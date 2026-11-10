@@ -202,8 +202,8 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
 - `createProxy(config, options)` retains its existing signature.
 - Consume Task 2’s collector and attach one request-local observation snapshot to existing diagnostic events.
 
-- [ ] Extend the test setup to select observation mode before creating the proxy.
-- [ ] Add enabled/disabled tests proving:
+- [x] Extend the test setup to select observation mode before creating the proxy.
+- [x] Add enabled/disabled tests proving:
   - Successful responses and compaction requests receive observations only when enabled.
   - Later malformed-identity, conflict, unmapped, and unresolved failures retain observations.
   - Early admission failures, health, and catalog events omit observations.
@@ -219,17 +219,17 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
   assert.equal(calls.length, 0);
   ```
 
-- [ ] Run the existing forwarding, overlapping-request, streaming, slow-consumer, upstream-error, and client-cancellation cases in both modes. Compare destination, status, credential, body bytes, forwarded metadata, response chunks, and cleanup; ignore generated correlation IDs and timing differences. Assert distinct observations for overlapping requests.
-- [ ] Run `node --test test/proxy.test.js`.
+- [x] Run the existing forwarding, overlapping-request, streaming, slow-consumer, upstream-error, and client-cancellation cases in both modes. Compare destination, status, credential, body bytes, forwarded metadata, response chunks, and cleanup; ignore generated correlation IDs and timing differences. Assert distinct observations for overlapping requests.
+- [x] Run `node --test test/proxy.test.js`.
 
   **Expected:** New enabled-mode diagnostic assertions fail before integration; existing transport behavior remains green.
 
-- [ ] Collect only when observation is enabled and admission returns a model request. Collect before `identifyProject`, retain the snapshot in the existing request closure, and include it in subsequent diagnostic events. Leave identity inputs, forwarding headers, bodies, and cancellation flow unchanged.
-- [ ] Run the same command.
+- [x] Collect only when observation is enabled and admission returns a model request. Collect before `identifyProject`, retain the snapshot in the existing request closure, and include it in subsequent diagnostic events. Leave identity inputs, forwarding headers, bodies, and cancellation flow unchanged.
+- [x] Run the same command.
 
   **Expected:** All parity and isolation tests pass; rejected requests make zero upstream model calls, cancellation still closes upstream work, and diagnostics contain no sentinels.
 
-- [ ] Commit with `feat: observe admitted model requests without changing routing`.
+- [x] Commit with `feat: observe admitted model requests without changing routing`.
 
 ### Task 4: Document and complete controlled desktop validation [size: M | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data]
 

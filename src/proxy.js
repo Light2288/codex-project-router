@@ -5,6 +5,7 @@ import { configFingerprint } from "./config.js";
 import { admitRequest } from "./admission.js";
 import { identifyProject } from "./identity.js";
 import { emitDiagnostic } from "./diagnostics.js";
+import { collectRequestMetadata } from "./request-metadata.js";
 import { RouterError, safeError } from "./errors.js";
 const hop = new Set([
   "connection",
@@ -44,6 +45,7 @@ export function createProxy(
       let outgoing,
         incoming,
         resolution,
+        requestMetadata,
         operation,
         completed = false;
       const record = (event, status, errorCode) => {
@@ -53,6 +55,7 @@ export function createProxy(
             requestId,
             ...resolution,
             operation,
+            requestMetadata,
             status,
             errorCode,
             elapsedMs: performance.now() - started,
@@ -112,6 +115,8 @@ export function createProxy(
       });
       try {
         const admission = admitRequest(req.method, req.url, req.rawHeaders);
+        if (admission.kind === "model" && config.observeRequestMetadata === true)
+          requestMetadata = collectRequestMetadata(req.rawHeaders);
         operation = admission.kind === "model"
           ? admission.upstreamPath.split("?")[0] === "/responses/compact"
             ? "compact"
