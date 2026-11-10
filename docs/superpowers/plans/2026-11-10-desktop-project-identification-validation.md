@@ -59,11 +59,11 @@ No material design decisions remain unresolved. Temporary project IDs are runtim
 **Acceptance criteria:** AC-11  
 **Risk:** Preserve local work while updating the base branch.
 
-- [ ] After separate plan approval, leave Plan mode if necessary, save this plan, and record its approval. Confirm both saved artifacts and the messages approving them.
-- [ ] Inspect tracked, staged, and untracked changes. Preserve the approved documents and any user changes before updating `main`.
-- [ ] Fetch `origin` and update `main` by fast-forward only. If the update cannot preserve local work, stop with the concrete conflict; do not reset or force an update.
-- [ ] Create `feat/desktop-project-identification-validation` in this checkout.
-- [ ] Commit only the approved specification and plan with `docs: record approved project-identification increment`.
+- [x] After separate plan approval, leave Plan mode if necessary, save this plan, and record its approval. Confirm both saved artifacts and the messages approving them.
+- [x] Inspect tracked, staged, and untracked changes. Preserve the approved documents and any user changes before updating `main`.
+- [x] Fetch `origin` and update `main` by fast-forward only. If the update cannot preserve local work, stop with the concrete conflict; do not reset or force an update.
+- [x] Create `feat/desktop-project-identification-validation` in this checkout.
+- [x] Commit only the approved specification and plan with `docs: record approved project-identification increment`.
 
 Expected result: the implementation branch contains the approved artifacts; user work remains preserved.
 
@@ -81,11 +81,11 @@ Expected result: the implementation branch contains the approved artifacts; user
 
 Private JSON configuration contains `schemaVersion: 1`, `codexHome`, `providerId`, `upstreamBaseUrl`, `listenPort`, and `projectRoutes`. Require an HTTPS upstream without embedded credentials and explicit project-ID-to-alias entries. Default private location: `~/.codex-project-router/config.json`.
 
-- [ ] Bootstrap the ESM package, pin the TOML dependency, and define `npm test` as `node --test test/*.test.js`. Add synthetic temporary-state fixtures and failing tests for direct assignments, ancestry, malformed/conflicting identifiers, cycles, missing aliases, projectless markers, and transient state availability.
-- [ ] Run `node --test test/config-identity.test.js`. Expected: failures for the missing implementation.
-- [ ] Implement configuration validation and identity resolution. Access only required JSON fields and query `parent_thread_id`/`child_thread_id` from `thread_spawn_edges` using read-only SQLite access. Do not filter ancestry by agent completion status.
-- [ ] Re-read state per request. Use a one-second lookup deadline, 50 ms asynchronous retry interval, and maximum ancestry depth of 32. Reject unproven identity relationships; never use working directories as a fallback. Freeze each successful resolution for its request.
-- [ ] Run the same test command. Expected: all cases pass, including assignment changes between requests and unchanged fixture state. Commit with `feat: resolve desktop project identity`.
+- [x] Bootstrap the ESM package, pin the TOML dependency, and define `npm test` as `node --test test/*.test.js`. Add synthetic temporary-state fixtures and failing tests for direct assignments, ancestry, malformed/conflicting identifiers, cycles, missing aliases, projectless markers, and transient state availability.
+- [x] Run `node --test test/config-identity.test.js`. Expected: failures for the missing implementation.
+- [x] Implement configuration validation and identity resolution. Access only required JSON fields and query `parent_thread_id`/`child_thread_id` from `thread_spawn_edges` using read-only SQLite access. Do not filter ancestry by agent completion status.
+- [x] Re-read state per request. Use a one-second lookup deadline, 50 ms asynchronous retry interval, and maximum ancestry depth of 32. Reject unproven identity relationships; never use working directories as a fallback. Freeze each successful resolution for its request.
+- [x] Run the same test command. Expected: all cases pass, including assignment changes between requests and unchanged fixture state. Commit with `feat: resolve desktop project identity`.
 
 ### Task 2: Enforce request admission and private diagnostics [size: M | risk: security | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: security,auth]
 
@@ -98,12 +98,12 @@ Private JSON configuration contains `schemaVersion: 1`, `codexHome`, `providerId
 - `admitRequest(method, rawUrl, rawHeaders) → Admission`
 - `emitDiagnostic(stream, event) → void`
 
-- [ ] Write failing tests for the exact route allowlist, missing authentication, duplicate identity/authentication headers, absolute-form URLs, path traversal, unsupported methods, WebSocket upgrades, and sentinel-bearing errors.
-- [ ] Run `node --test test/admission-diagnostics.test.js`. Expected: failures before implementation.
-- [ ] Implement local `GET /healthz`, provider-wide `GET /v1/models`, and gated `POST /v1/responses` and `POST /v1/responses/compact`. Map these routes onto the configured upstream prefix. Preserve permitted query strings without allowing them to change the destination.
-- [ ] Require existing bearer authentication for upstream requests. Only health and catalog requests may omit project identity. Return fixed error codes and sanitized messages; never reflect raw URLs, parser errors, headers, or metadata.
-- [ ] Restrict diagnostics to timestamps, event names, correlation identifiers, required chat/project identifiers, route aliases, resolution source/outcome, status, timing, and fixed error codes. Test every error path with credential and payload sentinels.
-- [ ] Run the same test command. Expected: all tests pass and forbidden sentinels are absent. Commit with `feat: enforce proxy admission and private diagnostics`.
+- [x] Write failing tests for the exact route allowlist, missing authentication, duplicate identity/authentication headers, absolute-form URLs, path traversal, unsupported methods, WebSocket upgrades, and sentinel-bearing errors.
+- [x] Run `node --test test/admission-diagnostics.test.js`. Expected: failures before implementation.
+- [x] Implement local `GET /healthz`, provider-wide `GET /v1/models`, and gated `POST /v1/responses` and `POST /v1/responses/compact`. Map these routes onto the configured upstream prefix. Preserve permitted query strings without allowing them to change the destination.
+- [x] Require existing bearer authentication for upstream requests. Only health and catalog requests may omit project identity. Return fixed error codes and sanitized messages; never reflect raw URLs, parser errors, headers, or metadata.
+- [x] Restrict diagnostics to timestamps, event names, correlation identifiers, required chat/project identifiers, route aliases, resolution source/outcome, status, timing, and fixed error codes. Test every error path with credential and payload sentinels.
+- [x] Run the same test command. Expected: all tests pass and forbidden sentinels are absent. Commit with `feat: enforce proxy admission and private diagnostics`.
 
 ### Task 3: Stream requests to the existing upstream [size: M | risk: concurrency | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: concurrency,auth,performance]
 
@@ -113,12 +113,12 @@ Private JSON configuration contains `schemaVersion: 1`, `codexHome`, `providerId
 
 **Interface:** `createProxy(config, { diagnostics, upstreamAgent }) → http.Server`. The optional agent supports trusted test certificates; production uses normal certificate verification.
 
-- [ ] Write failing integration tests against a local HTTPS dummy upstream: overlapping projects, distinct per-request authentication sentinels, streamed chunks, compaction, catalog requests, upstream failures, redirects, slow consumers, disconnects, and admission failures with zero upstream calls.
-- [ ] Run `node --test test/proxy.test.js`. Expected: failures before implementation.
-- [ ] Integrate admission, resolution, and forwarding using built-in HTTP/HTTPS streams. Preserve body bytes, model names, response status, and content; remove hop-by-hop headers and set the upstream host correctly.
-- [ ] Propagate backpressure and cancellation. Keep request-specific state separate, introduce no upstream retries, and follow no redirects. Use a five-minute upstream inactivity timeout with shorter injected test timing.
-- [ ] Emit start/completion outcomes without recording content. Sanitize connection and protocol failures, including errors occurring after response headers have been sent.
-- [ ] Run the same test command. Expected: all cases pass, requests remain isolated, and connections close after cancellation. Commit with `feat: stream resolved requests to the existing gateway`.
+- [x] Write failing integration tests against a local HTTPS dummy upstream: overlapping projects, distinct per-request authentication sentinels, streamed chunks, compaction, catalog requests, upstream failures, redirects, slow consumers, disconnects, and admission failures with zero upstream calls.
+- [x] Run `node --test test/proxy.test.js`. Expected: failures before implementation.
+- [x] Integrate admission, resolution, and forwarding using built-in HTTP/HTTPS streams. Preserve body bytes, model names, response status, and content; remove hop-by-hop headers and set the upstream host correctly.
+- [x] Propagate backpressure and cancellation. Keep request-specific state separate, introduce no upstream retries, and follow no redirects. Use a five-minute upstream inactivity timeout with shorter injected test timing.
+- [x] Emit start/completion outcomes without recording content. Sanitize connection and protocol failures, including errors occurring after response headers have been sent.
+- [x] Run the same test command. Expected: all cases pass, requests remain isolated, and connections close after cancellation. Commit with `feat: stream resolved requests to the existing gateway`.
 
 ### Task 4: Add explicit activation, status, and rollback [size: M | risk: data | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: data,auth]
 
@@ -131,14 +131,14 @@ Private JSON configuration contains `schemaVersion: 1`, `codexHome`, `providerId
 - CLI: `serve`, `status`, `activate`, and `rollback`, each accepting an explicit `--config` path.
 - `activate(configPath)`, `status(configPath)`, and `rollback(configPath)` return sanitized status objects.
 
-- [ ] Write failing temporary-file tests for provider validation, readiness mismatch, missing proxy, preservation of authentication/comments/unrelated settings, repeated commands, competing helpers, interrupted activation, and edits made before rollback.
-- [ ] Run `node --test test/activation.test.js test/cli.test.js`. Expected: failures before implementation.
-- [ ] Implement foreground serving and sanitized CLI errors. Document `node --use-system-ca src/cli.js serve --config …` as the production startup command.
-- [ ] Validate the active provider and original upstream before activation. Match proxy readiness to the selected configuration without exposing its contents.
-- [ ] Parse TOML for validation, but replace only the supported provider’s single-line base-URL value. Validate that the parsed configuration differs only at that setting. Reject unsupported or ambiguous representations instead of rewriting the whole file.
-- [ ] Create restrictive private state and exclusive backups. Use guarded temporary-file replacement and an activation record that supports recovery from interruption. Check the current file again before replacement.
-- [ ] Roll back against the latest configuration, preserving unrelated edits. Reject an unexpected owned base URL. Never invoke Keychain or restart the desktop app.
-- [ ] Run both test files. Expected: all cases pass, including recovery and sentinel checks. Commit with `feat: add reversible proxy activation`.
+- [x] Write failing temporary-file tests for provider validation, readiness mismatch, missing proxy, preservation of authentication/comments/unrelated settings, repeated commands, competing helpers, interrupted activation, and edits made before rollback.
+- [x] Run `node --test test/activation.test.js test/cli.test.js`. Expected: failures before implementation.
+- [x] Implement foreground serving and sanitized CLI errors. Document `node --use-system-ca src/cli.js serve --config …` as the production startup command.
+- [x] Validate the active provider and original upstream before activation. Match proxy readiness to the selected configuration without exposing its contents.
+- [x] Parse TOML for validation, but replace only the supported provider’s single-line base-URL value. Validate that the parsed configuration differs only at that setting. Reject unsupported or ambiguous representations instead of rewriting the whole file.
+- [x] Create restrictive private state and exclusive backups. Use guarded temporary-file replacement and an activation record that supports recovery from interruption. Check the current file again before replacement.
+- [x] Roll back against the latest configuration, preserving unrelated edits. Reject an unexpected owned base URL. Never invoke Keychain or restart the desktop app.
+- [x] Run both test files. Expected: all cases pass, including recovery and sentinel checks. Commit with `feat: add reversible proxy activation`.
 
 ### Task 5: Document, validate the desktop path, and review [size: M | risk: other | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: none]
 
@@ -147,8 +147,8 @@ Private JSON configuration contains `schemaVersion: 1`, `codexHome`, `providerId
 
 **Deliverables:** README, synthetic configuration example, and sanitized validation report.
 
-- [ ] Document setup, commands, configuration support, privacy guarantees, failure behavior, provider-wide effects, restart requirements, and manual recovery. State clearly that route aliases do not switch credentials.
-- [ ] Run `npm ci`, `npm test`, and `git diff --check`. Expected: installation succeeds, all tests pass, and whitespace checks are clean. Check the CLI syntax with `node --check src/cli.js`.
+- [x] Document setup, commands, configuration support, privacy guarantees, failure behavior, provider-wide effects, restart requirements, and manual recovery. State clearly that route aliases do not switch credentials.
+- [x] Run `npm ci`, `npm test`, and `git diff --check`. Expected: installation succeeds, all tests pass, and whitespace checks are clean. Check the CLI syntax with `node --check src/cli.js`.
 - [ ] Have the user create two disposable local desktop projects with scratch folders. Configure explicit aliases for both and for this controller project so this chat remains usable during validation. Keep their actual IDs and all upstream details private.
 - [ ] Establish a direct-connection baseline using minimal controlled prompts. Activate the proxy and have the user restart the app when required. Do not create or message other chats through coordination tools without explicit authorization.
 - [ ] Exercise the live matrix below. Record sanitized request intervals to demonstrate overlap and distinguish each project’s requests. Actual prompts and responses remain outside router diagnostics.
