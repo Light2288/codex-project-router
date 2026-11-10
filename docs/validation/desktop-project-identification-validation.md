@@ -28,11 +28,13 @@ The test-only certificate/key are synthetic localhost fixtures. Actual endpoint 
 
 A separate read-only check of the actual local desktop state resolved the controller chat to its configured alias. This used a locally constructed identity header; it did not capture an outgoing desktop request or contact ICA. A real configuration status check reported direct configuration with no proxy active.
 
+The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. On-disk Codex configuration remains direct; activation has not occurred.
+
 ## Actual desktop-to-ICA matrix
 
 | Scenario | Result | Evidence |
 |---|---|---|
-| Direct baseline in disposable projects | Not run | User project/chat setup pending |
+| Direct baseline in disposable projects | Not run | Project setup verified; baseline responses pending |
 | First routed requests in both projects | Not run | Desktop activation/restart pending |
 | Concurrent routed requests | Not run | Desktop requests pending |
 | Follow-up and resumed chats | Not run | Desktop requests pending |
