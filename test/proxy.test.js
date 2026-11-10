@@ -186,6 +186,9 @@ test("catalog works without identity, compaction requires and retains it, health
     400,
   );
   assert.equal(f.calls.length, 2);
+  const starts = f.logs().trim().split("\n").map(JSON.parse)
+    .filter((event) => event.event === "started");
+  assert.deepEqual(starts.map((event) => event.operation), ["catalog", "compact"]);
 });
 test("blocked and unmapped model requests make zero upstream calls", async (t) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"));

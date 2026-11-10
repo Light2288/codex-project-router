@@ -40,8 +40,8 @@ The disposable projects have been verified by their scratch-folder paths and exp
 | First routed requests in both projects | Observed pass | Repeated with 300-line outputs; correct aliases and user-confirmed completion; client close classified 499 |
 | Concurrent routed requests | Observed pass | Repeated intervals overlapped by 5.427 seconds; correct distinct aliases and user-confirmed completion |
 | Follow-up and resumed chats | Observed pass | User confirmed both in the same Project A chat; same validated chat ID and `validation-a`; HTTP 200 for both |
-| Forked chat | Not run | User action pending |
-| Project move | Not run | User action pending |
+| Forked chat | Observed pass | User confirmed branching; new chat ID directly assigned to `validation-a`; HTTP 200 |
+| Project move | Observed pass | Same fork chat ID changed from `validation-a` to `validation-b` on its next request; HTTP 200; user confirmed output |
 | `/compact` | Not run | Composer action observed in bundle; live action pending |
 | Subagent attribution | Not run | Live delegation pending |
 | Restoration and direct response after rollback | Not run | Proxy remains active; rollback and restart pending |

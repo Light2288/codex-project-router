@@ -87,7 +87,7 @@ Allowed local operations:
 
 Other routes, methods, and WebSocket upgrades are rejected. Allowed queries retain their original content. Forwarding preserves body bytes, model names, streaming status/content, and each request's credential. Hop-by-hop headers are removed, client disconnects cancel upstream work, and upstream inactivity is limited to five minutes. The router introduces no model-request retries and follows no redirects.
 
-Diagnostics contain only fixed event/error codes, timestamps, correlation IDs, required chat/project IDs, aliases, resolution source, status, and timing. Prompts, responses, credentials, whole headers, raw metadata, raw desktop state, and exception text are excluded, including failure paths.
+Diagnostics contain only fixed event/error codes, timestamps, correlation IDs, required chat/project IDs, aliases, resolution source, fixed operation labels, status, and timing. Prompts, responses, credentials, whole headers, raw metadata, raw desktop state, and exception text are excluded, including failure paths.
 
 ## Desktop validation procedure
 

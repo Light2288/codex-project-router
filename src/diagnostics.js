@@ -17,6 +17,8 @@ export function emitDiagnostic(stream, event) {
     record.routeAlias = event.routeAlias;
   if (["direct", "ancestor", "catalog"].includes(event.source))
     record.source = event.source;
+  if (["responses", "compact", "catalog", "health"].includes(event.operation))
+    record.operation = event.operation;
   if (
     Number.isInteger(event.status) &&
     event.status >= 100 &&

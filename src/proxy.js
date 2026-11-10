@@ -44,6 +44,7 @@ export function createProxy(
       let outgoing,
         incoming,
         resolution,
+        operation,
         completed = false;
       const record = (event, status, errorCode) => {
         try {
@@ -51,6 +52,7 @@ export function createProxy(
             event,
             requestId,
             ...resolution,
+            operation,
             status,
             errorCode,
             elapsedMs: performance.now() - started,
@@ -110,6 +112,11 @@ export function createProxy(
       });
       try {
         const admission = admitRequest(req.method, req.url, req.rawHeaders);
+        operation = admission.kind === "model"
+          ? admission.upstreamPath.split("?")[0] === "/responses/compact"
+            ? "compact"
+            : "responses"
+          : admission.kind;
         if (admission.kind === "health") {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(

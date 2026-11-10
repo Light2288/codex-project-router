@@ -66,6 +66,7 @@ test("diagnostics contain only fixed events and allowlisted safe metadata", () =
     projectId: P1,
     routeAlias: "route-a",
     source: "direct",
+    operation: "compact",
     authorization: "CREDENTIAL_SENTINEL",
     body: "PROMPT_SENTINEL",
     headers: { x: "RESPONSE_SENTINEL" },
@@ -76,11 +77,13 @@ test("diagnostics contain only fixed events and allowlisted safe metadata", () =
     errorCode: "ERROR_SENTINEL",
     threadId: "PROMPT_SENTINEL",
     routeAlias: "BAD\nCREDENTIAL_SENTINEL",
+    operation: "RESPONSE_SENTINEL",
   });
   assert.doesNotMatch(output, /SENTINEL/);
   const first = JSON.parse(output.split("\n")[0]);
   assert.equal(first.projectId, P1);
   assert.equal(first.routeAlias, "route-a");
   assert.equal(first.event, "started");
+  assert.equal(first.operation, "compact");
   assert.ok(first.timestamp);
 });
