@@ -7,6 +7,15 @@ export const P2 = "22222222-2222-4222-8222-222222222222";
 export const T1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const T2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const CHILD = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+export const duplicateIdentityMetadata = [
+  { id: T2, metadata: '{"thread_id":"' + T1 + '","thread_id":"' + T2 + '"}' },
+  { id: T2, metadata: '{"thr\\u0065ad_id":"' + T1 + '","thread_id":"' + T2 + '"}' },
+  { id: T2, metadata: '{"session_id":"' + T1 + '","session_id":"' + T2 + '"}' },
+  { id: T2, metadata: '{"session_id":"' + T1 + '","\\u0073ession_id":"' + T2 + '"}' },
+  { id: CHILD, metadata: '{"parent_thread_id":"' + T2 + '","parent_thread_id":"' + T1 + '"}' },
+  { id: CHILD, metadata: '{"\\u0070arent_thread_id":"' + T2 + '","parent_thread_id":"' + T1 + '"}' },
+  { id: T1, metadata: '{"thread_id":"' + T1 + '","thread_id":"' + T1 + '"}' },
+];
 export function headers(id = T1, metadata = {}) {
   return [
     "thread-id",

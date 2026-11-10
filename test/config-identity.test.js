@@ -4,7 +4,7 @@ import { writeFile, unlink } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadRouterConfig } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
-import { fixture, headers, P1, P2, T1, T2, CHILD } from "./helpers/fixtures.js";
+import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 
 test("loads an explicit private HTTPS configuration and defaults the loopback port", async (t) => {
   const f = await fixture(t);
@@ -87,6 +87,25 @@ test("does not trust a parent hint without a saved relationship", async (t) => {
     identifyProject(headers(CHILD, { parent_thread_id: T1 }), f.config),
     { code: "STATE_UNAVAILABLE" },
   );
+});
+test("rejects duplicate top-level metadata identities including escaped key spellings", async (t) => {
+  const f = await fixture(t);
+  f.edge(T1, CHILD);
+  for (const { id, metadata } of duplicateIdentityMetadata)
+    await assert.rejects(identifyProject([
+      "thread-id", id, "session-id", id, "x-codex-turn-metadata", metadata,
+    ], f.config), { code: "IDENTITY_INVALID" });
+});
+test("ignores nested identity names and identity-looking string contents", async (t) => {
+  const f = await fixture(t);
+  const metadata = JSON.stringify({
+    thread_id: T1,
+    extra: { thread_id: T2, session_id: T2 },
+    text: '{"thread_id":"' + T2 + '"} [braces] \\',
+  });
+  assert.equal((await identifyProject([
+    "thread-id", T1, "x-codex-turn-metadata", metadata,
+  ], f.config)).projectId, P1);
 });
 test("rejects explicit child assignment conflicting with its ancestor", async (t) => {
   const f = await fixture(t);

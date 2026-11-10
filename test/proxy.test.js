@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
-import { fixture, headers, P1, P2, T1, T2 } from "./helpers/fixtures.js";
+import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 const key = await readFile(
   new URL("./fixtures/tls/test-only-key.pem", import.meta.url),
 );
@@ -208,6 +208,19 @@ test("does not follow redirects or retry upstream responses", async (t) => {
   });
   assert.equal((await request(f)).status, 307);
   assert.equal(f.calls.length, 1);
+});
+test("duplicate metadata identities never reach an upstream model", async (t) => {
+  const f = await setup(t, async (req, res) => res.end("unexpected"));
+  f.edge(T1, CHILD);
+  for (const { id, metadata } of duplicateIdentityMetadata) {
+    const result = await request(f, {
+      raw: ["thread-id", id, "session-id", id, "x-codex-turn-metadata", metadata],
+    });
+    assert.equal(result.status, 400);
+    assert.equal(JSON.parse(result.body).error.code, "IDENTITY_INVALID");
+    assert.equal(f.calls.length, 0);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
 test("unresolved requests retain only the validated chat identifier for diagnosis", async (t) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"));

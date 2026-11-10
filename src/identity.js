@@ -21,7 +21,24 @@ function identity(raw) {
   let meta = {};
   if (fields.has("x-codex-turn-metadata")) {
     try {
-      meta = JSON.parse(fields.get("x-codex-turn-metadata"));
+      const text = fields.get("x-codex-turn-metadata"), seen = new Set();
+      let depth = 0;
+      // Check top-level identity keys before JSON.parse discards duplicates.
+      // Tokenizing whole strings excludes braces and key-like text in values;
+      // decoding key tokens also catches equivalent Unicode escape spellings.
+      for (const token of text.matchAll(/"(?:\\.|[^"\\])*"|[{}\[\]]/g)) {
+        const value = token[0];
+        if (value === "{" || value === "[") depth++;
+        else if (value === "}" || value === "]") depth--;
+        else if (depth === 1 && /^\s*:/.test(text.slice(token.index + value.length))) {
+          const key = JSON.parse(value);
+          if (["thread_id", "session_id", "parent_thread_id"].includes(key)) {
+            if (seen.has(key)) throw new RouterError("IDENTITY_INVALID");
+            seen.add(key);
+          }
+        }
+      }
+      meta = JSON.parse(text);
     } catch {
       throw new RouterError("IDENTITY_INVALID");
     }

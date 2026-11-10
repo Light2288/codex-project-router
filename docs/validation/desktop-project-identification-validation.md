@@ -1,6 +1,6 @@
 # Desktop project-identification validation report
 
-Date: 2026-11-10. Outcome: **primary desktop matrix passed; additional requests without durable identity are unsupported and blocked**. Direct configuration has been restored and verified. Final review outcomes are reported with delivery.
+Date: 2026-11-10. Outcome: **primary desktop matrix passed; additional requests without durable identity are unsupported and blocked**. Direct configuration has been restored and verified. Sequential final review completed; its one important finding was corrected and verified.
 
 ## Environment
 
@@ -10,7 +10,7 @@ Date: 2026-11-10. Outcome: **primary desktop matrix passed; additional requests 
 
 ## Automated evidence
 
-At the implementation checkpoint, `npm test` passed 65 tests with zero failures. Tests ran against synthetic temporary files/SQLite state and a local HTTPS upstream; they did not contact ICA or retrieve real credentials.
+At the implementation checkpoint, `npm test` passed 68 tests with zero failures. Tests ran against synthetic temporary files/SQLite state and a local HTTPS upstream; they did not contact ICA or retrieve real credentials.
 
 | Area | Observed result |
 |---|---|
@@ -62,11 +62,17 @@ Overlap: **5.427 seconds**. The initial run overlapped by 1.728 seconds.
 
 ## Findings and limits
 
-The cancellation regression initially failed with `502` where a client cancellation required `499`. Upstream teardown synchronously emitted an abort before the cancellation outcome was recorded. Recording cancellation first corrected the result; the full suite then passed 65 tests. Rejected requests now retain a validated chat identifier in diagnostics, without raw headers or metadata, so missing desktop relationships can be investigated. The repeated run correlated 34 `STATE_UNAVAILABLE` rejections with two request IDs absent from every supported saved identity relationship. Blocking these requests is required; auxiliary generation remains unsupported where no durable relationship exists. Their exact originating desktop feature is unverified. The router itself introduced no retries; repeated rejected attempts came from the caller.
+The cancellation regression initially failed with `502` where a client cancellation required `499`. Upstream teardown synchronously emitted an abort before the cancellation outcome was recorded. Recording cancellation first corrected the result; the full suite then passed 68 tests. Rejected requests now retain a validated chat identifier in diagnostics, without raw headers or metadata, so missing desktop relationships can be investigated. The repeated run correlated 34 `STATE_UNAVAILABLE` rejections with two request IDs absent from every supported saved identity relationship. Blocking these requests is required; auxiliary generation remains unsupported where no durable relationship exists. Their exact originating desktop feature is unverified. The router itself introduced no retries; repeated rejected attempts came from the caller.
 
 The two unresolvable request IDs remained absent from all supported saved relationships after the lookup deadline. The installed desktop bundle uses ephemeral threads for auxiliary title/description/summary generation, which is a plausible explanation; the exact originating feature is unverified. The approved architecture cannot safely route such requests. No project was guessed from folders, prompts, or nearby activity.
 
 The live `/compact` action used regular Responses. The dedicated `/responses/compact` endpoint is covered by synthetic integration tests but was not observed from this desktop. Client-close status 499 describes the transport outcome; complete content was established by user confirmation, not by inspecting response bodies in the router.
+
+## Final review
+
+The specification review passed on the complete branch snapshot. The subsequent quality review found one important issue: duplicate identity members in metadata JSON could conceal an earlier conflicting identifier. Resolver and HTTP regressions reproduced acceptance before the fix; the corrected parser rejects literal and escaped duplicate key spellings, including parent hints, before project selection. HTTP regressions confirm zero upstream model calls. Nested metadata and key-like string contents remain accepted when valid. The final suite passed **68/68**.
+
+The Native review policy permits one verified fix pass and no re-review. That pass addressed the only quality finding; no minor findings were deferred. Private raw runtime evidence was outside the independent reviewers' boundary; their assessment used the sanitized report and recorded verification. The original reviewed commit was `fa22c59`; subsequent changes implement and verify this finding.
 
 ## Completion boundary
 
