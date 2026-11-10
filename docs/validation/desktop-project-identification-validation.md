@@ -28,14 +28,14 @@ The test-only certificate/key are synthetic localhost fixtures. Actual endpoint 
 
 A separate read-only check of the actual local desktop state resolved the controller chat to its configured alias. This used a locally constructed identity header; it did not capture an outgoing desktop request or contact ICA. A real configuration status check reported direct configuration with no proxy active.
 
-The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. On-disk Codex configuration remains direct; activation has not occurred.
+The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. At preflight, on-disk Codex configuration remained direct. The user subsequently confirmed both baseline responses and the activation helper changed only the provider base URL after matching readiness. Desktop restart and routed requests remain pending.
 
 ## Actual desktop-to-ICA matrix
 
 | Scenario | Result | Evidence |
 |---|---|---|
-| Direct baseline in disposable projects | Not run | Project setup verified; baseline responses pending |
-| First routed requests in both projects | Not run | Desktop activation/restart pending |
+| Direct baseline in disposable projects | Pass | User confirmed both direct baseline responses |
+| First routed requests in both projects | Not run | Proxy activated; desktop restart pending |
 | Concurrent routed requests | Not run | Desktop requests pending |
 | Follow-up and resumed chats | Not run | Desktop requests pending |
 | Forked chat | Not run | User action pending |
@@ -44,7 +44,7 @@ The disposable projects have been verified by their scratch-folder paths and exp
 | Subagent attribution | Not run | Live delegation pending |
 | Restoration and direct response after rollback | Not run | Live activation has not occurred |
 
-The current direct provider configuration has not been changed by the implementation. No real credential has been retrieved by the router.
+The provider base URL is currently set to the loopback proxy, with the original authentication helper preserved. A private rollback record and backup exist. The router does not independently retrieve credentials. End-to-end routed behavior and restoration remain unverified.
 
 ## Completion boundary
 
