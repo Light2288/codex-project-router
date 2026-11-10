@@ -68,10 +68,10 @@
 
 **Files:** This specification/plan pair. Product files remain untouched.
 
-- [ ] After separate approval, record the two approval messages and mark this plan approved. Confirm both artifacts are saved before product changes.
-- [ ] Inspect tracked, staged and untracked changes; preserve all existing work. Fetch `origin`, fast-forward `main` only, and create `feat/unassigned-title-request-policy` in this checkout. Stop on a concrete preservation conflict; never reset, force, or discard work.
-- [ ] Commit only the approved pair with `docs: record approved title policy increment`.
-- [ ] Verify with `git status --short --branch` and `git log -1 --oneline`. **Expected:** Implementation branch, approved-artifact commit, no unexpected changes. Initialize the Native ledger and task/interface pre-flight under the selected execution workflow.
+- [x] After separate approval, record the two approval messages and mark this plan approved. Confirm both artifacts are saved before product changes.
+- [x] Inspect tracked, staged and untracked changes; preserve all existing work. Fetch `origin`, fast-forward `main` only, and create `feat/unassigned-title-request-policy` in this checkout. Stop on a concrete preservation conflict; never reset, force, or discard work.
+- [x] Commit only the approved pair with `docs: record approved title policy increment`.
+- [x] Verify with `git status --short --branch` and `git log -1 --oneline`. **Expected:** Implementation branch, approved-artifact commit, no unexpected changes. Initialize the Native ledger and task/interface pre-flight under the selected execution workflow.
 
 ### Task 1: Add policy configuration and readiness compatibility [size: M | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data]
 
@@ -83,12 +83,12 @@
 
 **Interfaces:** `loadRouterConfig(configPath)` adds frozen normalized `allowUnassignedThreadTitles: boolean`; `configFingerprint(config)` appends `allowUnassignedThreadTitles:true` only when enabled, after the existing observation marker. Activation/status/rollback interfaces and record schema stay unchanged.
 
-- [ ] Write tests for omission, both booleans, invalid null/string/number/array/object values and sentinel-safe errors. Assert omitted/false fingerprints equal the historical value for each observation mode, and all four effective mode combinations differ as appropriate.
-- [ ] Add readiness mismatches in both policy directions with unchanged TOML and no activation record. Add legacy `active` and interrupted `prepared` offline rollbacks after changing either/both flags, including unrelated edits and both pre/post-replacement prepared states.
-- [ ] Run `node --test test/config-identity.test.js test/activation.test.js`. **Expected RED:** New option/default/fingerprint assertions fail against the baseline.
-- [ ] Implement strict optional-boolean validation and normalization; preserve disabled fingerprints and mode-independent recovery validation.
-- [ ] Run the same command. **Expected GREEN:** All configuration, ordinary identity and activation tests pass; authentication sentinels remain absent from helper output.
-- [ ] Commit with `feat: add opt-in unassigned title policy configuration`.
+- [x] Write tests for omission, both booleans, invalid null/string/number/array/object values and sentinel-safe errors. Assert omitted/false fingerprints equal the historical value for each observation mode, and all four effective mode combinations differ as appropriate.
+- [x] Add readiness mismatches in both policy directions with unchanged TOML and no activation record. Add legacy `active` and interrupted `prepared` offline rollbacks after changing either/both flags, including unrelated edits and both pre/post-replacement prepared states.
+- [x] Run `node --test test/config-identity.test.js test/activation.test.js`. **Expected RED:** New option/default/fingerprint assertions fail against the baseline.
+- [x] Implement strict optional-boolean validation and normalization; preserve disabled fingerprints and mode-independent recovery validation.
+- [x] Run the same command. **Expected GREEN:** All configuration, ordinary identity and activation tests pass; authentication sentinels remain absent from helper output.
+- [x] Commit with `feat: add opt-in unassigned title policy configuration`.
 
 ### Task 2: Match the exact initial-title pattern [size: M | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,auth]
 
@@ -100,8 +100,8 @@
 
 **Interfaces:** `matchUnassignedTitle(rawHeaders) → string | undefined` is synchronous, does no I/O, and returns only the normalized temporary UUID when the exact request pattern matches. Nonmatches and unusable input return undefined without exposing input. It is independent of the advisory observer.
 
-- [ ] Write table-driven tests for the exact two `thread_title` labels; all four UUID claims present/equal; case-insensitive header names; UUID normalization; absence of every parent/fork field; and each missing, conflicting, malformed or unsupported required value.
-- [ ] Cover identical/differing/escaped duplicates in all seven metadata members, repeated headers, present null/empty origin values, nested lookalikes, braces/quotes/key-like text inside strings, unsupported roots and throwing synthetic inputs. Unknown fields and singleton `request_kind` values must not broaden or restrict matching; duplicate `request_kind` still disqualifies under the approved contract. Use prohibited-content sentinels.
+- [x] Write table-driven tests for the exact two `thread_title` labels; all four UUID claims present/equal; case-insensitive header names; UUID normalization; absence of every parent/fork field; and each missing, conflicting, malformed or unsupported required value.
+- [x] Cover identical/differing/escaped duplicates in all seven metadata members, repeated headers, present null/empty origin values, nested lookalikes, braces/quotes/key-like text inside strings, unsupported roots and throwing synthetic inputs. Unknown fields and singleton `request_kind` values must not broaden or restrict matching; duplicate `request_kind` still disqualifies under the approved contract. Use prohibited-content sentinels.
 
   ```js
   assert.equal(matchUnassignedTitle(titleHeaders(TEMP)), TEMP);
@@ -109,10 +109,10 @@
   assert.equal(matchUnassignedTitle(withEscapedDuplicate), undefined);
   ```
 
-- [ ] Run `node --test test/title-policy.test.js`. **Expected RED:** Missing matcher/module.
-- [ ] Implement the approved pattern with a valid JSON object, own top-level fields, and decoded top-level key-token duplicate detection before consuming parsed values. No last-value selection or nested capture; leave the ordinary identity and observation parsers unchanged.
-- [ ] Run the same command. **Expected GREEN:** Every candidate/sentinel case passes; no arbitrary value escapes the matcher.
-- [ ] Commit with `feat: match the approved initial title request pattern`.
+- [x] Run `node --test test/title-policy.test.js`. **Expected RED:** Missing matcher/module.
+- [x] Implement the approved pattern with a valid JSON object, own top-level fields, and decoded top-level key-token duplicate detection before consuming parsed values. No last-value selection or nested capture; leave the ordinary identity and observation parsers unchanged.
+- [x] Run the same command. **Expected GREEN:** Every candidate/sentinel case passes; no arbitrary value escapes the matcher.
+- [x] Commit with `feat: match the approved initial title request pattern`.
 
 ### Task 3: Prove absence within the existing resolution window [size: M | risk: data | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: data,security]
 
@@ -127,15 +127,15 @@
 - `proveUnassignedTitle(threadId, config, { signal, deadline }) → Promise<boolean>` returns true only for a complete fresh absence proof, false for a known record, and sanitized `STATE_UNAVAILABLE`/`CANCELLED` errors when proof cannot complete. `deadline` is the absolute `Date.now()` deadline owned by the existing lookup.
 - `identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false })` retains its signature compatibly. Its result is the existing frozen mapped resolution or frozen `{ threadId, source: "unassigned_title" }`. Both the internal option and normalized config flag must be true to consider Task 2's matcher.
 
-- [ ] Extend synthetic SQLite with `threads(id TEXT PRIMARY KEY)` and helpers for saved rows. Add proof tests for healthy absence and each blocker: own assignment key regardless of its value, projectless entry, thread row, either edge direction regardless of status, missing/unsupported JSON structures, missing tables/columns, malformed JSON, unavailable/locked SQLite, expired deadline and cancellation. Compare state snapshots before/after to prove no writes. Check equivalent UUID casing in saved keys/rows.
-- [ ] Add deterministic serial fault tests for JSON changes or replacement, SQLite commits/replacement between reads, and a successful initial read followed by a failed final read. Use built-in mocks restored with `syncBuiltinESMExports()`; inject no production hook. Add partial-state recovery and between-request assignment/relationship changes.
-- [ ] Add resolver tests for ordinary mapped priority, terminal ordinary failures, default/no-route-option behavior, title acceptance only with positive proof, no fallback for saved/orphan identities, one shared budget, cancellation, and immutable per-request results. Ordinary mapped resolution must continue working without a `threads` table when no exception is needed.
-- [ ] Run `node --test test/title-state.test.js test/config-identity.test.js`. **Expected RED:** Missing proof helper and unimplemented exception outcomes.
-- [ ] Implement fresh JSON reads bracketing the SQLite check. Validate required containers; test own assignment-key and projectless membership without consuming unrelated values. Use read-only SQLite existence queries for `threads.id` and both edge endpoints, comparing UUIDs without case distinctions. Read no content columns and apply no status filter.
-- [ ] Guard the proof with unchanged JSON bytes/file identity and stat metadata, unchanged database file identity/stat metadata, and unchanged `PRAGMA data_version` on the same connection across a read transaction and final checks. Normalize failed reads/queries/cleanup to fixed errors. Close every database/handle. A detected change invalidates the attempt; check signal and deadline again before returning true. This detects observed changes without claiming cross-file atomicity.
-- [ ] Integrate inside the existing retry loop: try ordinary resolution first; only an eligible candidate and `STATE_UNAVAILABLE` may trigger a fresh proof before the current deadline. Never cache a prior absence. Known records cannot authorize; transient proof failures rejoin the same 50 ms cadence. Terminal ordinary errors stay terminal. Do not start a second lookup window or run a proof after expiration.
-- [ ] Run the same command. **Expected GREEN:** Positive absence grants the exact result; final-check failures and known records never do; existing ordinary identity tests pass unchanged.
-- [ ] Commit with `feat: prove unassigned title identity with fresh desktop state`.
+- [x] Extend synthetic SQLite with `threads(id TEXT PRIMARY KEY)` and helpers for saved rows. Add proof tests for healthy absence and each blocker: own assignment key regardless of its value, projectless entry, thread row, either edge direction regardless of status, missing/unsupported JSON structures, missing tables/columns, malformed JSON, unavailable/locked SQLite, expired deadline and cancellation. Compare state snapshots before/after to prove no writes. Check equivalent UUID casing in saved keys/rows.
+- [x] Add deterministic serial fault tests for JSON changes or replacement, SQLite commits/replacement between reads, and a successful initial read followed by a failed final read. Use built-in mocks restored with `syncBuiltinESMExports()`; inject no production hook. Add partial-state recovery and between-request assignment/relationship changes.
+- [x] Add resolver tests for ordinary mapped priority, terminal ordinary failures, default/no-route-option behavior, title acceptance only with positive proof, no fallback for saved/orphan identities, one shared budget, cancellation, and immutable per-request results. Ordinary mapped resolution must continue working without a `threads` table when no exception is needed.
+- [x] Run `node --test test/title-state.test.js test/config-identity.test.js`. **Expected RED:** Missing proof helper and unimplemented exception outcomes.
+- [x] Implement fresh JSON reads bracketing the SQLite check. Validate required containers; test own assignment-key and projectless membership without consuming unrelated values. Use read-only SQLite existence queries for `threads.id` and both edge endpoints, comparing UUIDs without case distinctions. Read no content columns and apply no status filter.
+- [x] Guard the proof with unchanged JSON bytes/file identity and stat metadata, unchanged database file identity/stat metadata, and unchanged `PRAGMA data_version` on the same connection across a read transaction and final checks. Normalize failed reads/queries/cleanup to fixed errors. Close every database/handle. A detected change invalidates the attempt; check signal and deadline again before returning true. This detects observed changes without claiming cross-file atomicity.
+- [x] Integrate inside the existing retry loop: try ordinary resolution first; only an eligible candidate and `STATE_UNAVAILABLE` may trigger a fresh proof before the current deadline. Never cache a prior absence. Known records cannot authorize; transient proof failures rejoin the same 50 ms cadence. Terminal ordinary errors stay terminal. Do not start a second lookup window or run a proof after expiration.
+- [x] Run the same command. **Expected GREEN:** Positive absence grants the exact result; final-check failures and known records never do; existing ordinary identity tests pass unchanged.
+- [x] Commit with `feat: prove unassigned title identity with fresh desktop state`.
 
 ### Task 4: Integrate unattributed forwarding and diagnostics [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,auth]
 
@@ -147,14 +147,14 @@
 
 **Interfaces:** `createProxy(config, options)` and `emitDiagnostic(stream, event)` keep their signatures. The proxy supplies `allowUnassignedTitle: true` only for the admitted ordinary Responses operation. Diagnostics add fixed source `unassigned_title` and omit ownership/project/alias fields for that source, independently of observation mode.
 
-- [ ] Extend the test setup to select policy before server creation. Cover the four policy/observation combinations, exact accepted titles with permitted queries, disabled rejection, ordinary mapped title-labelled requests, and all noneligible routes/admission failures. Assert no extra observations when observation is off.
-- [ ] Test unmapped, projectless, saved-thread, orphan-edge, conflicting and unavailable candidates with zero upstream calls. Cover metadata duplicate handling and ensure invalid title-only fields do not add errors for otherwise valid mapped requests. Denied candidates retain fixed existing errors and never acquire the admitted-title source.
-- [ ] Exercise overlapping mapped and multiple title requests, distinct auth sentinels, unchanged body/header/query bytes, chunks/status, redirects/upstream failures, slow consumers, and cancellation before and after forwarding. Reuse existing transport cases in both policy modes and both observation modes; compare behavior excluding generated IDs/timing. Confirm separate attribution snapshots and upstream cleanup.
-- [ ] Directly test diagnostic source acceptance, ownership omission even if extra ownership is supplied with that source, safe optional observations, and prohibited-content sentinels.
-- [ ] Run `node --test test/proxy.test.js test/admission-diagnostics.test.js`. **Expected RED:** New title acceptance and diagnostic assertions fail before integration; existing transport cases remain green.
-- [ ] Pass the route-scoped option into Task 3's resolver and allow its result through the existing streaming path. Extend diagnostic sanitization without changing admission, forwarding, cancellation or observation collection order.
-- [ ] Run the same command. **Expected GREEN:** Exact candidates forward unchanged, all rejected candidates make zero upstream calls, and concurrent diagnostics contain only the appropriate ownership or unattributed source.
-- [ ] Commit with `feat: forward eligible unassigned titles without project attribution`.
+- [x] Extend the test setup to select policy before server creation. Cover the four policy/observation combinations, exact accepted titles with permitted queries, disabled rejection, ordinary mapped title-labelled requests, and all noneligible routes/admission failures. Assert no extra observations when observation is off.
+- [x] Test unmapped, projectless, saved-thread, orphan-edge, conflicting and unavailable candidates with zero upstream calls. Cover metadata duplicate handling and ensure invalid title-only fields do not add errors for otherwise valid mapped requests. Denied candidates retain fixed existing errors and never acquire the admitted-title source.
+- [x] Exercise overlapping mapped and multiple title requests, distinct auth sentinels, unchanged body/header/query bytes, chunks/status, redirects/upstream failures, slow consumers, and cancellation before and after forwarding. Reuse existing transport cases in both policy modes and both observation modes; compare behavior excluding generated IDs/timing. Confirm separate attribution snapshots and upstream cleanup.
+- [x] Directly test diagnostic source acceptance, ownership omission even if extra ownership is supplied with that source, safe optional observations, and prohibited-content sentinels.
+- [x] Run `node --test test/proxy.test.js test/admission-diagnostics.test.js`. **Expected RED:** New title acceptance and diagnostic assertions fail before integration; existing transport cases remain green.
+- [x] Pass the route-scoped option into Task 3's resolver and allow its result through the existing streaming path. Extend diagnostic sanitization without changing admission, forwarding, cancellation or observation collection order.
+- [x] Run the same command. **Expected GREEN:** Exact candidates forward unchanged, all rejected candidates make zero upstream calls, and concurrent diagnostics contain only the appropriate ownership or unattributed source.
+- [x] Commit with `feat: forward eligible unassigned titles without project attribution`.
 
 ### Task 5: Document and validate actual desktop titles, then recover [size: M | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data]
 
@@ -166,16 +166,16 @@
 
 **Interfaces:** Existing `serve`, `status`, `activate`, and `rollback` CLI commands with explicit private `--config` path. Production startup remains `node --use-system-ca src/cli.js serve --config "$HOME/.codex-project-router/config.json"`.
 
-- [ ] Document default-off behavior, exact supported family, additional state/schema requirement, unattributed caller-credential use, spoofable local markers, independent observation, readiness, restart and offline recovery. Update statements/table entries that currently say every unresolved model request blocks. Add `allowUnassignedThreadTitles: false` to the synthetic example; retain deferred credential selection.
-- [ ] Run `npm ci`, `npm test`, `node --check src/cli.js`, and `git diff --check`. **Expected:** Successful install, full passing suite, clean syntax/whitespace. Keep commands, exit statuses and decisive output for final review.
-- [ ] Verify Project A, Project B and controller mappings read-only, direct URL and stopped listener. Save a restrictive private checkpoint of the original URL and each flag's exact presence/value. Preserve unrelated settings and existing recovery evidence.
-- [ ] Ask the user for fresh direct-response baselines in both disposable projects and confirmation that automatic titles appear. Capture completion only; do not place prompt/response/title content in diagnostics or the report.
-- [ ] Enable policy and, for evidence, observation in private configuration. Start the foreground proxy with private restrictive output, activate using the existing helper, and have the user restart when required. Verify matching readiness and controller attribution.
-- [ ] Have the user open one new chat in each DIFFERENT project and send controlled requests close together; confirm both responses and automatic visible titles. Obtain a same-chat follow-up. Record sanitized intervals showing overlap and distinguish mapped main requests from unattributed title families. Repeat one paired fresh-chat round if title requests or useful overlap are absent. Do not create/message chats through coordination tools.
-- [ ] Analyze classification, saved-state absence and outcomes read-only, using symbolic labels in the report. Check observed failures within scope and rerun affected cases; never guess membership, admit a broader family or inspect request content. Classify every required case as observed pass/failure/not run. Missing user actions remain incomplete; demonstrated incompatibility after in-scope fixes/review may conclude with failed capability.
-- [ ] Roll back the original provider URL and restore each flag's exact prior presence/value while preserving unrelated current edits. Obtain the required user restart and a successful direct response, then stop the proxy. Verify `state=direct`, `proxyReady=false`, no recovery required, and no listener. Preserve private checkpoints/backups; do not delete recovery evidence with execution scratch.
-- [ ] Complete the sanitized report: app/build/engine/Node versions, mode combinations used, symbolic families and request intervals, overlap, mapped/unattributed outcomes, visible-title confirmation, follow-up, failures, trust/state-snapshot limitations and recovery. Actual IDs/endpoints/mappings/raw evidence remain outside Git.
-- [ ] Commit with `docs: record unassigned title policy validation`.
+- [x] Document default-off behavior, exact supported family, additional state/schema requirement, unattributed caller-credential use, spoofable local markers, independent observation, readiness, restart and offline recovery. Update statements/table entries that currently say every unresolved model request blocks. Add `allowUnassignedThreadTitles: false` to the synthetic example; retain deferred credential selection.
+- [x] Run `npm ci`, `npm test`, `node --check src/cli.js`, and `git diff --check`. **Expected:** Successful install, full passing suite, clean syntax/whitespace. Keep commands, exit statuses and decisive output for final review.
+- [x] Verify Project A, Project B and controller mappings read-only, direct URL and stopped listener. Save a restrictive private checkpoint of the original URL and each flag's exact presence/value. Preserve unrelated settings and existing recovery evidence.
+- [x] Ask the user for fresh direct-response baselines in both disposable projects and confirmation that automatic titles appear. Capture completion only; do not place prompt/response/title content in diagnostics or the report.
+- [x] Enable policy and, for evidence, observation in private configuration. Start the foreground proxy with private restrictive output, activate using the existing helper, and have the user restart when required. Verify matching readiness and controller attribution.
+- [x] Have the user open one new chat in each DIFFERENT project and send controlled requests close together; confirm both responses and automatic visible titles. Obtain a same-chat follow-up. Record sanitized intervals showing overlap and distinguish mapped main requests from unattributed title families. Repeat one paired fresh-chat round if title requests or useful overlap are absent. Do not create/message chats through coordination tools.
+- [x] Analyze classification, saved-state absence and outcomes read-only, using symbolic labels in the report. Check observed failures within scope and rerun affected cases; never guess membership, admit a broader family or inspect request content. Classify every required case as observed pass/failure/not run. Missing user actions remain incomplete; demonstrated incompatibility after in-scope fixes/review may conclude with failed capability.
+- [x] Roll back the original provider URL and restore each flag's exact prior presence/value while preserving unrelated current edits. Obtain the required user restart and a successful direct response, then stop the proxy. Verify `state=direct`, `proxyReady=false`, no recovery required, and no listener. Preserve private checkpoints/backups; do not delete recovery evidence with execution scratch.
+- [x] Complete the sanitized report: app/build/engine/Node versions, mode combinations used, symbolic families and request intervals, overlap, mapped/unattributed outcomes, visible-title confirmation, follow-up, failures, trust/state-snapshot limitations and recovery. Actual IDs/endpoints/mappings/raw evidence remain outside Git.
+- [x] Commit with `docs: record unassigned title policy validation`.
 
 ### Task 6: Verify and complete the sequential final review [size: S | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 
@@ -211,4 +211,4 @@
 
 **Approval record:** Specification approved in the user message reproducing it; this separate plan approved by the subsequent “approved” message.
 
-**Approval authorizes:** Implementation of this increment using Native execution after recording plan approval and safely preparing the implementation branch. Specification approval is already recorded; no product code has changed.
+**Approval authorizes:** Implementation of this increment using Native execution after recording plan approval and safely preparing the implementation branch. Specification approval was already recorded; no product code had changed when this plan was approved.
