@@ -1,6 +1,6 @@
 # Unassigned title-request policy validation
 
-Date: 2026-11-10. Status: **desktop validation and recovery complete — final review pending**.
+Date: 2026-11-10. Status: **complete — desktop validation, recovery and sequential review passed**.
 
 The implemented default-off policy admits only the approved initial-title pattern with fresh proof of absent saved identity. It forwards the caller's existing credential without project attribution. It does not select project credentials or establish trustworthy project origin.
 
@@ -11,7 +11,7 @@ The implemented default-off policy admits only the approved initial-title patter
 - Covered: exact/escaped/duplicate metadata, four policy/observation combinations, mapped priority, positive absence, failed final reads, file replacement, SQLite WAL changes, missing schema, cancellation, overlapping distinct credentials, transport parity and sanitized diagnostics.
 - Both private options were absent/default-off before this increment. Direct provider operation, proxy shutdown and disposable/controller mappings were verified read-only before activation.
 - Live proxy mode: `allowUnassignedThreadTitles: true`, `observeRequestMetadata: true`. All four combinations are covered synthetically; other combinations were not exercised live in this increment.
-- `npm ci` succeeded with zero reported vulnerabilities. `npm test` passed 259/259; `node --check src/cli.js` and `git diff --check` succeeded before live activation. Sequential final review remains pending the completed desktop evidence.
+- `npm ci` succeeded with zero reported vulnerabilities. `npm test` passed 259/259; `node --check src/cli.js` and `git diff --check` succeeded before live activation and again after the desktop evidence was committed.
 
 ## Desktop cases
 
@@ -65,3 +65,19 @@ Rollback restored the checkpointed direct provider URL. Both optional properties
 Only symbolic chat/request labels and sanitized intervals/outcomes belong in this report. Actual IDs, endpoints, mappings, checkpoints and raw evidence remain private outside Git. Prompts, responses, title text and credentials are excluded from diagnostics and this report.
 
 The policy accepts spoofable local title markers and provides no project cost attribution. Absence checks detect observed changes without providing cross-file atomicity. Per-project credential selection and additional auxiliary policies remain deferred.
+
+## Final review and dispositions
+
+The sole integrated whole-branch gate passed specification review, then quality review against the same immutable, hash-verified package. Review covered the complete 18-file change, approved artifacts, synthetic evidence and sanitized desktop report. No Critical or Important findings required a fix pass.
+
+One Minor finding is deferred under the Native execution policy: the interval prose above incorrectly says lookup is included. Diagnostic timestamp intervals start after lookup; completion `elapsedMs` includes lookup. The timestamp table and calculated overlap remain valid.
+
+The implementer retained the following evidence boundaries where quality review withheld judgment:
+
+- The original launcher failure remains unexplained; no causal fix is justified by successful controlled restarts. The earlier outage could recur.
+- Continuous full-shutdown monitoring is not claimed because the monitor stopped before reopen. A brief availability gap may remain undetected.
+- Cancelled streams retain their cancellation outcome; a visible response does not prove complete protocol delivery. An incomplete stream could be hidden by the displayed result.
+- Private evidence stays outside the review package. Reviewers rely on the sanitized report, so a mistaken private-evidence interpretation could escape review.
+- Title project/account/billing attribution remains unproven. Usage cannot be assigned to a project or independently verified account.
+
+Implementation and documentation are committed on the feature branch. Push, merge, credential selection and additional request policies remain pending separate authorization.

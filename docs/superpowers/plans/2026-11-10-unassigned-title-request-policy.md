@@ -185,11 +185,11 @@
 
 **Inputs:** Approved pair, complete branch diff, changed files, Native ledger and rulings, observed verification evidence, sanitized report and recovery status.
 
-- [ ] Run `npm test`, `node --check src/cli.js`, and `git diff --check`. **Expected:** All checks pass; retain exact commands, exit statuses and decisive output.
-- [ ] Self-check criterion traceability, completed live cases, restored settings, excluded private evidence and task ledger. Create one finalized review package and invoke `personal-workflows:code-review` once in integrated mode: specification review first, quality review only after specification PASS against the same package. No generic or per-task reviewer dispatch.
-- [ ] Apply the active Native policy: assess findings, record rulings/minors, and perform one verified fix pass for actionable Critical/Important findings using targeted RED→GREEN tests and then the full suite. Do not dispatch a second generic review. Commit verified fixes conventionally and preserve outcome evidence.
-- [ ] Confirm the approved artifacts, code, tests, documentation and report are committed on the implementation branch; verify Git status and private-file exclusion. Finish execution bookkeeping under the active skills without deleting private recovery evidence.
-- [ ] Report working behavior, observed desktop/test results, review outcomes, recovery, limitations, all rulings/deferred minors, and implications for later credential routing. Leave push and merge pending; stop this increment.
+- [x] Run `npm test`, `node --check src/cli.js`, and `git diff --check`. **Expected:** All checks pass; retain exact commands, exit statuses and decisive output.
+- [x] Self-check criterion traceability, completed live cases, restored settings, excluded private evidence and task ledger. Create one finalized review package and invoke `personal-workflows:code-review` once in integrated mode: specification review first, quality review only after specification PASS against the same package. No generic or per-task reviewer dispatch.
+- [x] Apply the active Native policy: assess findings, record rulings/minors, and perform one verified fix pass for actionable Critical/Important findings using targeted RED→GREEN tests and then the full suite. Do not dispatch a second generic review. Commit verified fixes conventionally and preserve outcome evidence.
+- [x] Confirm the approved artifacts, code, tests, documentation and report are committed on the implementation branch; verify Git status and private-file exclusion. Finish execution bookkeeping under the active skills without deleting private recovery evidence.
+- [x] Report working behavior, observed desktop/test results, review outcomes, recovery, limitations, all rulings/deferred minors, and implications for later credential routing. Leave push and merge pending; stop this increment.
 
 ## Traceability and handoff
 
@@ -207,8 +207,10 @@
 
 **Execution endpoint:** Deliver the reviewed opt-in exception and desktop findings, restore direct operation and exact prior settings, verify a direct response, stop the proxy, and stop before per-project credentials or other background-request policies.
 
-**Current stage:** Stage 4 — implementation authorized.
+**Current stage:** Implementation complete — verification, desktop recovery and sequential review recorded in the validation report.
 
 **Approval record:** Specification approved in the user message reproducing it; this separate plan approved by the subsequent “approved” message.
 
 **Approval authorizes:** Implementation of this increment using Native execution after recording plan approval and safely preparing the implementation branch. Specification approval was already recorded; no product code had changed when this plan was approved.
+
+**Execution result:** Completed on `feat/unassigned-title-request-policy`; see [sanitized validation report](../../validation/unassigned-title-request-policy.md). Both review stages passed; one Minor report-wording finding is deferred under the Native policy. Push and merge remain unauthorized.
