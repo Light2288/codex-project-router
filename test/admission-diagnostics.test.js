@@ -87,3 +87,10 @@ test("diagnostics contain only fixed events and allowlisted safe metadata", () =
   assert.equal(first.operation, "compact");
   assert.ok(first.timestamp);
 });
+test("diagnostics independently reject forged observation content", () => {
+  let output = "";
+  const stream = new Writable({write(chunk, encoding, cb) {output += chunk; cb();}});
+  emitDiagnostic(stream, {event: "completed", requestMetadata: {state: "RAW_SENTINEL", headers: {authorization: "CREDENTIAL_SENTINEL"}}});
+  assert.equal(JSON.parse(output).requestMetadata.state, "unavailable");
+  assert.doesNotMatch(output, /SENTINEL/);
+});

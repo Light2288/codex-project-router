@@ -37,8 +37,36 @@ async function setup(t, { ready = true, mismatch = false } = {}) {
     original,
     codexConfigPath,
     recordPath: join(f.dir, "activation.json"),
+    stopProxy: () => new Promise((r) => server.close(r)),
     localUrl: `http://127.0.0.1:${f.config.listenPort}/v1`,
   };
+}
+for (const runningMode of [false, true]) {
+  test(`activation refuses opposite observation mode (running ${runningMode})`, async (t) => {
+    const f = await setup(t);
+    f.config.observeRequestMetadata = runningMode;
+    await writeFile(f.configPath, JSON.stringify({...f.config, observeRequestMetadata: !runningMode}));
+    await assert.rejects(activate(f.configPath), {code: "PROXY_NOT_READY"});
+    assert.equal((await status(f.configPath)).proxyReady, false);
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
+    assert.ok(!(await readdir(f.dir)).includes("activation.json"));
+  });
+}
+for (const phase of ["active", "prepared"]) {
+  test(`legacy ${phase} records roll back offline after an observation mode change`, async (t) => {
+    const f = await setup(t);
+    await activate(f.configPath);
+    const record = JSON.parse(await readFile(f.recordPath, "utf8"));
+    assert.equal(Object.hasOwn(record, "observeRequestMetadata"), false);
+    record.phase = phase;
+    await writeFile(f.recordPath, JSON.stringify(record));
+    await writeFile(f.codexConfigPath, (await readFile(f.codexConfigPath, "utf8")).replace('"test-model"', '"changed-model"'));
+    await writeFile(f.configPath, JSON.stringify({...f.config, observeRequestMetadata: true}));
+    await f.stopProxy();
+    assert.equal((await rollback(f.configPath)).state, "direct");
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original.replace('"test-model"', '"changed-model"'));
+    assert.deepEqual(await status(f.configPath), {state:"direct", proxyReady:false, recoveryRequired:false});
+  });
 }
 test("activation changes only the base URL; rollback preserves later unrelated changes", async (t) => {
   const f = await setup(t);

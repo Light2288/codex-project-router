@@ -1,5 +1,6 @@
 import { UUID } from "./config.js";
 import { RouterError } from "./errors.js";
+import { sanitizeRequestMetadata } from "./request-metadata.js";
 export function emitDiagnostic(stream, event) {
   const record = {
     timestamp: new Date().toISOString(),
@@ -29,5 +30,7 @@ export function emitDiagnostic(stream, event) {
     record.elapsedMs = event.elapsedMs;
   if (event.errorCode !== undefined)
     record.errorCode = new RouterError(event.errorCode).code;
+  if (event.requestMetadata !== undefined)
+    record.requestMetadata = sanitizeRequestMetadata(event.requestMetadata);
   return stream.write(JSON.stringify(record) + "\n");
 }

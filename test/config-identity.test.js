@@ -2,9 +2,35 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { writeFile, unlink } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { loadRouterConfig } from "../src/config.js";
+import { loadRouterConfig, configFingerprint } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
 import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+
+test("metadata observation defaults off and accepts only explicit booleans", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await loadRouterConfig(f.configPath)).observeRequestMetadata, false);
+  for (const mode of [false, true]) {
+    f.config.observeRequestMetadata = mode;
+    await f.saveConfig();
+    assert.equal((await loadRouterConfig(f.configPath)).observeRequestMetadata, mode);
+  }
+});
+for (const value of [null, "SECRET_SENTINEL", 0, 1, [], {}]) {
+  test(`rejects nonboolean observation mode ${JSON.stringify(value)}`, async (t) => {
+    const f = await fixture(t);
+    f.config.observeRequestMetadata = value;
+    await f.saveConfig();
+    await assert.rejects(loadRouterConfig(f.configPath), (e) =>
+      e.code === "CONFIG_INVALID" && !e.message.includes("SENTINEL"));
+  });
+}
+test("readiness distinguishes observation mode while omitted and false match", async (t) => {
+  const f = await fixture(t);
+  assert.equal(configFingerprint(f.config), configFingerprint({...f.config, observeRequestMetadata: false}));
+  assert.notEqual(configFingerprint(f.config), configFingerprint({...f.config, observeRequestMetadata: true}));
+  assert.equal(configFingerprint({...f.config, codexHome: "/Users/example/.codex", observeRequestMetadata: false}),
+    "e9cc34013d43cefc6db257f4cc9b78301221267c20638afa165e9caa574111fc");
+});
 
 test("loads an explicit private HTTPS configuration and defaults the loopback port", async (t) => {
   const f = await fixture(t);
