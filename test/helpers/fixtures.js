@@ -26,6 +26,9 @@ export function headers(id = T1, metadata = {}) {
     JSON.stringify({ thread_id: id, session_id: id, ...metadata }),
   ];
 }
+export function titleHeaders(id = CHILD, metadata = {}) {
+  return headers(id, {thread_source:"thread_title",turn_trigger:"thread_title",...metadata});
+}
 export async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), "router-test-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -53,6 +56,7 @@ export async function fixture(t) {
   db.exec(
     "CREATE TABLE thread_spawn_edges(parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL)",
   );
+  db.exec("CREATE TABLE threads(id TEXT PRIMARY KEY)");
   db.close();
   const configPath = join(dir, "router.json");
   const saveConfig = () =>
@@ -67,6 +71,11 @@ export async function fixture(t) {
     saveState,
     saveConfig,
     dbPath,
+    thread(id) {
+      const d = new DatabaseSync(dbPath);
+      try { d.prepare("INSERT INTO threads VALUES(?)").run(id); }
+      finally { d.close(); }
+    },
     edge(parent, child) {
       const d = new DatabaseSync(dbPath);
       try {

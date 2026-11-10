@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { UUID } from "./config.js";
 import { RouterError } from "./errors.js";
+import { matchUnassignedTitle } from "./title-policy.js";
+import { proveUnassignedTitle } from "./title-state.js";
 const object = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 function identity(raw) {
@@ -144,15 +146,25 @@ async function resolveOnce(ids, config) {
     db?.close();
   }
 }
-export async function identifyProject(rawHeaders, config, { signal } = {}) {
+export async function identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false } = {}) {
   if (signal?.aborted) throw new RouterError("CANCELLED");
   const ids = identity(rawHeaders),
-    deadline = Date.now() + 1000;
+    deadline = Date.now() + 1000,
+    titleId = allowUnassignedTitle === true && config.allowUnassignedThreadTitles === true
+      ? matchUnassignedTitle(rawHeaders) : undefined;
   for (;;) {
     if (signal?.aborted) throw new RouterError("CANCELLED");
     try {
       return await resolveOnce(ids, config);
     } catch (e) {
+      if (titleId && e instanceof RouterError && e.code === "STATE_UNAVAILABLE" && Date.now() < deadline) {
+        try {
+          if (await proveUnassignedTitle(titleId, config, { signal, deadline }))
+            return Object.freeze({threadId:titleId,source:"unassigned_title"});
+        } catch (proofError) {
+          e = proofError;
+        }
+      }
       if (
         !(e instanceof RouterError) ||
         e.code !== "STATE_UNAVAILABLE" ||

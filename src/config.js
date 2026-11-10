@@ -34,6 +34,7 @@ export async function loadRouterConfig(configPath) {
     "listenPort",
     "projectRoutes",
     "observeRequestMetadata",
+    "allowUnassignedThreadTitles",
   ];
   if (
     !object(value) ||
@@ -41,6 +42,8 @@ export async function loadRouterConfig(configPath) {
     value.schemaVersion !== 1 ||
     (Object.hasOwn(value, "observeRequestMetadata") &&
       typeof value.observeRequestMetadata !== "boolean") ||
+    (Object.hasOwn(value, "allowUnassignedThreadTitles") &&
+      typeof value.allowUnassignedThreadTitles !== "boolean") ||
     typeof value.codexHome !== "string" ||
     !isAbsolute(value.codexHome) ||
     !/^[a-zA-Z0-9_-]+$/.test(value.providerId ?? "") ||
@@ -79,6 +82,7 @@ export async function loadRouterConfig(configPath) {
     upstreamBaseUrl: upstream.href.replace(/\/$/, ""),
     listenPort: port,
     observeRequestMetadata: value.observeRequestMetadata ?? false,
+    allowUnassignedThreadTitles: value.allowUnassignedThreadTitles ?? false,
     projectRoutes: Object.freeze({ ...value.projectRoutes }),
   });
 }
@@ -93,5 +97,6 @@ export function configFingerprint(config) {
   ];
   // Keep the existing default-mode fingerprint compatible with running proxies.
   if (config.observeRequestMetadata === true) canonical.push("observeRequestMetadata:true");
+  if (config.allowUnassignedThreadTitles === true) canonical.push("allowUnassignedThreadTitles:true");
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }

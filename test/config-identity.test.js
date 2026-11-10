@@ -4,7 +4,84 @@ import { writeFile, unlink } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadRouterConfig, configFingerprint } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
-import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+import { DatabaseSync } from "node:sqlite";
+
+test("eligible titles require both policy and route permission and freeze their result", async t => {
+  const f=await fixture(t);
+  f.config.allowUnassignedThreadTitles=true;
+  await assert.rejects(identifyProject(titleHeaders(),f.config),{code:"STATE_UNAVAILABLE"});
+  const first=await identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true});
+  assert.deepEqual(first,{threadId:CHILD,source:"unassigned_title"});
+  assert.ok(Object.isFrozen(first));
+  f.state["thread-project-assignments"][CHILD]={projectKind:"local",projectId:P2};await f.saveState();
+  assert.equal((await identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true})).source,"direct");
+  assert.equal(first.source,"unassigned_title");
+});
+test("ordinary outcomes take precedence over forged title markers",async t => {
+  const f=await fixture(t);f.config.allowUnassignedThreadTitles=true;
+  assert.equal((await identifyProject(titleHeaders(T1),f.config,{allowUnassignedTitle:true})).projectId,P1);
+  delete f.config.projectRoutes[P1];
+  await assert.rejects(identifyProject(titleHeaders(T1),f.config,{allowUnassignedTitle:true}),{code:"ROUTE_UNMAPPED"});
+  f.state["projectless-thread-ids"].push(CHILD);await f.saveState();
+  await assert.rejects(identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true}),{code:"PROJECT_UNRESOLVED"});
+});
+test("saved threads and outgoing orphan relationships cannot become unattributed titles",async t => {
+  const f=await fixture(t);f.config.allowUnassignedThreadTitles=true;
+  f.thread(CHILD);
+  await assert.rejects(identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true}),{code:"STATE_UNAVAILABLE"});
+  const db=new DatabaseSync(f.dbPath);db.exec("DELETE FROM threads");db.close();
+  f.edge(CHILD,T1);
+  await assert.rejects(identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true}),{code:"STATE_UNAVAILABLE"});
+});
+test("missing title-only schema leaves ordinary mapped requests unchanged",async t => {
+  const f=await fixture(t);f.config.allowUnassignedThreadTitles=true;
+  const db=new DatabaseSync(f.dbPath);db.exec("DROP TABLE threads");db.close();
+  assert.equal((await identifyProject(titleHeaders(T1),f.config,{allowUnassignedTitle:true})).projectId,P1);
+  const start=Date.now();
+  await assert.rejects(identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true}),{code:"STATE_UNAVAILABLE"});
+  assert.ok(Date.now()-start<1800,"must share one lookup budget");
+});
+test("title proof recovers from partial state and rereads saved identity between requests",async t => {
+  const f=await fixture(t);f.config.allowUnassignedThreadTitles=true;
+  await writeFile(f.statePath,"{");
+  const pending=identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true});
+  await delay(70);await f.saveState();
+  assert.equal((await pending).source,"unassigned_title");
+  f.thread(CHILD);
+  const controller=new AbortController();
+  const cancelled=identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true,signal:controller.signal});
+  const rejection=assert.rejects(cancelled,{code:"CANCELLED"});
+  controller.abort();await rejection;
+  f.config.allowUnassignedThreadTitles=false;
+  await assert.rejects(identifyProject(titleHeaders(),f.config,{allowUnassignedTitle:true}),{code:"STATE_UNAVAILABLE"});
+});
+
+test("unassigned title policy defaults off and accepts only booleans", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await loadRouterConfig(f.configPath)).allowUnassignedThreadTitles, false);
+  for (const mode of [true, false]) {
+    f.config.allowUnassignedThreadTitles = mode;
+    await f.saveConfig();
+    assert.equal((await loadRouterConfig(f.configPath)).allowUnassignedThreadTitles, mode);
+  }
+  for (const value of [null, "SECRET_SENTINEL", 0, 1, [], {}]) {
+    f.config.allowUnassignedThreadTitles = value;
+    await f.saveConfig();
+    await assert.rejects(loadRouterConfig(f.configPath), e =>
+      e.code === "CONFIG_INVALID" && !e.message.includes("SENTINEL"));
+  }
+});
+test("policy readiness preserves prior modes and separates all enabled combinations", async (t) => {
+  const f = await fixture(t), fingerprints = new Set();
+  for (const observeRequestMetadata of [false, true]) {
+    const old = {...f.config, observeRequestMetadata};
+    assert.equal(configFingerprint(old), configFingerprint({...old, allowUnassignedThreadTitles:false}));
+    for (const allowUnassignedThreadTitles of [false, true])
+      fingerprints.add(configFingerprint({...old, allowUnassignedThreadTitles}));
+  }
+  assert.equal(fingerprints.size, 4);
+});
 
 test("metadata observation defaults off and accepts only explicit booleans", async (t) => {
   const f = await fixture(t);

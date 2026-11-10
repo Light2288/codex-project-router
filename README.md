@@ -2,13 +2,13 @@
 
 Experimental local proxy for validating automatic project identification in Codex desktop. It previews a project route alias and forwards every admitted request with the caller's existing global credential. **Per-project API-key selection is not implemented.**
 
-The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](docs/validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. Those requests remain blocked; their handling policy must be resolved before progression to per-project credentials.
+The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](docs/validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. They remain blocked by default. The optional narrow title policy below allows qualifying initial-title requests without project attribution; see its [validation report](docs/validation/unassigned-title-request-policy.md) for current evidence.
 
 ## Requirements and installation
 
 - macOS with Node.js 24 and npm.
 - A configured HTTP Responses provider using a command-backed authentication helper, with `supports_websockets = false`.
-- The currently observed `.codex-global-state.json` assignment/catalog structures and `state_5.sqlite` parent-edge table.
+- The currently observed `.codex-global-state.json` assignment/catalog structures and `state_5.sqlite` parent-edge table. The optional title policy also requires the saved `threads.id` table/column.
 
 ```sh
 npm ci
@@ -34,6 +34,8 @@ Start the foreground proxy in a terminal:
 node --use-system-ca src/cli.js serve --config "$HOME/.codex-project-router/config.json"
 ```
 
+For desktop restart tests, use a separate macOS Terminal window and keep it open until rollback is complete.
+
 This enables normal certificate verification with the system CA store. There is no insecure TLS mode. Startup prints the loopback listener; per-request diagnostics go to stderr.
 
 In another terminal, inspect configuration and readiness:
@@ -52,7 +54,7 @@ node src/cli.js activate --config "$HOME/.codex-project-router/config.json"
 
 Activation checks provider compatibility and a matching local health fingerprint, saves an exclusive private backup, and replaces only the supported provider's base-URL value. It preserves the existing authentication command, models, comments, and unrelated configuration. Supported editing is deliberately limited to a simple `[model_providers.PROVIDER_ID]` table with a single-line double-quoted `base_url`; ambiguous forms are rejected.
 
-Restart the desktop app when the command reports `restartRequired`. The helper never restarts it. The provider setting affects every chat using that provider: model requests without a resolvable, explicitly mapped project will block. Arrange validation while other work is idle.
+Restart the desktop app when the command reports `restartRequired`. The helper never restarts it. The provider setting affects every chat using that provider: model requests without a resolvable, explicitly mapped project will block, except qualifying initial titles when their separate policy is enabled. Arrange validation while other work is idle.
 
 Restore direct access before stopping the proxy:
 
@@ -82,12 +84,26 @@ Allowed local operations:
 |---|---|
 | `GET /healthz` | Local readiness; no authentication or upstream request |
 | `GET /v1/models` | Provider-wide catalog; bearer authentication required, chat identity optional |
-| `POST /v1/responses` | Bearer authentication and resolved project required |
+| `POST /v1/responses` | Bearer authentication and resolved project required; optional narrow initial-title exception below |
 | `POST /v1/responses/compact` | Same identity and authentication requirements |
 
 Other routes, methods, and WebSocket upgrades are rejected. Allowed queries retain their original content. Forwarding preserves body bytes, model names, streaming status/content, and each request's credential. Hop-by-hop headers are removed, client disconnects cancel upstream work, and upstream inactivity is limited to five minutes. The router introduces no model-request retries and follows no redirects.
 
 Diagnostics contain only fixed event/error codes, timestamps, correlation IDs, required chat/project IDs, aliases, resolution source, fixed operation labels, status, and timing. Prompts, responses, credentials, whole headers, raw metadata, raw desktop state, and exception text are excluded, including failure paths.
+
+## Optional unassigned initial-title policy
+
+Set `allowUnassignedThreadTitles` to `true` in private configuration to permit the observed initial-title pattern through `POST /v1/responses`. This strict boolean defaults to `false` under `schemaVersion: 1`. Restart the foreground proxy after changing it. Readiness distinguishes both policy and observation modes; rollback remains usable after mode changes and with the proxy offline. Existing activation records need no migration.
+
+Ordinary mapped resolution always wins. The exception requires exactly one valid metadata object with singleton `thread_source` and `turn_trigger` strings both equal to `thread_title`. Header `thread-id`/`session-id` and metadata `thread_id`/`session_id` must all contain the same valid UUID. Header `x-codex-parent-thread-id` and metadata parent/fork-source members must be absent, including no null or empty occurrences. Duplicate allowlisted metadata members, including escaped key spellings, disqualify the exception. `request_kind` values do not authorize it.
+
+Fresh healthy JSON and read-only SQLite checks must prove that the temporary ID has no assignment entry, projectless marker, saved thread, or incoming/outgoing spawn edge. Malformed state, missing schema, detected file/database changes, failed final checks and cancellation cannot grant the exception. Transient failures share the existing one-second lookup budget and 50 ms retry cadence. The checks use current readable snapshots, not an atomic transaction across both state files. No prior absence is cached for later attempts or requests.
+
+Accepted titles use the existing upstream and caller credential unchanged. Their diagnostics use `source: unassigned_title` with no project, owner or route alias. They have no project cost attribution. Client-supplied markers can be imitated by a local caller with an accepted credential; enabling this option accepts that limitation. The router does not inspect the body to prove that it generates a title.
+
+This policy works independently of `observeRequestMetadata` and enables no additional metadata logging. Compaction, title reconsideration, other auxiliary families, known projectless/unmapped identities and other unresolved requests retain their existing behavior. There is no general unresolved-request fallback. Per-project credentials remain deferred.
+
+For a controlled run, checkpoint each flag's prior presence/value and the direct provider URL privately before enabling it. Use the existing activation and rollback commands. Restore the prior flags while preserving unrelated edits, restart the desktop when required, verify a direct response, then stop the foreground proxy. Keep backups and run evidence outside Git.
 
 ## Optional request metadata observation
 
@@ -138,4 +154,4 @@ git diff --check
 
 Tests use temporary synthetic desktop state and a local HTTPS upstream. The committed TLS key/certificate are public, test-only fixtures for localhost. Production uses normal upstream certificate verification. Tests never contact ICA or retrieve real credentials.
 
-Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), and the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md).
+Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md), and the title policy's [specification](docs/superpowers/specs/2026-11-10-unassigned-title-request-policy.md) and [implementation plan](docs/superpowers/plans/2026-11-10-unassigned-title-request-policy.md).
