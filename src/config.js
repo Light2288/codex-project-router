@@ -7,6 +7,34 @@ export const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const object = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+const routeAlias = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+const referenceFields = ["keychainPath", "service", "account"];
+function credentialReference(value) {
+  if (
+    !object(value) ||
+    Object.keys(value).length !== referenceFields.length ||
+    referenceFields.some((field) =>
+      typeof value[field] !== "string" || !value[field].length ||
+      value[field].length > 1024 || /[\u0000-\u001f\u007f-\u009f]/.test(value[field])) ||
+    !isAbsolute(value.keychainPath)
+  )
+    throw new RouterError("CONFIG_INVALID");
+  return Object.freeze({ keychainPath: value.keychainPath, service: value.service, account: value.account });
+}
+function credentialRouting(value) {
+  if (
+    !object(value) || Object.keys(value).length !== 2 ||
+    !Object.hasOwn(value, "globalCredential") ||
+    !Object.hasOwn(value, "routeCredentials") || !object(value.routeCredentials)
+  )
+    throw new RouterError("CONFIG_INVALID");
+  const globalCredential = credentialReference(value.globalCredential);
+  const routeCredentials = Object.fromEntries(Object.entries(value.routeCredentials).map(([alias, reference]) => {
+    if (!routeAlias.test(alias)) throw new RouterError("CONFIG_INVALID");
+    return [alias, credentialReference(reference)];
+  }));
+  return Object.freeze({ globalCredential, routeCredentials: Object.freeze(routeCredentials) });
+}
 const root = fileURLToPath(new URL("../", import.meta.url));
 export async function loadRouterConfig(configPath) {
   let value, actualPath;
@@ -35,6 +63,7 @@ export async function loadRouterConfig(configPath) {
     "projectRoutes",
     "observeRequestMetadata",
     "allowUnassignedThreadTitles",
+    "credentialRouting",
   ];
   if (
     !object(value) ||
@@ -72,7 +101,7 @@ export async function loadRouterConfig(configPath) {
     if (
       !UUID.test(id) ||
       typeof alias !== "string" ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(alias)
+      !routeAlias.test(alias)
     )
       throw new RouterError("CONFIG_INVALID");
   }
@@ -84,6 +113,9 @@ export async function loadRouterConfig(configPath) {
     observeRequestMetadata: value.observeRequestMetadata ?? false,
     allowUnassignedThreadTitles: value.allowUnassignedThreadTitles ?? false,
     projectRoutes: Object.freeze({ ...value.projectRoutes }),
+    ...(Object.hasOwn(value, "credentialRouting")
+      ? { credentialRouting: credentialRouting(value.credentialRouting) }
+      : {}),
   });
 }
 export function configFingerprint(config) {
@@ -98,5 +130,15 @@ export function configFingerprint(config) {
   // Keep the existing default-mode fingerprint compatible with running proxies.
   if (config.observeRequestMetadata === true) canonical.push("observeRequestMetadata:true");
   if (config.allowUnassignedThreadTitles === true) canonical.push("allowUnassignedThreadTitles:true");
+  if (Object.hasOwn(config, "credentialRouting")) {
+    const reference = ({ keychainPath, service, account }) => [keychainPath, service, account];
+    canonical.push([
+      "credentialRouting",
+      reference(config.credentialRouting.globalCredential),
+      Object.entries(config.credentialRouting.routeCredentials)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([alias, item]) => [alias, reference(item)]),
+    ]);
+  }
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }

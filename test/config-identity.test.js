@@ -7,6 +7,135 @@ import { identifyProject } from "../src/identity.js";
 import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 import { DatabaseSync } from "node:sqlite";
 
+const credentialReference = () => ({
+  keychainPath: "/nonexistent/synthetic.keychain-db",
+  service: "synthetic-service",
+  account: "synthetic-account",
+});
+const credentialRouting = () => ({
+  globalCredential: credentialReference(),
+  routeCredentials: { "route-a": credentialReference() },
+});
+
+test("legacy loading omits credential routing and enabled references are deeply frozen", async (t) => {
+  const f = await fixture(t);
+  assert.equal(Object.hasOwn(await loadRouterConfig(f.configPath), "credentialRouting"), false);
+  f.config.credentialRouting = credentialRouting();
+  await f.saveConfig();
+  const config = await loadRouterConfig(f.configPath);
+  assert.deepEqual(config.credentialRouting, credentialRouting());
+  for (const value of [config, config.credentialRouting,
+    config.credentialRouting.globalCredential, config.credentialRouting.routeCredentials,
+    config.credentialRouting.routeCredentials["route-a"]])
+    assert.ok(Object.isFrozen(value));
+  assert.throws(() => { config.credentialRouting.globalCredential.account = "changed"; }, TypeError);
+  assert.throws(() => { config.credentialRouting.routeCredentials["route-a"].service = "changed"; }, TypeError);
+});
+
+test("credential routing permits empty maps, shared items, unused aliases and own constructor aliases", async (t) => {
+  const f = await fixture(t);
+  for (const routeCredentials of [{}, {
+    "route-a": credentialReference(), "route-b": credentialReference(),
+    unused: credentialReference(), constructor: credentialReference(), ["a".repeat(64)]: credentialReference(),
+  }]) {
+    f.config.credentialRouting = { globalCredential: credentialReference(), routeCredentials };
+    await f.saveConfig();
+    const config = await loadRouterConfig(f.configPath);
+    assert.deepEqual(config.credentialRouting.routeCredentials, routeCredentials);
+    if (Object.hasOwn(routeCredentials, "constructor")) {
+      assert.ok(Object.hasOwn(config.credentialRouting.routeCredentials, "constructor"));
+      assert.ok(Object.isFrozen(config.credentialRouting.routeCredentials.constructor));
+    }
+  }
+});
+
+test("credential references accept the 1024-character boundary and preserve literal absolute paths", async (t) => {
+  const f = await fixture(t);
+  const reference = { keychainPath: "/" + "p".repeat(1023), service: "s".repeat(1024), account: "a".repeat(1024) };
+  f.config.credentialRouting = { globalCredential: reference, routeCredentials: { "route-a": reference } };
+  await f.saveConfig();
+  assert.deepEqual((await loadRouterConfig(f.configPath)).credentialRouting.globalCredential, reference);
+  const literal = "/$HOME/${SYNTHETIC_HOME}/~/synthetic.keychain-db";
+  f.config.credentialRouting.globalCredential.keychainPath = literal;
+  await f.saveConfig();
+  assert.equal((await loadRouterConfig(f.configPath)).credentialRouting.globalCredential.keychainPath, literal);
+});
+
+test("credential routing rejects malformed structure and aliases without reflecting values", async (t) => {
+  const f = await fixture(t);
+  const invalid = [
+    null, true, false, [], "SECRET_SENTINEL", 1, {},
+    { globalCredential: credentialReference() },
+    { routeCredentials: {} },
+    { ...credentialRouting(), unexpected: "SECRET_SENTINEL" },
+    ...[null, [], true, "SECRET_SENTINEL"].map(globalCredential => ({ ...credentialRouting(), globalCredential })),
+    ...[null, [], true, "SECRET_SENTINEL"].map(routeCredentials => ({ ...credentialRouting(), routeCredentials })),
+    ...["", "_route", "route.invalid", "route\nSECRET_SENTINEL", "a".repeat(65)].map(alias => ({
+      globalCredential: credentialReference(), routeCredentials: { [alias]: credentialReference() },
+    })),
+  ];
+  for (const [index, value] of invalid.entries()) await t.test(`invalid structure ${index}`, async () => {
+    f.config.credentialRouting = value;
+    await f.saveConfig();
+    await assert.rejects(loadRouterConfig(f.configPath), error =>
+      error.code === "CONFIG_INVALID" && error.message === "Router configuration is invalid or unsupported.");
+  });
+});
+
+test("both global and route references require exactly three bounded control-free strings", async (t) => {
+  const f = await fixture(t);
+  const malformed = [null, true, [], "SECRET_SENTINEL", {}, { ...credentialReference(), extra: "SECRET_SENTINEL" }];
+  for (const field of ["keychainPath", "service", "account"]) {
+    const missing = credentialReference();
+    delete missing[field];
+    malformed.push(missing);
+    for (const value of [null, true, 1, [], {}, "", "x".repeat(1025), "SECRET_SENTINEL\n", "\u0000", "\u001f", "\u007f", "\u0085", "\u009f"])
+      malformed.push({ ...credentialReference(), [field]: field === "keychainPath" && typeof value === "string" && value ? "/" + value : value });
+  }
+  for (const keychainPath of ["relative.keychain-db", "~/synthetic.keychain-db", "$HOME/synthetic.keychain-db"])
+    malformed.push({ ...credentialReference(), keychainPath });
+  for (const location of ["global", "route"]) for (const [index, reference] of malformed.entries())
+    await t.test(`${location} malformed reference ${index}`, async () => {
+      const routing = credentialRouting();
+      if (location === "global") routing.globalCredential = reference;
+      else routing.routeCredentials["route-a"] = reference;
+      f.config.credentialRouting = routing;
+      await f.saveConfig();
+      await assert.rejects(loadRouterConfig(f.configPath), error =>
+        error.code === "CONFIG_INVALID" && error.message === "Router configuration is invalid or unsupported.");
+    });
+});
+
+test("enabled fingerprints ignore field and alias order but include every reference and mapping", async (t) => {
+  const f = await fixture(t);
+  const routing = credentialRouting();
+  routing.routeCredentials.constructor = { ...credentialReference(), service: "synthetic-other" };
+  const config = { ...f.config, credentialRouting: routing };
+  const reverseReference = reference => ({ account: reference.account, service: reference.service, keychainPath: reference.keychainPath });
+  const reordered = { ...config, credentialRouting: {
+    routeCredentials: { constructor: reverseReference(routing.routeCredentials.constructor), "route-a": reverseReference(routing.routeCredentials["route-a"]) },
+    globalCredential: reverseReference(routing.globalCredential),
+  } };
+  const fingerprint = configFingerprint(config);
+  assert.match(fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(fingerprint, configFingerprint(reordered));
+  assert.notEqual(fingerprint, configFingerprint(f.config));
+  for (const location of ["global", "route"]) for (const field of ["keychainPath", "service", "account"]) {
+    const changed = structuredClone(config);
+    const reference = location === "global" ? changed.credentialRouting.globalCredential : changed.credentialRouting.routeCredentials["route-a"];
+    reference[field] += "-changed";
+    assert.notEqual(fingerprint, configFingerprint(changed), `${location} ${field} must affect readiness`);
+  }
+  const changed = structuredClone(config);
+  changed.credentialRouting.routeCredentials["route-b"] = changed.credentialRouting.routeCredentials["route-a"];
+  assert.notEqual(fingerprint, configFingerprint(changed));
+  delete changed.credentialRouting.routeCredentials["route-a"];
+  assert.notEqual(fingerprint, configFingerprint(changed));
+  const empty = { ...f.config, credentialRouting: { globalCredential: credentialReference(), routeCredentials: {} } };
+  assert.notEqual(configFingerprint(empty), configFingerprint(f.config));
+  assert.notEqual(configFingerprint(empty), fingerprint);
+});
+
 test("eligible titles require both policy and route permission and freeze their result", async t => {
   const f=await fixture(t);
   f.config.allowUnassignedThreadTitles=true;

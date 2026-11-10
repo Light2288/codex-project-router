@@ -41,6 +41,65 @@ async function setup(t, { ready = true, mismatch = false } = {}) {
     localUrl: `http://127.0.0.1:${f.config.listenPort}/v1`,
   };
 }
+const credentialRouting = () => ({
+  globalCredential: { keychainPath: "/nonexistent/synthetic.keychain-db", service: "synthetic-global", account: "synthetic-account" },
+  routeCredentials: { "route-a": { keychainPath: "/nonexistent/synthetic.keychain-db", service: "synthetic-project", account: "synthetic-account" } },
+});
+for (const runningEnabled of [false, true])
+  test(`activation refuses opposite credential routing mode (running ${runningEnabled})`, async (t) => {
+    const f = await setup(t);
+    const enabled = { ...f.config, credentialRouting: credentialRouting() };
+    if (runningEnabled) f.config.credentialRouting = enabled.credentialRouting;
+    await writeFile(f.configPath, JSON.stringify(runningEnabled ? { ...f.config, credentialRouting: undefined } : enabled));
+    await assert.rejects(activate(f.configPath), { code: "PROXY_NOT_READY" });
+    assert.equal((await status(f.configPath)).proxyReady, false);
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
+    assert.ok(!(await readdir(f.dir)).includes("activation.json"));
+  });
+test("activation rejects changed credential references while canonical reordering stays ready", async (t) => {
+  const f = await setup(t);
+  f.config.credentialRouting = credentialRouting();
+  const routing = f.config.credentialRouting;
+  const reverse = ref => ({ account: ref.account, service: ref.service, keychainPath: ref.keychainPath });
+  await writeFile(f.configPath, JSON.stringify({ ...f.config, credentialRouting: {
+    routeCredentials: { "route-a": reverse(routing.routeCredentials["route-a"]) },
+    globalCredential: reverse(routing.globalCredential),
+  } }));
+  assert.equal((await status(f.configPath)).proxyReady, true);
+  for (const location of ["global", "route"]) for (const field of ["keychainPath", "service", "account"]) {
+    const changed = structuredClone(f.config);
+    const reference = location === "global" ? changed.credentialRouting.globalCredential : changed.credentialRouting.routeCredentials["route-a"];
+    reference[field] += "-changed";
+    await writeFile(f.configPath, JSON.stringify(changed));
+    await assert.rejects(activate(f.configPath), { code: "PROXY_NOT_READY" });
+    assert.equal((await status(f.configPath)).proxyReady, false);
+  }
+  await f.saveConfig();
+  assert.equal((await activate(f.configPath)).state, "active");
+  assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original.replace(f.config.upstreamBaseUrl, f.localUrl));
+  assert.equal((await rollback(f.configPath)).state, "direct");
+  assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
+});
+for (const phase of ["active", "prepared"]) for (const initiallyEnabled of [false, true])
+  test(`offline ${phase} recovery tolerates credential routing changes (initially enabled ${initiallyEnabled})`, async (t) => {
+    const f = await setup(t);
+    if (initiallyEnabled) f.config.credentialRouting = credentialRouting();
+    await f.saveConfig();
+    await activate(f.configPath);
+    const record = JSON.parse(await readFile(f.recordPath, "utf8"));
+    assert.equal(Object.hasOwn(record, "credentialRouting"), false);
+    record.phase = phase;
+    await writeFile(f.recordPath, JSON.stringify(record));
+    const edited = f.original.replace('"test-model"', '"changed-model"');
+    await writeFile(f.codexConfigPath, edited.replace(f.config.upstreamBaseUrl, f.localUrl));
+    f.config.credentialRouting = credentialRouting();
+    f.config.credentialRouting.globalCredential.service = "changed-synthetic-global";
+    await f.saveConfig();
+    await f.stopProxy();
+    assert.equal((await rollback(f.configPath)).state, "direct");
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), edited);
+    assert.deepEqual(await status(f.configPath), { state: "direct", proxyReady: false, recoveryRequired: false });
+  });
 for (const runningMode of [false, true]) {
   test(`activation refuses opposite title policy (running ${runningMode})`, async (t) => {
     const f = await setup(t);
