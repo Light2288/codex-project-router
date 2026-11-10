@@ -2,7 +2,7 @@
 
 Experimental local proxy for validating automatic project identification in Codex desktop. It previews a project route alias and forwards every admitted request with the caller's existing global credential. **Per-project API-key selection is not implemented.**
 
-The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility.
+The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. Some additional desktop model requests have no saved chat/project/parent relationship and are blocked; their originating feature is unverified. This limitation blocks progression to per-project credentials.
 
 ## Requirements and installation
 

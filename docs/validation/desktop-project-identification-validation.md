@@ -1,6 +1,6 @@
 # Desktop project-identification validation report
 
-Date: 2026-11-10. Outcome: **incomplete — desktop actions pending**.
+Date: 2026-11-10. Outcome: **primary desktop matrix passed; additional requests without durable identity are unsupported and blocked**. Direct configuration has been restored and verified. Final review outcomes are reported with delivery.
 
 ## Environment
 
@@ -26,27 +26,28 @@ At the implementation checkpoint, `npm test` passed 65 tests with zero failures.
 
 The test-only certificate/key are synthetic localhost fixtures. Actual endpoint details, project mappings, and raw private run evidence are intentionally absent from this report.
 
-A separate read-only check of the actual local desktop state resolved the controller chat to its configured alias. This used a locally constructed identity header; it did not capture an outgoing desktop request or contact ICA. A real configuration status check reported direct configuration with no proxy active.
-
-The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. At preflight, on-disk Codex configuration remained direct. The user subsequently confirmed both baseline responses and the activation helper changed only the provider base URL after matching readiness. The user restarted the desktop app. The resumed controller chat was explicitly identified and completed an actual proxy-to-ICA request with HTTP 200. Provider-wide catalog requests also completed with HTTP 200. The user then confirmed complete numbered responses from new chats in both disposable projects. Both requests resolved to the correct aliases and their intervals overlapped by 1.728 seconds. Initial completion diagnostics incorrectly labeled client stream closure as an upstream failure; a local HTTPS regression reproduced that classification bug and passed after cancellation was recorded before upstream teardown. The repeated new-chat test used 300 lines per chat. Both resolved correctly and overlapped by 5.427 seconds; the user confirmed completion. Both transport intervals ended with client cancellation (499), rather than an upstream failure. Two other request IDs were each rejected 17 times. Neither ID exists in saved chats, assignments, projectless markers, attached-parent relationships, or spawn edges. They cannot be safely attributed using the approved evidence sources. The desktop bundle implements auxiliary generation using ephemeral threads; that is a plausible origin, not a proven correlation for these requests.
+The user created two disposable desktop projects with separate scratch roots, confirmed direct baseline responses, and restarted the app after explicit proxy activation. The original authentication helper remained in place throughout. Actual desktop requests traversed the proxy to ICA; lifecycle checks combined sanitized diagnostics, required saved identity relationships, and user confirmation of visible completion. The router never independently retrieved credentials.
 
 ## Actual desktop-to-ICA matrix
 
 | Scenario | Result | Evidence |
 |---|---|---|
-| Direct baseline in disposable projects | Pass | User confirmed both direct baseline responses |
-| Resumed controller chat after restart | Pass | Explicit controller alias; proxy completion HTTP 200 |
-| Provider-wide model discovery | Pass | Catalog requests completed with HTTP 200 |
+| Direct baseline in disposable projects | Observed pass | User confirmed both direct baseline responses |
+| Resumed controller chat after restart | Observed pass | Explicit controller alias; proxy completion HTTP 200 |
+| Provider-wide model discovery | Observed pass | Catalog requests completed with HTTP 200 |
 | First routed requests in both projects | Observed pass | Repeated with 300-line outputs; correct aliases and user-confirmed completion; client close classified 499 |
 | Concurrent routed requests | Observed pass | Repeated intervals overlapped by 5.427 seconds; correct distinct aliases and user-confirmed completion |
 | Follow-up and resumed chats | Observed pass | User confirmed both in the same Project A chat; same validated chat ID and `validation-a`; HTTP 200 for both |
 | Forked chat | Observed pass | User confirmed branching; new chat ID directly assigned to `validation-a`; HTTP 200 |
 | Project move | Observed pass | Same fork chat ID changed from `validation-a` to `validation-b` on its next request; HTTP 200; user confirmed output |
-| `/compact` | Not run | Composer action observed in bundle; live action pending |
-| Subagent attribution | Not run | Live delegation pending |
-| Restoration and direct response after rollback | Not run | Proxy remains active; rollback and restart pending |
+| `/compact` | Observed pass | Desktop used regular Responses operation; HTTP 200 at 15:32:00.227 UTC, saved compaction marker 6 ms later; follow-up HTTP 200 and user confirmation |
+| Subagent attribution | Observed pass | Child request used saved spawn edge to the moved fork, `source=ancestor`, `validation-b`; HTTP 200 and user confirmation |
+| Restoration and direct response after rollback | Observed pass | Helper restored original URL; user restarted and confirmed direct response; no proxy request from the test chat after rollback |
+| Additional requests without saved identity relationships | Observed failure / unsupported | Two IDs, 17 rejected attempts each; no saved thread, project assignment, projectless marker, attached parent, or spawn edge; zero admitted upstream calls |
 
-The provider base URL is currently set to the loopback proxy, with the original authentication helper preserved. A private rollback record and backup exist. The router does not independently retrieve credentials. End-to-end forwarding is observed for the controller chat; disposable-project lifecycle coverage and restoration remain unverified. Actual run diagnostics were checked for the fixed field allowlist, with no header or body fields.
+Final status: `state=direct`, `proxyReady=false`, `recoveryRequired=false`. The test proxy was stopped after the successful direct-response check. Protected backup/recovery records remain private. The disposable projects and their chats remain available for inspection; moving the fork granted Project B access to the original disposable scratch root as well as its own.
+
+All 420 actual diagnostic records parsed as JSON and contained only allowed fields; no header or body fields were present. Actual endpoints, identifiers, configuration, and raw run evidence remain outside Git.
 
 ## Sanitized concurrency intervals
 
@@ -59,10 +60,14 @@ The repeated run on 2026-11-10 recorded these UTC intervals. IDs and upstream de
 
 Overlap: **5.427 seconds**. The initial run overlapped by 1.728 seconds.
 
-## Live debugging checkpoint
+## Findings and limits
 
 The cancellation regression initially failed with `502` where a client cancellation required `499`. Upstream teardown synchronously emitted an abort before the cancellation outcome was recorded. Recording cancellation first corrected the result; the full suite then passed 65 tests. Rejected requests now retain a validated chat identifier in diagnostics, without raw headers or metadata, so missing desktop relationships can be investigated. The repeated run correlated 34 `STATE_UNAVAILABLE` rejections with two request IDs absent from every supported saved identity relationship. Blocking these requests is required; auxiliary generation remains unsupported where no durable relationship exists. Their exact originating desktop feature is unverified. The router itself introduced no retries; repeated rejected attempts came from the caller.
 
+The two unresolvable request IDs remained absent from all supported saved relationships after the lookup deadline. The installed desktop bundle uses ephemeral threads for auxiliary title/description/summary generation, which is a plausible explanation; the exact originating feature is unverified. The approved architecture cannot safely route such requests. No project was guessed from folders, prompts, or nearby activity.
+
+The live `/compact` action used regular Responses. The dedicated `/responses/compact` endpoint is covered by synthetic integration tests but was not observed from this desktop. Client-close status 499 describes the transport outcome; complete content was established by user confirmation, not by inspecting response bodies in the router.
+
 ## Completion boundary
 
-Missing desktop actions do not establish incompatibility. AC-03 through AC-05 and AC-10 require live evidence; automated checks alone cannot complete this increment. The final result must distinguish compatible, conclusively incompatible, and incomplete outcomes. Per-project key selection remains outside this increment.
+All required primary desktop scenarios were exercised. The increment establishes support for mapped durable chats and saved subagents on the observed installation, alongside a demonstrated inability to attribute some additional requests using the approved sources. That limitation blocks progression to credential switching until addressed through a later approved design. Per-project key selection, billing attribution, GUI, and automatic startup remain outside this increment. No push or merge is authorized.
