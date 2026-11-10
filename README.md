@@ -2,7 +2,7 @@
 
 Experimental local proxy for validating automatic project identification in Codex desktop. It previews a project route alias and forwards every admitted request with the caller's existing global credential. **Per-project API-key selection is not implemented.**
 
-The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. Some additional desktop model requests have no saved chat/project/parent relationship and are blocked; their originating feature is unverified. This limitation blocks progression to per-project credentials.
+The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](docs/validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. Those requests remain blocked; their handling policy must be resolved before progression to per-project credentials.
 
 ## Requirements and installation
 
@@ -89,6 +89,29 @@ Other routes, methods, and WebSocket upgrades are rejected. Allowed queries reta
 
 Diagnostics contain only fixed event/error codes, timestamps, correlation IDs, required chat/project IDs, aliases, resolution source, fixed operation labels, status, and timing. Prompts, responses, credentials, whole headers, raw metadata, raw desktop state, and exception text are excluded, including failure paths.
 
+## Optional request metadata observation
+
+Set `observeRequestMetadata` to `true` in the private configuration to investigate auxiliary desktop requests. The option is a strict boolean and defaults to `false` under the existing `schemaVersion: 1`. Restart the foreground proxy after changing it. Readiness distinguishes the two modes; a running proxy with the other mode is not ready for activation. Existing activation records remain usable, and rollback works with a changed observation setting or an unavailable proxy.
+
+When enabled, eligible model-request diagnostics include `requestMetadata` after route/authentication admission, before identity resolution. This includes subsequent identity failures. Early admission failures, health, and catalog requests receive no observations. When disabled, the additional property is absent.
+
+Only these inputs are observed:
+
+| Input | Fields |
+|---|---|
+| Top-level `x-codex-turn-metadata` members | `thread_source`, `turn_trigger`, `request_kind`, `thread_id`, `session_id`, `parent_thread_id`, `forked_from_thread_id` |
+| Individual headers | `thread-id`, `session-id`, `x-codex-parent-thread-id` |
+
+Feature values are classified as `user`, `desktop_app`, `thread_title`, `thread_title_reconsideration`, `thread_description`, `thread_summary`, `compact`, `compaction`, or `subagent`. Every other string becomes `other`; its original value is never emitted, truncated, or hashed. Only syntactically valid UUID claims are emitted, normalized to lowercase and kept under their original field.
+
+The observation has `state` (`collected` or `unavailable`), `turnMetadata` with its container state/type and fixed `fields`, and a fixed `headers` object. Each field records `state`, `type`, and `conflict`, plus a validated `label` or `id` when valid. Field states distinguish `absent`, `valid`, `invalid`, `duplicate`, `unsupported`, and `unavailable`. Types distinguish string, number, boolean, null, array, object, absent, and unknown. The metadata container also distinguishes malformed JSON. Duplicate members, including escaped key spellings, emit no winning value. Nested structures are unsupported; unknown keys are excluded.
+
+`conflict` compares only corresponding valid header/metadata claims for thread, session, or parent: `none`, `different`, or `unassessed`. Distinct thread/session or parent/fork roles are not compared. A claimed parent or fork source does not establish project membership. Observation failures produce fixed unavailable states; they introduce no admission error and confer no routing authority. Existing identity validation still decides whether a request can proceed.
+
+These observations use the existing diagnostic stream and correlation IDs. Keep diagnostic files private; they contain permitted chat UUIDs. All other privacy exclusions still apply. Observation does not switch credentials, allow unresolved requests, or resolve auxiliary requests from timing or feature labels.
+
+For a controlled run, establish a direct baseline, enable observation, start/activate the proxy, restart the desktop when required, and exercise fresh chats in both disposable projects plus a follow-up. Restore direct configuration and the previous observation setting, restart as required, verify a direct response, and stop the proxy. Preserve whether the option was originally absent. Keep checkpoints and actual IDs outside Git, and publish only symbolic labels in a report. See the [auxiliary metadata validation report](docs/validation/auxiliary-request-metadata-validation.md) for observed evidence and limitations.
+
 ## Desktop validation procedure
 
 Use disposable projects named Router Validation A and Router Validation B with separate scratch folders. Add their IDs and the controller project's ID to private configuration. Keep folder-access changes confined to these scratch projects.
@@ -115,4 +138,4 @@ git diff --check
 
 Tests use temporary synthetic desktop state and a local HTTPS upstream. The committed TLS key/certificate are public, test-only fixtures for localhost. Production uses normal upstream certificate verification. Tests never contact ICA or retrieve real credentials.
 
-Scope and approval history are recorded in the [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md).
+Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), and the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md).

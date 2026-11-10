@@ -244,19 +244,19 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
 
 **Runtime interface:** Existing `serve`, `status`, `activate`, and `rollback` commands with the private configuration path. No new CLI command.
 
-- [ ] Document the default-off setting, restart requirement, observation schema and privacy boundaries, unchanged blocking, readiness behavior, and mode-independent rollback. Show `observeRequestMetadata: false` in the synthetic example. Retain the production startup command using `node --use-system-ca`.
-- [ ] Run `npm ci`, `npm test`, `node --check src/cli.js`, and `git diff --check`.
+- [x] Document the default-off setting, restart requirement, observation schema and privacy boundaries, unchanged blocking, readiness behavior, and mode-independent rollback. Show `observeRequestMetadata: false` in the synthetic example. Retain the production startup command using `node --use-system-ca`.
+- [x] Run `npm ci`, `npm test`, `node --check src/cli.js`, and `git diff --check`.
 
   **Expected:** Installation succeeds; all tests pass; syntax and whitespace checks succeed.
 
-- [ ] Verify the existing Project A, Project B, and controller mappings read-only. Verify direct configuration and proxy shutdown. Save a restrictive private checkpoint recording the prior observation property, including whether it was absent, and the direct provider URL.
-- [ ] Ask the user to establish fresh direct-response baselines in both disposable projects. Record completion without capturing prompt or response content.
-- [ ] Enable observation in private configuration, preserving other settings. Start the foreground proxy with restrictive private diagnostic output, activate through the existing helper, and have the user restart the desktop when required.
-- [ ] Have the user send first requests in one new chat in Project A and one new chat in Project B, close together. Then obtain a follow-up control in one of those chats. Do not create or message other chats through coordination tools.
-- [ ] Observe the resulting request families, including lookup failures and retries. If auxiliary requests or useful overlap are absent, repeat one paired fresh-chat round. Record an observed absence explicitly; do not infer a feature from timing alone.
-- [ ] Analyze allowlisted classifications and UUID claims against saved assignments and spawn relationships read-only. Keep actual IDs and relationship evidence private. Distinguish supported feature labels, origin claims, absent fields, unsupported structures, and inference.
-- [ ] Restore the direct provider URL using rollback and restore the prior observation property, preserving unrelated current settings. Have the user restart when required, verify a successful direct response, then stop the proxy. Confirm `state=direct` and `proxyReady=false`; preserve private recovery evidence.
-- [ ] Write the sanitized report using symbolic request/chat labels instead of actual IDs. Include app/engine/Node versions, mode, intervals, overlap, diagnostic classifications, relationship findings, recovery outcome, and remaining uncertainty.
+- [x] Verify the existing Project A, Project B, and controller mappings read-only. Verify direct configuration and proxy shutdown. Save a restrictive private checkpoint recording the prior observation property, including whether it was absent, and the direct provider URL.
+- [x] Ask the user to establish fresh direct-response baselines in both disposable projects. Record completion without capturing prompt or response content.
+- [x] Enable observation in private configuration, preserving other settings. Start the foreground proxy with restrictive private diagnostic output, activate through the existing helper, and have the user restart the desktop when required.
+- [x] Have the user send first requests in one new chat in Project A and one new chat in Project B, close together. Then obtain a follow-up control in one of those chats. Do not create or message other chats through coordination tools.
+- [x] Observe the resulting request families, including lookup failures and retries. If auxiliary requests or useful overlap are absent, repeat one paired fresh-chat round. Record an observed absence explicitly; do not infer a feature from timing alone.
+- [x] Analyze allowlisted classifications and UUID claims against saved assignments and spawn relationships read-only. Keep actual IDs and relationship evidence private. Distinguish supported feature labels, origin claims, absent fields, unsupported structures, and inference.
+- [x] Restore the direct provider URL using rollback and restore the prior observation property, preserving unrelated current settings. Have the user restart when required, verify a successful direct response, then stop the proxy. Confirm `state=direct` and `proxyReady=false`; preserve private recovery evidence.
+- [x] Write the sanitized report using symbolic request/chat labels instead of actual IDs. Include app/engine/Node versions, mode, intervals, overlap, diagnostic classifications, relationship findings, recovery outcome, and remaining uncertainty.
 
 **Required report cases:**
 
@@ -271,7 +271,7 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
 
 Classify execution cases as observed pass, observed failure, or not run. An absent or unsupported metadata format is a valid finding. Missing user actions leave live validation incomplete.
 
-- [ ] Commit documentation and the completed sanitized report with `docs: record auxiliary metadata validation findings`.
+- [x] Commit documentation and the completed sanitized report with `docs: record auxiliary metadata validation findings`.
 
 ### Task 5: Complete verification and sequential review [size: S | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 

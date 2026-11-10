@@ -5,7 +5,7 @@
 **Status:** APPROVED  
 **Created:** 2026-11-10  
 **Updated:** 2026-11-10  
-**Provenance:** Confirmed diagnostic-increment scope; subsequent interactive selection of an explicit validation mode, disabled by default. DRAFT specification approved by the user's “PLEASE IMPLEMENT THIS PLAN” message reproducing this specification after its presentation. That approval advances the pending specification gate only; a separate implementation plan has not yet been presented or approved.
+**Provenance:** Confirmed diagnostic-increment scope; subsequent interactive selection of an explicit validation mode, disabled by default. DRAFT specification approved by the user's “PLEASE IMPLEMENT THIS PLAN” message reproducing this specification after its presentation. That approval advanced the specification gate only. A later message reproducing the separately presented implementation plan approved that plan.
 
 ## 1. Problem and desired outcome
 
@@ -117,7 +117,7 @@ The report will explain what the observed evidence permits and which decisions a
 
 Design choices made by the author are the setting name, the explicit observation allowlist, and retaining existing diagnostics for early admission failures. Internal module names and output-field layout are left to implementation planning within this contract.
 
-At DRAFT presentation, the specification and plan for this new slug were both **MISSING**. This approved specification is now saved; the implementation plan remains **MISSING**. The previous approved artifacts remain unchanged. A fresh builder check identified the early-admission wording conflict, which this specification resolves.
+At DRAFT presentation, the specification and plan for this new slug were both **MISSING**. Both approved artifacts are now saved. The previous increment's approved artifacts remain unchanged. A fresh builder check identified the early-admission wording conflict, which this specification resolves.
 
 **Execution endpoint:** deliver and review the opt-in diagnostics, complete controlled desktop evidence and its sanitized report, restore direct operation and the prior observation setting, and stop before admission exceptions or credential selection.
 
