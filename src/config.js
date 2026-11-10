@@ -33,11 +33,14 @@ export async function loadRouterConfig(configPath) {
     "upstreamBaseUrl",
     "listenPort",
     "projectRoutes",
+    "observeRequestMetadata",
   ];
   if (
     !object(value) ||
     Object.keys(value).some((k) => !fields.includes(k)) ||
     value.schemaVersion !== 1 ||
+    (Object.hasOwn(value, "observeRequestMetadata") &&
+      typeof value.observeRequestMetadata !== "boolean") ||
     typeof value.codexHome !== "string" ||
     !isAbsolute(value.codexHome) ||
     !/^[a-zA-Z0-9_-]+$/.test(value.providerId ?? "") ||
@@ -75,6 +78,7 @@ export async function loadRouterConfig(configPath) {
     codexHome: resolve(value.codexHome),
     upstreamBaseUrl: upstream.href.replace(/\/$/, ""),
     listenPort: port,
+    observeRequestMetadata: value.observeRequestMetadata ?? false,
     projectRoutes: Object.freeze({ ...value.projectRoutes }),
   });
 }
@@ -87,5 +91,7 @@ export function configFingerprint(config) {
     config.listenPort,
     Object.entries(config.projectRoutes).sort(([a], [b]) => a.localeCompare(b)),
   ];
+  // Keep the existing default-mode fingerprint compatible with running proxies.
+  if (config.observeRequestMetadata === true) canonical.push("observeRequestMetadata:true");
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }

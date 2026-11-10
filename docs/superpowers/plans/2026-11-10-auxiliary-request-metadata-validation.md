@@ -106,11 +106,11 @@ Apply these rules:
 
 **Files:** The approved specification and this plan at the paths above.
 
-- [ ] After separate plan approval and leaving Plan Mode, save this plan and record its approval. Identify both artifacts and their separate approval messages before product changes.
-- [ ] Inspect tracked, staged, and untracked changes. Preserve all existing work.
-- [ ] Fetch `origin`; update `main` by fast-forward only. Stop on a concrete conflict rather than resetting or overwriting local work.
-- [ ] Create `feat/auxiliary-request-metadata-validation` in this checkout.
-- [ ] Commit only the approved artifacts with `docs: record approved metadata validation increment`.
+- [x] After separate plan approval and leaving Plan Mode, save this plan and record its approval. Identify both artifacts and their separate approval messages before product changes.
+- [x] Inspect tracked, staged, and untracked changes. Preserve all existing work.
+- [x] Fetch `origin`; update `main` by fast-forward only. Stop on a concrete conflict rather than resetting or overwriting local work.
+- [x] Create `feat/auxiliary-request-metadata-validation` in this checkout.
+- [x] Commit only the approved artifacts with `docs: record approved metadata validation increment`.
 
 **Expected:** Both approved artifacts are saved on the implementation branch; unrelated work remains preserved.
 
