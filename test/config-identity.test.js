@@ -6,6 +6,32 @@ import { loadRouterConfig, configFingerprint } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
 import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 
+test("unassigned title policy defaults off and accepts only booleans", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await loadRouterConfig(f.configPath)).allowUnassignedThreadTitles, false);
+  for (const mode of [true, false]) {
+    f.config.allowUnassignedThreadTitles = mode;
+    await f.saveConfig();
+    assert.equal((await loadRouterConfig(f.configPath)).allowUnassignedThreadTitles, mode);
+  }
+  for (const value of [null, "SECRET_SENTINEL", 0, 1, [], {}]) {
+    f.config.allowUnassignedThreadTitles = value;
+    await f.saveConfig();
+    await assert.rejects(loadRouterConfig(f.configPath), e =>
+      e.code === "CONFIG_INVALID" && !e.message.includes("SENTINEL"));
+  }
+});
+test("policy readiness preserves prior modes and separates all enabled combinations", async (t) => {
+  const f = await fixture(t), fingerprints = new Set();
+  for (const observeRequestMetadata of [false, true]) {
+    const old = {...f.config, observeRequestMetadata};
+    assert.equal(configFingerprint(old), configFingerprint({...old, allowUnassignedThreadTitles:false}));
+    for (const allowUnassignedThreadTitles of [false, true])
+      fingerprints.add(configFingerprint({...old, allowUnassignedThreadTitles}));
+  }
+  assert.equal(fingerprints.size, 4);
+});
+
 test("metadata observation defaults off and accepts only explicit booleans", async (t) => {
   const f = await fixture(t);
   assert.equal((await loadRouterConfig(f.configPath)).observeRequestMetadata, false);

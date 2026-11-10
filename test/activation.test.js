@@ -42,6 +42,15 @@ async function setup(t, { ready = true, mismatch = false } = {}) {
   };
 }
 for (const runningMode of [false, true]) {
+  test(`activation refuses opposite title policy (running ${runningMode})`, async (t) => {
+    const f = await setup(t);
+    f.config.allowUnassignedThreadTitles = runningMode;
+    await writeFile(f.configPath, JSON.stringify({...f.config, allowUnassignedThreadTitles: !runningMode}));
+    await assert.rejects(activate(f.configPath), {code:"PROXY_NOT_READY"});
+    assert.equal((await status(f.configPath)).proxyReady, false);
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
+    assert.ok(!(await readdir(f.dir)).includes("activation.json"));
+  });
   test(`activation refuses opposite observation mode (running ${runningMode})`, async (t) => {
     const f = await setup(t);
     f.config.observeRequestMetadata = runningMode;
@@ -50,6 +59,28 @@ for (const runningMode of [false, true]) {
     assert.equal((await status(f.configPath)).proxyReady, false);
     assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
     assert.ok(!(await readdir(f.dir)).includes("activation.json"));
+  });
+}
+for (const phase of ["active", "prepared"]) for (const replaced of [false, true])
+for (const flags of [
+  {allowUnassignedThreadTitles:true},
+  {observeRequestMetadata:true},
+  {allowUnassignedThreadTitles:true, observeRequestMetadata:true},
+]) {
+  test(`offline ${phase} recovery preserves edits with changed modes ${JSON.stringify(flags)} (replaced ${replaced})`, async (t) => {
+    const f = await setup(t);
+    await activate(f.configPath);
+    const record = JSON.parse(await readFile(f.recordPath,"utf8"));
+    assert.equal(Object.hasOwn(record,"allowUnassignedThreadTitles"), false);
+    record.phase = phase;
+    await writeFile(f.recordPath, JSON.stringify(record));
+    const edited = f.original.replace('"test-model"', '"changed-model"');
+    await writeFile(f.codexConfigPath, replaced ? edited.replace(f.config.upstreamBaseUrl,f.localUrl) : edited);
+    await writeFile(f.configPath, JSON.stringify({...f.config,...flags}));
+    await f.stopProxy();
+    assert.equal((await rollback(f.configPath)).state,"direct");
+    assert.equal(await readFile(f.codexConfigPath,"utf8"),edited);
+    assert.deepEqual(await status(f.configPath),{state:"direct",proxyReady:false,recoveryRequired:false});
   });
 }
 for (const phase of ["active", "prepared"]) {
