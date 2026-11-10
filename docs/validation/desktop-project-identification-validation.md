@@ -28,14 +28,16 @@ The test-only certificate/key are synthetic localhost fixtures. Actual endpoint 
 
 A separate read-only check of the actual local desktop state resolved the controller chat to its configured alias. This used a locally constructed identity header; it did not capture an outgoing desktop request or contact ICA. A real configuration status check reported direct configuration with no proxy active.
 
-The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. At preflight, on-disk Codex configuration remained direct. The user subsequently confirmed both baseline responses and the activation helper changed only the provider base URL after matching readiness. Desktop restart and routed requests remain pending.
+The disposable projects have been verified by their scratch-folder paths and explicitly mapped in private configuration. A foreground proxy running in an independent Terminal passes its matching readiness check. At preflight, on-disk Codex configuration remained direct. The user subsequently confirmed both baseline responses and the activation helper changed only the provider base URL after matching readiness. The user restarted the desktop app. The resumed controller chat was explicitly identified and completed an actual proxy-to-ICA request with HTTP 200. Provider-wide catalog requests also completed with HTTP 200. First requests in the disposable projects remain pending.
 
 ## Actual desktop-to-ICA matrix
 
 | Scenario | Result | Evidence |
 |---|---|---|
 | Direct baseline in disposable projects | Pass | User confirmed both direct baseline responses |
-| First routed requests in both projects | Not run | Proxy activated; desktop restart pending |
+| Resumed controller chat after restart | Pass | Explicit controller alias; proxy completion HTTP 200 |
+| Provider-wide model discovery | Pass | Catalog requests completed with HTTP 200 |
+| First routed requests in both projects | Not run | User requested to exercise fresh chats in each project |
 | Concurrent routed requests | Not run | Desktop requests pending |
 | Follow-up and resumed chats | Not run | Desktop requests pending |
 | Forked chat | Not run | User action pending |
@@ -44,7 +46,7 @@ The disposable projects have been verified by their scratch-folder paths and exp
 | Subagent attribution | Not run | Live delegation pending |
 | Restoration and direct response after rollback | Not run | Live activation has not occurred |
 
-The provider base URL is currently set to the loopback proxy, with the original authentication helper preserved. A private rollback record and backup exist. The router does not independently retrieve credentials. End-to-end routed behavior and restoration remain unverified.
+The provider base URL is currently set to the loopback proxy, with the original authentication helper preserved. A private rollback record and backup exist. The router does not independently retrieve credentials. End-to-end forwarding is observed for the controller chat; disposable-project lifecycle coverage and restoration remain unverified. Actual run diagnostics were checked for the fixed field allowlist, with no header or body fields.
 
 ## Completion boundary
 
