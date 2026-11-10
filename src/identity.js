@@ -140,8 +140,10 @@ export async function identifyProject(rawHeaders, config, { signal } = {}) {
         !(e instanceof RouterError) ||
         e.code !== "STATE_UNAVAILABLE" ||
         Date.now() >= deadline
-      )
+      ) {
+        if (e instanceof RouterError) e.threadId = ids.threadId;
         throw e;
+      }
       try {
         await delay(Math.min(50, deadline - Date.now()), undefined, { signal });
       } catch {

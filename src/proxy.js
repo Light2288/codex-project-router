@@ -92,18 +92,20 @@ export function createProxy(
       req.once("aborted", () => controller.abort());
       req.once("error", () => fail(new RouterError("CANCELLED")));
       res.once("error", () => {
+        finish(499, "CANCELLED");
         controller.abort();
         outgoing?.destroy();
         incoming?.destroy();
-        finish(499, "CANCELLED");
       });
       res.once("finish", () => finish(res.statusCode));
       res.once("close", () => {
         if (!res.writableFinished) {
+          // Destroying the upstream emits aborted synchronously. Record the
+          // initiating client cancellation before teardown can misclassify it.
+          finish(499, "CANCELLED");
           controller.abort();
           outgoing?.destroy();
           incoming?.destroy();
-          finish(499, "CANCELLED");
         }
       });
       try {
@@ -156,6 +158,8 @@ export function createProxy(
         );
         req.pipe(outgoing);
       } catch (e) {
+        if (!resolution && e instanceof RouterError)
+          resolution = { threadId: e.threadId };
         fail(e);
       }
     },

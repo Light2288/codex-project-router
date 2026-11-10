@@ -206,6 +206,18 @@ test("does not follow redirects or retry upstream responses", async (t) => {
   assert.equal((await request(f)).status, 307);
   assert.equal(f.calls.length, 1);
 });
+test("unresolved requests retain only the validated chat identifier for diagnosis", async (t) => {
+  const f = await setup(t, async (req, res) => res.end("unexpected"));
+  delete f.state["thread-project-assignments"][T1];
+  await f.saveState();
+  assert.equal((await request(f)).status, 503);
+  const completion = f.logs().trim().split("\n").map(JSON.parse)
+    .find((event) => event.event === "completed");
+  assert.equal(completion.threadId, T1);
+  assert.equal(completion.errorCode, "STATE_UNAVAILABLE");
+  assert.equal(f.calls.length, 0);
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
 test("removes connection-nominated hop headers and sets the upstream host", async (t) => {
   const f = await setup(t, async (req, res) => {
     res.setHeader("Connection", "x-private-hop");
@@ -272,7 +284,7 @@ test("slow clients receive the complete streamed body under backpressure", async
   assert.equal(result.body.length, size * 64);
   assert.ok(blocked);
 });
-test("client cancellation closes the upstream response", async (t) => {
+test("client cancellation closes the upstream response and is not reported as an upstream failure", async (t) => {
   let closed;
   const done = new Promise((r) => (closed = r));
   const f = await setup(t, async (req, res) => {
@@ -306,6 +318,10 @@ test("client cancellation closes the upstream response", async (t) => {
       throw new Error("upstream did not close");
     }),
   ]);
+  const completion = f.logs().trim().split("\n").map(JSON.parse)
+    .find((event) => event.event === "completed");
+  assert.equal(completion.status, 499);
+  assert.equal(completion.errorCode, "CANCELLED");
 });
 test("malformed HTTP input produces a fixed response without dumping the packet", async (t) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"));
