@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
-import { fixture, headers, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 const key = await readFile(
   new URL("./fixtures/tls/test-only-key.pem", import.meta.url),
 );
@@ -36,6 +36,7 @@ async function setupProxy(t, handler, options = {}) {
   const port = await listening(upstream, t);
   f.config.upstreamBaseUrl = `https://127.0.0.1:${port}/api/v1`;
   f.config.observeRequestMetadata = options.observeRequestMetadata ?? false;
+  f.config.allowUnassignedThreadTitles = options.allowUnassignedThreadTitles ?? false;
   const logs = new PassThrough();
   let output = "";
   logs.on("data", (c) => (output += c));
@@ -100,9 +101,116 @@ function request(
     req.end(body);
   });
 }
-for (const observationMode of [false, true]) {
-const test = (name, run) => nodeTest(`${name} (observation ${observationMode})`, run);
-const setup = (t, handler, options = {}) => setupProxy(t, handler, {...options, observeRequestMetadata: observationMode});
+for (const observationMode of [false, true]) for (const policyMode of [false,true]) {
+const test = (name, run) => nodeTest(`${name} (observation ${observationMode}, title policy ${policyMode})`, run);
+const setup = (t, handler, options = {}) => setupProxy(t, handler, {...options, observeRequestMetadata: observationMode, allowUnassignedThreadTitles:policyMode});
+test("exact initial titles forward only when enabled without project ownership",async t => {
+  const f=await setup(t, async (req,res) => {
+    res.writeHead(201,{"content-type":"text/event-stream"});
+    res.write("data: first\n\n");await delay(60);res.end("data: RESPONSE_SENTINEL\n\n");
+  });
+  const chunks=[];
+  const raw=titleHeaders(CHILD,{request_kind:"UNKNOWN_SENTINEL",unknown:"METADATA_SENTINEL"});
+  const result=await request(f,{raw,path:"/v1/responses?mode=unchanged",token:"TITLE_CREDENTIAL_SENTINEL",onChunk:c=>chunks.push(c.toString())});
+  assert.equal(result.status,policyMode ? 201 : 503);
+  const events=f.logs().trim().split("\n").map(JSON.parse);
+  if(policyMode) {
+    assert.equal(f.calls.length,1);
+    assert.equal(f.calls[0].url,"/api/v1/responses?mode=unchanged");
+    assert.equal(f.calls[0].headers.authorization,"Bearer TITLE_CREDENTIAL_SENTINEL");
+    assert.equal(f.calls[0].headers["x-codex-turn-metadata"],raw[5]);
+    assert.equal(f.calls[0].body,'{"model":"unchanged","input":"PROMPT_SENTINEL"}');
+    assert.ok(chunks.length>=2);
+    assert.equal(result.body,"data: first\n\ndata: RESPONSE_SENTINEL\n\n");
+    for(const event of events) {
+      assert.equal(event.source,"unassigned_title");assert.equal(event.threadId,CHILD);
+      for(const field of ["projectId","ownerThreadId","routeAlias"]) assert.equal(Object.hasOwn(event,field),false);
+    }
+  } else {assert.equal(f.calls.length,0);assert.equal(events.at(-1).source,undefined);}
+  for(const event of events) assert.equal(Object.hasOwn(event,"requestMetadata"),observationMode);
+  assert.doesNotMatch(f.logs(),/SENTINEL/);
+});
+test("title labels preserve mapped priority and cannot admit known identities",async t => {
+  const f=await setup(t,async(req,res)=>res.end("mapped"));
+  const mapped=await request(f,{raw:titleHeaders(T1)});
+  assert.equal(mapped.status,200);
+  assert.equal(JSON.parse(f.logs().trim().split("\n").at(-1)).projectId,P1);
+  const duplicateFeature=["thread-id",T1,"session-id",T1,"x-codex-turn-metadata",`{"thread_source":"user","thread_source":"thread_title"}`];
+  assert.equal((await request(f,{raw:duplicateFeature})).status,200);
+  delete f.config.projectRoutes[P1];
+  assert.equal((await request(f,{raw:titleHeaders(T1)})).status,422);
+  f.state["projectless-thread-ids"].push(CHILD);await f.saveState();
+  assert.equal((await request(f,{raw:titleHeaders()})).status,422);
+  f.state["projectless-thread-ids"]=[];await f.saveState();f.thread(CHILD);
+  assert.equal((await request(f,{raw:titleHeaders()})).status,503);
+  const orphan="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  f.edge(orphan,T2);
+  assert.equal((await request(f,{raw:titleHeaders(orphan)})).status,503);
+  assert.equal(f.calls.length,2);
+});
+test("title markers never bypass routes, authentication, identity or state failures",async t => {
+  const f=await setup(t,async(req,res)=>res.end("unexpected"));
+  for(const [options,status] of [
+    [{path:"/v1/responses/compact",raw:titleHeaders()},503],
+    [{authenticated:false,raw:titleHeaders()},401],
+    [{method:"GET",raw:titleHeaders(),body:""},404],
+    [{raw:[...titleHeaders(),"thread-id",CHILD]},400],
+    [{raw:titleHeaders(CHILD,{thread_id:T1})},409],
+    [{raw:titleHeaders(CHILD,{forked_from_thread_id:T1})},503],
+    [{raw:titleHeaders(CHILD,{parent_thread_id:null})},503],
+  ]) {
+    assert.equal((await request(f,options)).status,status);
+  }
+  await writeFile(f.statePath,"{STATE_SENTINEL");
+  assert.equal((await request(f,{raw:titleHeaders()})).status,503);
+  assert.equal(f.calls.length,0);
+  assert.ok(f.logs().trim().split("\n").map(JSON.parse).every(e=>e.source!=="unassigned_title"));
+  assert.doesNotMatch(f.logs(),/SENTINEL/);
+});
+if(policyMode) {
+test("mapped and multiple title streams overlap with independent credentials and observations",async t => {
+  let active=0,max=0;
+  const f=await setup(t,async(req,res)=>{max=Math.max(max,++active);res.write("first");await delay(100);res.end("last");active--;});
+  const other="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const results=await Promise.all([
+    request(f,{raw:headers(T1),token:"MAPPED_KEY"}),
+    request(f,{raw:titleHeaders(),token:"TITLE_A_KEY"}),
+    request(f,{raw:titleHeaders(other),token:"TITLE_B_KEY"}),
+  ]);
+  assert.deepEqual(results.map(r=>r.body),["firstlast","firstlast","firstlast"]);
+  assert.equal(max,3);
+  assert.deepEqual(f.calls.map(c=>c.headers.authorization).sort(),["Bearer MAPPED_KEY","Bearer TITLE_A_KEY","Bearer TITLE_B_KEY"]);
+  const starts=f.logs().trim().split("\n").map(JSON.parse).filter(e=>e.event==="started");
+  assert.equal(starts.filter(e=>e.source==="unassigned_title").length,2);
+  assert.equal(starts.find(e=>e.threadId===T1).projectId,P1);
+  for(const event of starts) if(observationMode) assert.equal(event.requestMetadata.headers["thread-id"].id,event.threadId);
+  assert.doesNotMatch(f.logs(),/MAPPED_KEY|TITLE_A_KEY|TITLE_B_KEY|SENTINEL/);
+});
+test("title cancellation releases upstream work and lookup cancellation makes zero calls",async t => {
+  let closed;const done=new Promise(r=>closed=r);
+  const f=await setup(t,async(req,res)=>{res.on("close",closed);res.write("first");});
+  await new Promise((resolve,reject)=>{
+    const req=http.request({host:"127.0.0.1",port:f.proxyPort,path:"/v1/responses",method:"POST",headers:["Host","127.0.0.1","Authorization","Bearer CREDENTIAL_SENTINEL",...titleHeaders()]},
+      res=>res.once("data",()=>{res.destroy();resolve();}));
+    req.on("error",reject);req.end("{}");
+  });
+  await Promise.race([done,delay(1500).then(()=>{throw new Error("title upstream retained");})]);
+  const completed=f.logs().trim().split("\n").map(JSON.parse).find(e=>e.event==="completed");
+  assert.equal(completed.source,"unassigned_title");assert.equal(completed.errorCode,"CANCELLED");
+  await writeFile(f.statePath,"{");
+  await new Promise(resolve=>{
+    const req=http.request({host:"127.0.0.1",port:f.proxyPort,path:"/v1/responses",method:"POST",headers:["Host","127.0.0.1","Authorization","Bearer CREDENTIAL_SENTINEL",...titleHeaders()]});
+    req.on("error",resolve);req.end("{}");setTimeout(()=>req.destroy(),50);
+  });
+  await delay(50);assert.equal(f.calls.length,1);
+  assert.equal(JSON.parse(f.logs().trim().split("\n").at(-1)).errorCode,"CANCELLED");
+});
+test("title redirects are not followed or retried",async t => {
+  const f=await setup(t,async(req,res)=>{res.writeHead(307,{location:"https://example.invalid/ignored"});res.end("redirect");});
+  assert.equal((await request(f,{raw:titleHeaders()})).status,307);
+  assert.equal(f.calls.length,1);
+});
+}
 test("overlapping requests preserve identities, original body bytes and per-request credentials", async (t) => {
   let active = 0,
     max = 0,

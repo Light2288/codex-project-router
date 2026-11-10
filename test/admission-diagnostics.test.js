@@ -94,3 +94,12 @@ test("diagnostics independently reject forged observation content", () => {
   assert.equal(JSON.parse(output).requestMetadata.state, "unavailable");
   assert.doesNotMatch(output, /SENTINEL/);
 });
+test("unattributed title diagnostics never fabricate project ownership", () => {
+  let output="";
+  const stream=new Writable({write(chunk,encoding,cb){output+=chunk;cb();}});
+  emitDiagnostic(stream,{event:"started",source:"unassigned_title",threadId:T1,ownerThreadId:T1,projectId:P1,routeAlias:"route-a",body:"PROMPT_SENTINEL",authorization:"KEY_SENTINEL"});
+  const event=JSON.parse(output);
+  assert.equal(event.source,"unassigned_title");assert.equal(event.threadId,T1);
+  for(const field of ["ownerThreadId","projectId","routeAlias"]) assert.equal(Object.hasOwn(event,field),false);
+  assert.doesNotMatch(output,/SENTINEL/);
+});

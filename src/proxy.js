@@ -137,6 +137,7 @@ export function createProxy(
           admission.kind === "model"
             ? await identifyProject(req.rawHeaders, config, {
                 signal: controller.signal,
+                allowUnassignedTitle: operation === "responses",
               })
             : { source: "catalog" };
         if (controller.signal.aborted || res.destroyed) return;

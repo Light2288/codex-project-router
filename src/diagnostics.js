@@ -8,15 +8,16 @@ export function emitDiagnostic(stream, event) {
       ? event.event
       : "rejected",
   };
-  for (const key of ["requestId", "threadId", "ownerThreadId", "projectId"])
+  const unattributedTitle = event.source === "unassigned_title";
+  for (const key of unattributedTitle ? ["requestId", "threadId"] : ["requestId", "threadId", "ownerThreadId", "projectId"])
     if (typeof event[key] === "string" && UUID.test(event[key]))
       record[key] = event[key];
   if (
-    typeof event.routeAlias === "string" &&
+    !unattributedTitle && typeof event.routeAlias === "string" &&
     /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(event.routeAlias)
   )
     record.routeAlias = event.routeAlias;
-  if (["direct", "ancestor", "catalog"].includes(event.source))
+  if (["direct", "ancestor", "catalog", "unassigned_title"].includes(event.source))
     record.source = event.source;
   if (["responses", "compact", "catalog", "health"].includes(event.operation))
     record.operation = event.operation;
