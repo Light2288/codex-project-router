@@ -10,13 +10,20 @@
 
 **Spec:** docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md
 
-**Slug:** `auxiliary-request-metadata-validation`  
-**Status:** APPROVED  
-**Created:** 2026-11-10  
-**Updated:** 2026-11-10  
-**Execution tier:** full  
-**Implementation model role:** full  
-**Execution method:** Native  
+**Slug:** `auxiliary-request-metadata-validation`
+
+**Status:** APPROVED
+
+**Created:** 2026-11-10
+
+**Updated:** 2026-11-10
+
+**Execution tier:** full
+
+**Implementation model role:** full
+
+**Execution method:** Native
+
 **Provenance:** Approved specification; Native selected through interactive clarification. Separately approved by the user's “PLEASE IMPLEMENT THIS PLAN” message reproducing this implementation plan after presentation.
 
 **Destination:** `/Users/davide/Personal/Projects/codex-project-router/docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md`
@@ -101,7 +108,8 @@ Apply these rules:
 
 ### Task 0: Preserve approvals and prepare the branch [size: S | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data]
 
-**Acceptance criteria:** AC-08  
+**Acceptance criteria:** AC-08
+
 **Risk:** Preserve approved artifacts and unrelated local work during branch preparation.
 
 **Files:** The approved specification and this plan at the paths above.
@@ -233,7 +241,8 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
 
 ### Task 4: Document and complete controlled desktop validation [size: M | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data]
 
-**Acceptance criteria:** AC-05, AC-06, AC-07, AC-08  
+**Acceptance criteria:** AC-05, AC-06, AC-07, AC-08
+
 **Risk:** Preserve private runtime configuration and recovery evidence while temporarily activating observation.
 
 **Files:**
@@ -275,19 +284,20 @@ Classify execution cases as observed pass, observed failure, or not run. An abse
 
 ### Task 5: Complete verification and sequential review [size: S | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 
-**Acceptance criteria:** AC-01–AC-08  
+**Acceptance criteria:** AC-01–AC-08
+
 **Risk:** Ensure the delivered evidence and implementation satisfy the entire increment.
 
 **Inputs:** Approved artifacts, complete branch diff, changed files, observed test results, sanitized live report, and the Native execution ledger.
 
-- [ ] Run `npm test`, `node --check src/cli.js`, and `git diff --check`.
+- [x] Run `npm test`, `node --check src/cli.js`, and `git diff --check`.
 
   **Expected:** All checks pass. Retain exact commands, exit statuses, and decisive output for review.
 
-- [ ] Invoke `personal-workflows:code-review` once in integrated mode as the sole whole-branch review gate: specification review first, then quality review only after a specification PASS, using the same finalized review package.
-- [ ] Handle findings under the Native execution policy: one verified fix pass for actionable Critical/Important findings, targeted RED→GREEN tests, then the full suite. Record rulings and deferred minor findings; do not dispatch a second generic review.
-- [ ] Commit any verified fixes with an appropriate conventional message. Confirm the branch contains the approved artifacts, implementation, documentation, and sanitized report, with private evidence excluded.
-- [ ] Report observed results, limitations, review outcomes, recovery status, and implications for a later handling increment. Leave push and merge pending.
+- [x] Invoke `personal-workflows:code-review` once in integrated mode as the sole whole-branch review gate: specification review first, then quality review only after a specification PASS, using the same finalized review package.
+- [x] Handle findings under the Native execution policy: one verified fix pass for actionable Critical/Important findings, targeted RED→GREEN tests, then the full suite. Record rulings and deferred minor findings; do not dispatch a second generic review.
+- [x] Commit any verified fixes with an appropriate conventional message. Confirm the branch contains the approved artifacts, implementation, documentation, and sanitized report, with private evidence excluded.
+- [x] Report observed results, limitations, review outcomes, recovery status, and implications for a later handling increment. Leave push and merge pending.
 
 ## Traceability and handoff
 
@@ -304,5 +314,15 @@ Classify execution cases as observed pass, observed failure, or not run. An abse
 
 **Execution endpoint:** Deliver reviewed opt-in observations and desktop findings, restore direct operation and the prior observation setting, verify a direct response, stop the proxy, and stop before changing auxiliary-request admission or selecting credentials.
 
-**Current stage:** Stage 4 — implementation, separately approved.  
+**Current stage:** Approved increment complete; push and branch integration pending.
+
 **Approval evidence:** The earlier user message reproducing the DRAFT specification approved that specification; the later user message reproducing this implementation plan separately approved this plan. Both are saved before product-code changes.
+
+## Completion evidence
+
+- Implementation and controlled desktop validation completed on 2026-11-10. `npm ci`, `npm test` (136/136), `node --check src/cli.js`, and `git diff --check` passed.
+- Sequential integrated review of product/documentation commit `cb77ec60ba2cdb5e2751e4f5822c147391cb76a6`: specification PASS, then quality PASS with no findings. The specification reviewer retracted an initial code-reading concern after clarification against the same unchanged package. No fix pass was needed; no rulings or deferred minor findings remain.
+- Reviewed package SHA-256: `896e293d360dd4913c708f28d498cdeae6c651d51e0e2fad6455ea572d54e417`.
+- Live evidence is recorded in `docs/validation/auxiliary-request-metadata-validation.md`. Title-generation labels were observed; no usable project origin was established. Unresolved requests remain blocked.
+- Original direct URL and original router configuration values restored, prior observation omission restored, desktop restarted, direct response confirmed, proxy stopped, and no listener remains. Private recovery evidence is preserved outside Git.
+- Existing checkout and local `feat/auxiliary-request-metadata-validation` branch retained. No push, merge, admission exception, or credential selection performed.

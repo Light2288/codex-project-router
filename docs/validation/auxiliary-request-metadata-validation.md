@@ -1,8 +1,11 @@
 # Auxiliary request metadata validation
 
-**Date:** 2026-11-10  
-**Status:** Desktop validation complete  
-**Observation mode:** Enabled only for the controlled run; the prior setting was restored afterward.  
+**Date:** 2026-11-10
+
+**Status:** Desktop validation complete
+
+**Observation mode:** Enabled only for the controlled run; the prior setting was restored afterward.
+
 **Credential behavior:** Every admitted request used the caller's existing global credential. No credential selection or admission exception was added.
 
 ## Result
@@ -22,6 +25,8 @@ The title-generation explanation for the previous run remains a historical infer
 | Bundled engine | `0.167.0-alpha.3.2` |
 
 The desktop and engine versions differ from the previous validation run. Before activation, `npm ci` succeeded, `npm test` passed 136 tests, and `node --check src/cli.js` and `git diff --check` succeeded. Tests cover privacy sentinels, escaped duplicates, unsupported values, readiness and offline recovery, and admission/forwarding/streaming/concurrency/cancellation with observation enabled and disabled.
+
+The final full suite also passed 136/136 tests. Sequential specification and quality reviews passed against product/documentation commit `cb77ec6`, with no remaining findings. Final checklist and lifecycle records were updated afterward.
 
 ## Live validation
 

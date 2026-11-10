@@ -1,10 +1,15 @@
 # Auxiliary request metadata validation
 
-**Slug:** `auxiliary-request-metadata-validation`  
-**Type:** feature  
-**Status:** APPROVED  
-**Created:** 2026-11-10  
-**Updated:** 2026-11-10  
+**Slug:** `auxiliary-request-metadata-validation`
+
+**Type:** feature
+
+**Status:** APPROVED
+
+**Created:** 2026-11-10
+
+**Updated:** 2026-11-10
+
 **Provenance:** Confirmed diagnostic-increment scope; subsequent interactive selection of an explicit validation mode, disabled by default. DRAFT specification approved by the user's “PLEASE IMPLEMENT THIS PLAN” message reproducing this specification after its presentation. That approval advanced the specification gate only. A later message reproducing the separately presented implementation plan approved that plan.
 
 ## 1. Problem and desired outcome
@@ -121,5 +126,6 @@ At DRAFT presentation, the specification and plan for this new slug were both **
 
 **Execution endpoint:** deliver and review the opt-in diagnostics, complete controlled desktop evidence and its sanitized report, restore direct operation and the prior observation setting, and stop before admission exceptions or credential selection.
 
-**Current stage:** Stage 4 — implementation.  
+**Current stage:** Approved increment complete; push and branch integration pending.
+
 **Approval evidence:** Specification approval authorized planning only. The user subsequently approved the separately presented implementation plan in a later “PLEASE IMPLEMENT THIS PLAN” message reproducing that plan. Both approved artifacts are saved before product-code changes.
