@@ -129,7 +129,7 @@ Apply these rules:
 - `configFingerprint(config)` treats omitted and `false` identically; `true` differs.
 - Activation, status, rollback, CLI signatures, and activation-record schema remain unchanged.
 
-- [ ] Write configuration tests for omission, explicit booleans, and invalid values including `null`, strings, numbers, arrays, and objects. Check sanitized errors with sentinels.
+- [x] Write configuration tests for omission, explicit booleans, and invalid values including `null`, strings, numbers, arrays, and objects. Check sanitized errors with sentinels.
 
   ```js
   assert.equal(loaded.observeRequestMetadata, false);
@@ -137,17 +137,17 @@ Apply these rules:
   assert.notEqual(configFingerprint(off), configFingerprint(on));
   ```
 
-- [ ] Add activation tests for enabled/disabled readiness mismatches in both directions, unchanged TOML on failed activation, and rollback after a mode change with the proxy unavailable. Cover existing active and interrupted `prepared` records and preservation of unrelated edits.
-- [ ] Run `node --test test/config-identity.test.js test/activation.test.js`.
+- [x] Add activation tests for enabled/disabled readiness mismatches in both directions, unchanged TOML on failed activation, and rollback after a mode change with the proxy unavailable. Cover existing active and interrupted `prepared` records and preservation of unrelated edits.
+- [x] Run `node --test test/config-identity.test.js test/activation.test.js`.
 
   **Expected:** New assertions fail because the option is unsupported and fingerprints do not distinguish modes.
 
-- [ ] Accept the optional boolean and normalize omission to `false`. Preserve the existing disabled-mode fingerprint by appending an observation-mode marker to its canonical input only when enabled. Keep recovery-record validation independent of observation mode.
-- [ ] Run the same command.
+- [x] Accept the optional boolean and normalize omission to `false`. Preserve the existing disabled-mode fingerprint by appending an observation-mode marker to its canonical input only when enabled. Keep recovery-record validation independent of observation mode.
+- [x] Run the same command.
 
   **Expected:** All cases pass, including existing identity tests and recovery records without any new fields.
 
-- [ ] Commit with `feat: add opt-in metadata observation configuration`.
+- [x] Commit with `feat: add opt-in metadata observation configuration`.
 
 ### Task 2: Collect and sanitize allowlisted observations [size: M | risk: security | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: security]
 
@@ -167,10 +167,10 @@ Apply these rules:
 
 Both new helpers are synchronous, perform no I/O, and return only the contract above.
 
-- [ ] Write table-driven tests for every allowed field, feature label, JSON type, absence, invalid UUID, uppercase UUID normalization, and unknown feature value.
-- [ ] Add duplicate tests with identical and differing values, escaped key spellings, case-insensitive header names, nested lookalikes, braces and escaped quotes inside strings, and duplicate parent headers. Verify malformed and non-object metadata roots.
-- [ ] Add conflict tests for same-role header/metadata pairs. Assert that differing current/session IDs are retained separately rather than classified as a same-role conflict.
-- [ ] Add sentinel tests for unknown keys and values, unsupported nested objects, malformed JSON, and an unexpected collection exception induced by a throwing synthetic input. Exercise the diagnostic writer directly with forged observations and extra properties.
+- [x] Write table-driven tests for every allowed field, feature label, JSON type, absence, invalid UUID, uppercase UUID normalization, and unknown feature value.
+- [x] Add duplicate tests with identical and differing values, escaped key spellings, case-insensitive header names, nested lookalikes, braces and escaped quotes inside strings, and duplicate parent headers. Verify malformed and non-object metadata roots.
+- [x] Add conflict tests for same-role header/metadata pairs. Assert that differing current/session IDs are retained separately rather than classified as a same-role conflict.
+- [x] Add sentinel tests for unknown keys and values, unsupported nested objects, malformed JSON, and an unexpected collection exception induced by a throwing synthetic input. Exercise the diagnostic writer directly with forged observations and extra properties.
 
   ```js
   assert.equal(observation.turnMetadata.fields.request_kind.label, "other");
@@ -179,17 +179,17 @@ Both new helpers are synchronous, perform no I/O, and return only the contract a
   assert.doesNotMatch(JSON.stringify(observation), /SENTINEL/);
   ```
 
-- [ ] Run `node --test test/request-metadata.test.js test/admission-diagnostics.test.js`.
+- [x] Run `node --test test/request-metadata.test.js test/admission-diagnostics.test.js`.
 
   **Expected:** Failures for the missing collector and unsupported diagnostic property.
 
-- [ ] Implement collection and sanitization. Validate JSON syntax, then detect duplicate allowlisted top-level members using decoded key tokens and structural depth before consuming parsed field values. Use the existing identity parser’s tokenization approach without refactoring identity resolution. Inspect only own allowlisted fields.
-- [ ] Extend the diagnostic writer to rebuild sanitized observations only when the optional property is supplied. Preserve all existing diagnostic fields and error handling.
-- [ ] Run the same command.
+- [x] Implement collection and sanitization. Validate JSON syntax, then detect duplicate allowlisted top-level members using decoded key tokens and structural depth before consuming parsed field values. Use the existing identity parser’s tokenization approach without refactoring identity resolution. Inspect only own allowlisted fields.
+- [x] Extend the diagnostic writer to rebuild sanitized observations only when the optional property is supplied. Preserve all existing diagnostic fields and error handling.
+- [x] Run the same command.
 
   **Expected:** All tests pass; no sentinel, arbitrary key, invalid claim, or parser exception reaches emitted diagnostics.
 
-- [ ] Commit with `feat: collect private request metadata observations`.
+- [x] Commit with `feat: collect private request metadata observations`.
 
 ### Task 3: Integrate observations with unchanged proxy behavior [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,auth]
 
