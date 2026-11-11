@@ -318,7 +318,7 @@ export async function rollback(configPath) {
     return { state: "direct", changed, restartRequired: changed };
   });
 }
-export async function status(configPath) {
+export async function inspectActivation(configPath) {
   try {
     const c = await context(configPath),
       file = await ownedFile(c.codexPath),
@@ -337,12 +337,28 @@ export async function status(configPath) {
         : p.url === (existing?.record.originalBaseUrl ?? c.cfg.upstreamBaseUrl)
           ? "direct"
           : "conflict";
+    const recordPhase = existing?.record.phase ?? "none";
     return {
-      state,
-      proxyReady,
-      recoveryRequired: existing?.record.phase === "prepared",
+      context: {
+        configPath: c.configPath,
+        codexHome: c.cfg.codexHome,
+        providerId: c.cfg.providerId,
+        listenPort: c.cfg.listenPort,
+      },
+      // Only operational identity contributes: never hash authentication data
+      // or raw provider/configuration bytes into comparison metadata.
+      revision: digest(JSON.stringify([
+        configFingerprint(c.cfg), state,
+        existing ? [existing.record.routerConfigPath, existing.record.codexConfigPath,
+          existing.record.providerId, existing.record.backupFile, recordPhase] : null,
+      ])),
+      recordPhase,
+      status: { state, proxyReady, recoveryRequired: recordPhase === "prepared" },
     };
   } catch (e) {
     throw e instanceof RouterError ? e : new RouterError("STORAGE_FAILED");
   }
+}
+export async function status(configPath) {
+  return (await inspectActivation(configPath)).status;
 }

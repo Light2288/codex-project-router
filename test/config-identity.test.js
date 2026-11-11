@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, mkdir, copyFile, symlink } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadRouterConfig, configFingerprint } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
@@ -19,6 +21,29 @@ const routeTarget = (credential = credentialReference()) => ({
 const credentialRouting = () => ({
   globalCredential: credentialReference(),
   routeTargets: { "route-a": routeTarget() },
+});
+
+test("relocated runtime preserves private configuration containment", async t => {
+  const f = await fixture(t);
+  const runtime = join(f.dir, "relocated-runtime");
+  await mkdir(join(runtime, "src"), { recursive: true });
+  await writeFile(join(runtime, "package.json"), '{"type":"module"}');
+  for (const file of ["config.js", "errors.js"])
+    await copyFile(new URL("../src/" + file, import.meta.url), join(runtime, "src", file));
+  const relocated = await import(pathToFileURL(join(runtime, "src", "config.js")));
+  assert.equal((await relocated.loadRouterConfig(f.configPath)).providerId, "test_gateway");
+  for (const marker of ["git-directory", "git-file", "Application.app"]) {
+    const enclosing = join(f.dir, marker), nested = join(enclosing, "deep", "private");
+    await mkdir(nested, { recursive: true });
+    if (marker === "git-directory") await mkdir(join(enclosing, ".git"));
+    if (marker === "git-file") await writeFile(join(enclosing, ".git"), "gitdir: elsewhere");
+    const path = join(nested, "router.json"), link = join(f.dir, marker + "-external.json");
+    await writeFile(path, JSON.stringify(f.config), { mode: 0o600 });
+    await symlink(path, link);
+    for (const load of [loadRouterConfig, relocated.loadRouterConfig])
+      for (const candidate of [path, link])
+        await assert.rejects(load(candidate), { code: "CONFIG_INVALID" });
+  }
 });
 
 test("legacy loading omits credential routing and enabled targets are deeply frozen", async (t) => {

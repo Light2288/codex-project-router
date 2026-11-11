@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import { once } from "node:events";
-import { readFile, writeFile, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { activate, rollback, status } from "../src/activation.js";
+import * as activation from "../src/activation.js";
 import { configFingerprint } from "../src/config.js";
 import { createProxy } from "../src/proxy.js";
 import { fixture } from "./helpers/fixtures.js";
@@ -74,6 +75,35 @@ const credentialRouting = (upstreamBaseUrl = "https://project.example.invalid/re
     upstreamBaseUrl,
     credential: { keychainPath: "/nonexistent/synthetic.keychain-db", service: "synthetic-project", account: "synthetic-account" },
   } },
+});
+test("activation inspection returns context and revision while preserving public status", async t => {
+  const f = await setup(t);
+  assert.equal(typeof activation.inspectActivation, "function");
+  const inspection = await activation.inspectActivation(f.configPath);
+  assert.deepEqual(inspection.context, { configPath: await realpath(f.configPath), codexHome: f.dir, providerId: "test_gateway", listenPort: f.config.listenPort });
+  assert.deepEqual(inspection.status, await status(f.configPath));
+  assert.equal(inspection.recordPhase, "none");
+  assert.match(inspection.revision, /^[a-f0-9]{64}$/);
+  await activate(f.configPath);
+  const active = await activation.inspectActivation(f.configPath);
+  assert.notEqual(active.revision, inspection.revision);
+  assert.equal(active.recordPhase, "active");
+  assert.equal(active.status.state, "active");
+  assert.doesNotMatch(JSON.stringify(active), /SECRET_SENTINEL|gateway\.example/);
+});
+test("inspection revision excludes credential material in a conflicting provider URL", async t => {
+  const f = await setup(t);
+  const direct = await activation.inspectActivation(f.configPath);
+  const revisions = [];
+  for (const secret of ["FIRST_SECRET_SENTINEL", "SECOND_SECRET_SENTINEL"]) {
+    await writeFile(f.codexConfigPath, f.original.replace(f.config.upstreamBaseUrl, `https://user:${secret}@unexpected.example.invalid/v1?key=${secret}`));
+    const inspection = await activation.inspectActivation(f.configPath);
+    assert.equal(inspection.status.state, "conflict");
+    assert.notEqual(inspection.revision, direct.revision);
+    assert.doesNotMatch(JSON.stringify(inspection), /SECRET_SENTINEL/);
+    revisions.push(inspection.revision);
+  }
+  assert.equal(revisions[0], revisions[1]);
 });
 test("real proxy startup health status activation and recovery avoid credentials and destination preflight", async (t) => {
   let credentialReads = 0;
