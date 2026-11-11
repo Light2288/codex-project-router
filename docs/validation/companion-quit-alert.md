@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: implementation and automated verification passed; native visibility observations partially complete; two human observations and final sequential review pending.
+Status: implementation and automated verification passed; native visibility observations partially complete; Escape/minimized check confirmed by the user; usability revision proposed and final sequential review pending.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -105,12 +105,26 @@ package fixture identified the omission. That tracked synthetic process was
 stopped and removed, and only the one-off fixture was corrected. Product code
 and real private state were untouched.
 
-A native interactive request asks the user to check that Keep Running preserves
-closed Controls and Escape preserves minimized Controls using the synthetic
-companion's menu-bar Quit. Those two observations and final tracked-process
-cleanup remain pending. Raw fixture paths/checkpoints stay outside Git. No
-human report has yet been inferred from elapsed time, and no whole-increment
-completion is claimed.
+The user requested a repeat of Escape. The earlier native PID was absent; its
+remaining temporary fixture was cleaned. A new signed isolated fixture was
+launched with the same protections and positive synthetic instance-lock proof.
+The user explicitly reported: **Alert closes; window stays minimized** after
+minimizing Controls, choosing menu-bar Quit and pressing Escape. This establishes
+the human-observed Escape/minimized result. Closed-window preservation has not
+been separately confirmed by an explicit user report and remains qualified.
+The repeated fixture's router/provider/journal verification passed unchanged,
+its port was empty, and its exact tracked process exited during cleanup; its
+temporary directory was removed.
+
+The user also reported three usability problems: the alert does not clearly
+explain how to become able to quit; Open Controls does not explain the next
+action; and that label is confusing when Controls is already open. These are
+feedback on the approved copy/flow, not a claimed failure of Escape or the
+safety rules. A targeted revision is being proposed through the existing
+scope/specification/plan gates. No revised wording/navigation has been
+implemented or approved, and the final integrated review has not been opened.
+Raw fixture paths/checkpoints stay outside Git. No whole-increment completion
+is claimed.
 
 ## Operational-state safeguards
 
