@@ -337,8 +337,11 @@ test(`${cancellation} during ${stage} retrieval reaps real child work and preser
 test("credential routing rejects global mismatch before broken state or observations", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
     credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
   });
+  assert.notEqual(f.globalBaseUrl, f.projectBaseUrl);
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
   await writeFile(f.statePath, "{STATE_SENTINEL");
   for (const token of ["WRONG_CREDENTIAL_SENTINEL", "global_credential_sentinel", "GLOBAL_CREDENTIAL_SENTINEL_EXTRA"]) {
     const result = await request(f, {token, raw: titleHeaders()});
@@ -348,6 +351,7 @@ test("credential routing rejects global mismatch before broken state or observat
   }
   assert.deepEqual(reads, [globalReference, globalReference, globalReference]);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
   for (const event of f.logs().trim().split("\n").map(JSON.parse)) {
     assert.equal(event.event, "completed");
     for (const field of ["requestMetadata", "threadId", "projectId", "source"])
@@ -358,15 +362,19 @@ test("credential routing rejects global mismatch before broken state or observat
 test("global credential failure precedes identity lookup and project reads", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
     credentialRouting: credentialRouting,
     credentialReader: async reference => { reads.push(reference); throw new RouterError("CREDENTIAL_UNAVAILABLE"); },
   });
+  assert.notEqual(f.globalBaseUrl, f.projectBaseUrl);
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
   await writeFile(f.statePath, "{STATE_SENTINEL");
   const result = await request(f, {raw: titleHeaders(), token: "GLOBAL_CREDENTIAL_SENTINEL"});
   assert.equal(result.status, 503);
   assert.equal(JSON.parse(result.body).error.code, "CREDENTIAL_UNAVAILABLE");
   assert.deepEqual(reads, [globalReference]);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
   const event = JSON.parse(f.logs().trim());
   assert.equal(event.event, "completed");
   for (const field of ["requestMetadata", "threadId", "projectId", "source"])
