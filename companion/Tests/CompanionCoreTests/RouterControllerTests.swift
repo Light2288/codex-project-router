@@ -478,6 +478,116 @@ import XCTest
         XCTAssertTrue(controller.needsManualListenerCleanup)
         XCTAssertNil(controller.inspection?.revision)
     }
+
+    func testHeldStopReadinessLossDoesNotReopenRecovery() async throws {
+        // Refresh can observe the requested teardown before stop's independent port result returns.
+        let controller = await activated(); await controller.restoreDirect(); await controller.confirmDirectResponse()
+        let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+        let stop = Task { await controller.stop() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = false
+        await controller.refresh(); await controller.refresh()
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedDirect)
+        XCTAssertNil(try store.load().pending)
+        XCTAssertFalse(controller.canQuit)
+        barrier.release(.init(childExited: true, portState: .empty)); await stop.value
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedDirect)
+        XCTAssertNil(try store.load().pending)
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertEqual(controller.lastStopOutcome, .init(childExited: true, portState: .empty))
+        await controller.requestQuit()
+        XCTAssertTrue(controller.quitRequested)
+    }
+    func testHeldQuitReadinessLossPreservesIndependentPortOutcomes() async throws {
+        // Successful child exit permits Quit while occupied/unknown port results remain separate visible facts.
+        for portState in [StopOutcome.PortState.empty, .occupied, .unknown] {
+            store = PrivateStore(directory: root.appendingPathComponent(portState.rawValue))
+            try store.save(CompanionJournal(selectedConfigurationPath: context.configPath))
+            backend = ControlledBackend(context: context)
+            let controller = await activated(); await controller.restoreDirect(); await controller.confirmDirectResponse()
+            let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+            let quit = Task { await controller.requestQuit() }
+            await waitUntil { barrier.waiting }
+            backend.snapshot.provider.proxyReady = false
+            backend.exitChild()
+            await controller.refresh()
+            XCTAssertEqual(controller.desktopConfirmation, .confirmedDirect)
+            XCTAssertNil(try store.load().pending)
+            XCTAssertFalse(controller.quitRequested); XCTAssertFalse(controller.canQuit)
+            barrier.release(.init(childExited: true, portState: portState)); await quit.value
+            XCTAssertTrue(controller.quitRequested); XCTAssertTrue(controller.canQuit)
+            XCTAssertEqual(controller.lastStopOutcome?.portState, portState)
+            if portState == .empty { XCTAssertNil(controller.error) }
+            else { XCTAssertNotNil(controller.error) }
+            XCTAssertEqual(controller.needsManualListenerCleanup, portState == .occupied)
+        }
+    }
+    func testHeldStopStillInvalidatesConfirmationForRevisionChange() async throws {
+        // Requested readiness loss cannot suppress a concurrent relevant revision change.
+        let controller = await activated(); await controller.restoreDirect(); await controller.confirmDirectResponse()
+        let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+        let stop = Task { await controller.stop() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = false
+        backend.snapshot.revision = "changed-during-stop"
+        await controller.refresh()
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(try store.load().pending?.context, context)
+        barrier.release(.init(childExited: true, portState: .empty)); await stop.value
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(controller.lastStopOutcome?.portState, .empty)
+    }
+    func testHeldQuitStillInvalidatesConfirmationForContextChange() async throws {
+        // A changed home/provider/port during requested teardown retains the original recovery binding.
+        let controller = await activated(); await controller.restoreDirect(); await controller.confirmDirectResponse()
+        let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+        let quit = Task { await controller.requestQuit() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = false
+        backend.snapshot.context?.codexHome = "/synthetic/changed-during-quit"
+        await controller.refresh()
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(try store.load().pending?.context, context)
+        barrier.release(.init(childExited: true, portState: .occupied)); await quit.value
+        XCTAssertFalse(controller.quitRequested); XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.recoveryContext, context)
+        XCTAssertEqual(controller.lastStopOutcome?.portState, .occupied)
+        XCTAssertNotNil(controller.error)
+    }
+    func testFailedHeldStopReadinessLossRetainsRecovery() async throws {
+        // Only verified requested exit consumes readiness loss; a failed stop keeps recovery conservative.
+        let controller = await activated(); await controller.restoreDirect(); await controller.confirmDirectResponse()
+        let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+        let stop = Task { await controller.stop() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = false
+        await controller.refresh()
+        barrier.release(.init(childExited: false, portState: .unknown)); await stop.value
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(try store.load().pending?.context, context)
+        XCTAssertNotNil(controller.ownedRouter); XCTAssertFalse(controller.canQuit)
+        XCTAssertNotNil(controller.error)
+        XCTAssertEqual(controller.lastStopOutcome, .init(childExited: false, portState: .unknown))
+    }
+
+    func testFailedHeldStopRetainsReadinessLossObservedAfterStopBegins() async throws {
+        // Loss observed during a failed stop also matters when the stop began with readiness false.
+        let controller = await activated(); await controller.restoreDirect()
+        backend.snapshot.provider.proxyReady = false
+        await controller.refresh(); await controller.confirmDirectResponse()
+        let barrier = Barrier<StopOutcome>(); backend.stopBarrier = barrier
+        let stop = Task { await controller.stop() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = true
+        await controller.refresh()
+        backend.snapshot.provider.proxyReady = false
+        await controller.refresh()
+        barrier.release(.init(childExited: false, portState: .unknown)); await stop.value
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(try store.load().pending?.context, context)
+        XCTAssertNotNil(controller.ownedRouter); XCTAssertFalse(controller.canQuit)
+    }
     private func waitUntil(_ predicate: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<1000 {
             if predicate() { return }

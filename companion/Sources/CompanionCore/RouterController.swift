@@ -31,6 +31,7 @@ import Observation
     private var refreshRunning = false
     private var refreshAgain = false
     private var stoppingID: UUID?
+    private var deferredReadinessLoss = false
 
     public var recoveryContext: ActivationContext? { dependencyContext }
     public var needsManualListenerCleanup: Bool {
@@ -250,9 +251,10 @@ import Observation
     private func reconcile(_ value: Inspection) {
         let changed = revision != nil && revision != value.revision
         let readinessLost = inspection?.provider.proxyReady == true && value.provider.proxyReady != true
+        if stoppingID != nil, readinessLost { deferredReadinessLoss = true }
         revision = value.revision
         var presentation = value; presentation.revision = nil; inspection = presentation
-        if changed || readinessLost || matchingContext == nil { invalidateConfirmation() }
+        if changed || (readinessLost && stoppingID == nil) || matchingContext == nil { invalidateConfirmation() }
         if let context = value.context, value.configuration.state == "valid",
            value.provider.recoveryRequired || ["router", "conflict", "unavailable"].contains(value.provider.state) || ["prepared", "active"].contains(value.provider.recordPhase) {
             // Imported recovery is bound once; later mapping/home edits cannot retarget it.
@@ -312,8 +314,14 @@ import Observation
     private func stopOwnedChild() async {
         guard await inspectNow() else { return }
         guard stopPermitted, let child = ownedRouter else { reject(); return }
+        deferredReadinessLoss = false
         stoppingID = child.id
-        defer { stoppingID = nil }
+        defer {
+            stoppingID = nil
+            // A failed teardown has not consumed observed readiness loss.
+            if deferredReadinessLoss, ownedRouter != nil { invalidateConfirmation() }
+            deferredReadinessLoss = false
+        }
         do {
             let outcome = try await backend.stop(child)
             lastStopOutcome = outcome
