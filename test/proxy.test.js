@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
-import { once } from "node:events";
+import { EventEmitter, getEventListeners, once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
 import { RouterError } from "../src/errors.js";
+import { readKeychainCredential } from "../src/credentials.js";
 import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 const key = await readFile(
   new URL("./fixtures/tls/test-only-key.pem", import.meta.url),
@@ -138,9 +140,190 @@ function syntheticCredentialReader(reads) {
     throw new Error("Unexpected synthetic reference");
   };
 }
+async function within(promise, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 3000); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function diagnosticEvents(f) {
+  return f.logs().trim().split("\n").filter(Boolean).map(JSON.parse);
+}
+function processCredentialReader(t, blockedReference, {holdClose = false} = {}) {
+  const ready = Promise.withResolvers(), runs = [];
+  const reader = (reference, {signal}) => {
+    assert.ok(reference === globalReference || reference === projectAReference);
+    const closed = Promise.withResolvers(), releaseClose = Promise.withResolvers();
+    const run = {reference, signal, closed: false, settled: false, releaseClose};
+    const token = reference === globalReference ? "GLOBAL_CREDENTIAL_SENTINEL" : "PROJECT_A_CREDENTIAL_SENTINEL";
+    const blocked = reference === blockedReference;
+    const lookup = readKeychainCredential(reference, {
+      signal,
+      spawnProcess(_executable, _args, options) {
+        const source = blocked
+          ? `process.stdout.write(${JSON.stringify(token)}); process.stderr.write("READY"); setInterval(() => {}, 1000);`
+          : `process.stdout.write(${JSON.stringify(token)});`;
+        const child = spawn(process.execPath, ["--input-type=module", "-e", source], options);
+        run.child = child;
+        // Hold only notification of a real child's closure to test late reader settlement.
+        const readerChild = holdClose && blocked ? new EventEmitter() : child;
+        if (readerChild !== child) {
+          readerChild.stdout = child.stdout;
+          readerChild.stderr = child.stderr;
+          readerChild.kill = terminationSignal => child.kill(terminationSignal);
+          child.once("error", error => readerChild.emit("error", error));
+        }
+        child.once("close", (code, terminationSignal) => {
+          run.closed = true;
+          closed.resolve();
+          if (readerChild !== child)
+            releaseClose.promise.then(() => readerChild.emit("close", code, terminationSignal));
+        });
+        if (blocked) child.stderr.once("data", () => ready.resolve(run));
+        return readerChild;
+      },
+    });
+    run.outcome = lookup.then(value => ({value}), error => ({error})).then(outcome => {
+      run.settled = true;
+      return outcome;
+    });
+    run.whenClosed = closed.promise;
+    runs.push(run);
+    t.after(async () => {
+      releaseClose.resolve();
+      if (!run.closed) run.child.kill("SIGKILL");
+      await within(closed.promise, "synthetic credential child survived cleanup");
+      await within(run.outcome, "synthetic credential lookup survived cleanup");
+    });
+    return lookup;
+  };
+  return {reader, ready: ready.promise, runs};
+}
 for (const observationMode of [false, true]) for (const policyMode of [false,true]) {
 const test = (name, run) => nodeTest(`${name} (observation ${observationMode}, title policy ${policyMode})`, run);
 const setup = (t, handler, options = {}) => setupProxy(t, handler, {...options, observeRequestMetadata: observationMode, allowUnassignedThreadTitles:policyMode});
+const transportTest = (name, run) => {
+  for (const routingMode of [false, true]) test(`${name} (credential routing ${routingMode})`, async t => {
+    const fixtures = [], reads = [], token = routingMode ? "GLOBAL_CREDENTIAL_SENTINEL" : "CREDENTIAL_SENTINEL";
+    const transportSetup = async (t, handler, options = {}) => {
+      const f = await setup(t, handler, {
+        ...options,
+        credentialReader: syntheticCredentialReader(reads),
+        ...(routingMode ? {credentialRouting: credentialRouting()} : {}),
+      });
+      fixtures.push(f);
+      return f;
+    };
+    await run(t, transportSetup, (f, options) => request(f, {token, ...options}), token);
+    for (const f of fixtures) {
+      if (routingMode) for (const call of f.calls) assert.equal(call.headers.authorization,
+        call.headers["thread-id"] === CHILD ? "Bearer GLOBAL_CREDENTIAL_SENTINEL" : "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+      assert.doesNotMatch(f.logs(), /SENTINEL/);
+    }
+    if (!routingMode) assert.deepEqual(reads, []);
+  });
+};
+test("terminal credential failures record their initiating outcome before aborting request work", async t => {
+  for (const failure of ["mismatch", "project unavailable"]) {
+    let requestSignal, eventsAtAbort;
+    const f = await setup(t, async (req, res) => res.end("unexpected"), {
+      credentialRouting: credentialRouting(),
+      credentialReader: async (reference, {signal}) => {
+        if (!requestSignal) {
+          requestSignal = signal;
+          signal.addEventListener("abort", () => { eventsAtAbort = diagnosticEvents(f); }, {once: true});
+        }
+        if (reference === projectAReference) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return "GLOBAL_CREDENTIAL_SENTINEL";
+      },
+    });
+    const result = await request(f, {token: failure === "mismatch" ? "WRONG_CREDENTIAL_SENTINEL" : "GLOBAL_CREDENTIAL_SENTINEL"});
+    const expectedCode = failure === "mismatch" ? "AUTH_INVALID" : "CREDENTIAL_UNAVAILABLE";
+    assert.equal(result.status, failure === "mismatch" ? 401 : 503);
+    assert.equal(JSON.parse(result.body).error.code, expectedCode);
+    assert.equal(requestSignal.aborted, true, "terminal failure retained request work");
+    assert.equal(eventsAtAbort.length, 1);
+    assert.equal(eventsAtAbort[0].errorCode, expectedCode);
+    assert.equal(diagnosticEvents(f).length, 1);
+    assert.equal(f.calls.length, 0);
+    assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
+  }
+});
+for (const stage of ["global", "project"]) for (const cancellation of ["client disconnect", "forced connection closure", "request error", "delayed child completion"]) {
+test(`${cancellation} during ${stage} retrieval reaps real child work and preserves cancellation`, async t => {
+  const processes = processCredentialReader(t, stage === "global" ? globalReference : projectAReference, {
+    holdClose: cancellation === "delayed child completion",
+  });
+  const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    credentialRouting: credentialRouting(), credentialReader: processes.reader,
+  });
+  let serverRequest, client;
+  f.proxy.once("request", req => { serverRequest = req; });
+  const clientOutcome = new Promise(resolve => {
+    client = http.request({
+      host: "127.0.0.1", port: f.proxyPort, path: "/v1/responses", method: "POST",
+      headers: ["Host", "127.0.0.1", "Authorization", "Bearer GLOBAL_CREDENTIAL_SENTINEL", ...headers()],
+    }, res => {
+      let body = "";
+      res.on("data", chunk => { body += chunk; });
+      res.on("end", () => resolve({status: res.statusCode, body}));
+      res.on("error", error => resolve({error}));
+    });
+    client.on("error", error => resolve({error}));
+    client.end("{}");
+  });
+  t.after(() => client.destroy());
+  const pending = await within(processes.ready, "synthetic lookup did not become pending");
+  assert.equal(pending.settled, false);
+  let eventsAtAbort;
+  pending.signal.addEventListener("abort", () => { eventsAtAbort = diagnosticEvents(f); }, {once: true});
+  if (cancellation === "request error") serverRequest.emit("error", new Error("REQUEST_ERROR_SENTINEL"));
+  else if (cancellation === "forced connection closure") f.proxy.closeAllConnections();
+  else client.destroy();
+  await within(pending.whenClosed, "cancelled credential child was not reaped");
+  assert.ok(pending.child.exitCode !== null || pending.child.signalCode !== null);
+  assert.throws(() => process.kill(pending.child.pid, 0), {code: "ESRCH"});
+  if (cancellation === "delayed child completion") {
+    assert.equal(pending.settled, false, "reader settled before child close notification");
+    const completed = diagnosticEvents(f);
+    assert.equal(completed.length, 1);
+    assert.equal(completed[0].status, 499);
+    assert.equal(completed[0].errorCode, "CANCELLED");
+    pending.releaseClose.resolve();
+  }
+  const outcome = await within(pending.outcome, "cancelled credential lookup did not settle");
+  assert.equal(outcome.error.code, "CANCELLED");
+  assert.equal(pending.signal.aborted, true);
+  assert.equal(eventsAtAbort.length, 1, "cancellation was not recorded before aborting child work");
+  assert.equal(eventsAtAbort[0].status, 499);
+  assert.equal(eventsAtAbort[0].errorCode, "CANCELLED");
+  assert.equal(getEventListeners(pending.signal, "abort").length, 0);
+  assert.deepEqual(processes.runs.map(run => run.reference), stage === "global"
+    ? [globalReference] : [globalReference, projectAReference]);
+  const result = await within(clientOutcome, "cancelled client did not settle");
+  if (cancellation === "request error") {
+    assert.equal(result.status, 499);
+    assert.equal(JSON.parse(result.body).error.code, "CANCELLED");
+    assert.doesNotMatch(result.body, /SENTINEL/);
+  } else assert.ok(result.error);
+  assert.equal(f.calls.length, 0);
+  const events = diagnosticEvents(f);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "completed");
+  assert.equal(events[0].status, 499);
+  assert.equal(events[0].errorCode, "CANCELLED");
+  assert.equal(Object.hasOwn(events[0], "requestMetadata"), stage === "project" && observationMode);
+  if (stage === "project") assert.equal(events[0].projectId, P1);
+  else for (const field of ["threadId", "projectId", "routeAlias", "source"])
+    assert.equal(Object.hasOwn(events[0], field), false);
+  assert.doesNotMatch(f.logs(), /SENTINEL|READY/);
+});
+}
 test("credential routing rejects global mismatch before broken state or observations", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
@@ -336,6 +519,214 @@ test("legacy mode forwards its original credential without any credential reads"
   assert.equal(f.calls[0].headers.authorization, "bEaReR LEGACY_CREDENTIAL_SENTINEL");
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
+test("fresh global and project reads observe rotation and deletion without stale fallback", async t => {
+  const reads = [];
+  const values = new Map([
+    [globalReference, "GLOBAL_FIRST_SENTINEL"],
+    [projectAReference, "PROJECT_A_FIRST_SENTINEL"],
+    [projectBReference, "PROJECT_B_FIRST_SENTINEL"],
+  ]);
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: credentialRouting(),
+    credentialReader: async reference => {
+      reads.push(reference);
+      if (!values.has(reference)) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+      return values.get(reference);
+    },
+  });
+  const first = {token: "GLOBAL_FIRST_SENTINEL"};
+  assert.equal((await request(f, first)).status, 200);
+  values.set(projectAReference, "PROJECT_A_ROTATED_SENTINEL");
+  assert.equal((await request(f, first)).status, 200);
+  values.delete(projectAReference);
+  const deleted = await request(f, first);
+  assert.equal(deleted.status, 503);
+  assert.equal(JSON.parse(deleted.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.equal((await request(f, {...first, raw: headers(T2)})).status, 200);
+  values.set(globalReference, "GLOBAL_ROTATED_SENTINEL");
+  const stale = await request(f, {...first, raw: headers(T2)});
+  assert.equal(stale.status, 401);
+  assert.equal(JSON.parse(stale.body).error.code, "AUTH_INVALID");
+  assert.equal((await request(f, {token: "GLOBAL_ROTATED_SENTINEL", raw: headers(T2)})).status, 200);
+  values.delete(globalReference);
+  const globalDeleted = await request(f, {token: "GLOBAL_ROTATED_SENTINEL", raw: headers(T2)});
+  assert.equal(globalDeleted.status, 503);
+  assert.equal(JSON.parse(globalDeleted.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.deepEqual(reads, [
+    globalReference, projectAReference, globalReference, projectAReference,
+    globalReference, projectAReference, globalReference, projectBReference,
+    globalReference, globalReference, projectBReference, globalReference,
+  ]);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_FIRST_SENTINEL", "Bearer PROJECT_A_ROTATED_SENTINEL",
+    "Bearer PROJECT_B_FIRST_SENTINEL", "Bearer PROJECT_B_FIRST_SENTINEL",
+  ]);
+  assert.equal(diagnosticEvents(f).filter(event => event.event === "started").length, 4);
+  assert.doesNotMatch(deleted.body + stale.body + globalDeleted.body + f.logs(), /SENTINEL/);
+});
+test("a reference shared by global and project roles is read independently for each role", async t => {
+  const reads = [], routing = credentialRouting();
+  routing.routeCredentials["route-a"] = globalReference;
+  const values = ["SHARED_CALLER_SENTINEL", "SHARED_PROJECT_SENTINEL", "ROTATED_CALLER_SENTINEL", "ROTATED_PROJECT_SENTINEL"];
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: routing,
+    credentialReader: async reference => { reads.push(reference); return values.shift(); },
+  });
+  assert.equal((await request(f, {token: "SHARED_CALLER_SENTINEL"})).status, 200);
+  assert.equal((await request(f, {token: "ROTATED_CALLER_SENTINEL"})).status, 200);
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference, globalReference]);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+    "Bearer SHARED_PROJECT_SENTINEL", "Bearer ROTATED_PROJECT_SENTINEL",
+  ]);
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("overlapping requests never coalesce global or project credential lookups", async t => {
+  const bothGlobal = Promise.withResolvers(), bothProject = Promise.withResolvers();
+  let globals = 0, projects = 0;
+  t.after(() => { bothGlobal.resolve(); bothProject.resolve(); });
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: credentialRouting(),
+    credentialReader: async reference => {
+      if (reference === globalReference) {
+        if (++globals === 2) bothGlobal.resolve();
+        await within(bothGlobal.promise, "global lookups were coalesced");
+        return "GLOBAL_CREDENTIAL_SENTINEL";
+      }
+      assert.equal(reference, projectAReference);
+      const ordinal = ++projects;
+      if (projects === 2) bothProject.resolve();
+      await within(bothProject.promise, "project lookups were coalesced");
+      return ordinal === 1 ? "FIRST_PROJECT_SENTINEL" : "SECOND_PROJECT_SENTINEL";
+    },
+  });
+  const results = await Promise.all([
+    request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"}),
+    request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"}),
+  ]);
+  assert.deepEqual(results.map(result => result.status), [200, 200]);
+  assert.equal(globals, 2);
+  assert.equal(projects, 2);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization).sort(), [
+    "Bearer FIRST_PROJECT_SENTINEL", "Bearer SECOND_PROJECT_SENTINEL",
+  ]);
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+for (const moveAt of ["selected project lookup", "active stream"]) {
+test(`reassignment during ${moveAt} preserves the selected request and changes the next request`, async t => {
+  const selected = Promise.withResolvers(), releaseLookup = Promise.withResolvers();
+  const streamed = Promise.withResolvers(), releaseStream = Promise.withResolvers();
+  t.after(() => { releaseLookup.resolve(); releaseStream.resolve(); });
+  const reads = [], values = new Map([
+    [globalReference, "GLOBAL_CREDENTIAL_SENTINEL"],
+    [projectAReference, "PROJECT_A_FIRST_SENTINEL"],
+    [projectBReference, "PROJECT_B_FIRST_SENTINEL"],
+  ]);
+  const f = await setup(t, async (req, res, calls) => {
+    if (calls.length === 1) {
+      res.write("old-route-");
+      await releaseStream.promise;
+      res.end("stream");
+    } else res.end("new-route");
+  }, {
+    credentialRouting: credentialRouting(),
+    credentialReader: async reference => {
+      reads.push(reference);
+      const value = values.get(reference);
+      if (reference === projectAReference) {
+        selected.resolve();
+        await releaseLookup.promise;
+      }
+      return value;
+    },
+  });
+  const first = request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", onChunk: () => streamed.resolve()});
+  await within(selected.promise, "the first request did not select its project credential");
+  if (moveAt === "active stream") {
+    releaseLookup.resolve();
+    await within(streamed.promise, "the first stream did not start");
+  }
+  f.state["thread-project-assignments"][T1].projectId = P2;
+  await f.saveState();
+  releaseLookup.resolve();
+  await within(streamed.promise, "the selected stream did not start");
+  values.set(projectAReference, "PROJECT_A_ROTATED_SENTINEL");
+  values.set(projectBReference, "PROJECT_B_ROTATED_SENTINEL");
+  const next = await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(next.body, "new-route");
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_FIRST_SENTINEL", "Bearer PROJECT_B_ROTATED_SENTINEL",
+  ]);
+  releaseStream.resolve();
+  assert.equal((await first).body, "old-route-stream");
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.deepEqual(starts.map(event => [event.projectId, event.routeAlias]), [[P1, "route-a"], [P2, "route-b"]]);
+  for (const start of starts) {
+    const complete = diagnosticEvents(f).find(event => event.event === "completed" && event.requestId === start.requestId);
+    assert.equal(complete.projectId, start.projectId);
+    assert.equal(complete.routeAlias, start.routeAlias);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+}
+test("routing streams overlap with one global token and independent mapped and title outcomes", async t => {
+  const other = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const ids = [T1, T2, CHILD, other], expectedActive = policyMode ? 4 : 2;
+  const releases = new Map(ids.map(id => [id, Promise.withResolvers()]));
+  const firstChunks = new Map(ids.map(id => [id, Promise.withResolvers()]));
+  const allActive = Promise.withResolvers(), finished = new Set(), reads = [];
+  t.after(() => { for (const gate of releases.values()) gate.resolve(); });
+  let active = 0, max = 0;
+  const f = await setup(t, async (req, res) => {
+    const id = req.headers["thread-id"], ordinal = ids.indexOf(id);
+    max = Math.max(max, ++active);
+    res.writeHead(200 + ordinal, {"content-type": "text/event-stream"});
+    res.write(`stream-${ordinal}-`);
+    if (active === expectedActive) allActive.resolve();
+    await releases.get(id).promise;
+    res.end("done");
+    active--;
+  }, {credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads)});
+  const pending = ids.map((id, index) => request(f, {
+    raw: index < 2 ? headers(id) : titleHeaders(id), token: "GLOBAL_CREDENTIAL_SENTINEL",
+    onChunk: () => firstChunks.get(id).resolve(),
+  }).then(result => { finished.add(id); return result; }));
+  await within(allActive.promise, "streams did not overlap upstream");
+  await within(Promise.all(ids.slice(0, expectedActive).map(id => firstChunks.get(id).promise)), "stream chunks were buffered");
+  assert.equal(max, expectedActive);
+  releases.get(T2).resolve();
+  assert.equal((await pending[1]).body, "stream-1-done");
+  assert.equal(finished.has(T1), false);
+  if (policyMode) for (const id of [CHILD, other]) assert.equal(finished.has(id), false);
+  for (const gate of releases.values()) gate.resolve();
+  const results = await Promise.all(pending);
+  assert.deepEqual(results.map(result => result.status), policyMode ? [200, 201, 202, 203] : [200, 201, 503, 503]);
+  assert.deepEqual(results.slice(0, expectedActive).map(result => result.body), policyMode
+    ? ["stream-0-done", "stream-1-done", "stream-2-done", "stream-3-done"]
+    : ["stream-0-done", "stream-1-done"]);
+  const expectedAuthorization = new Map([
+    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL"], [T2, "Bearer PROJECT_B_CREDENTIAL_SENTINEL"],
+    [CHILD, "Bearer GLOBAL_CREDENTIAL_SENTINEL"], [other, "Bearer GLOBAL_CREDENTIAL_SENTINEL"],
+  ]);
+  for (const call of f.calls)
+    assert.equal(call.headers.authorization, expectedAuthorization.get(call.headers["thread-id"]));
+  assert.deepEqual(f.calls.map(call => call.headers.authorization).sort(), policyMode ? [
+    "Bearer GLOBAL_CREDENTIAL_SENTINEL", "Bearer GLOBAL_CREDENTIAL_SENTINEL",
+    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
+  ] : ["Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL"]);
+  assert.equal(reads.filter(reference => reference === globalReference).length, 4);
+  assert.equal(reads.filter(reference => reference === projectAReference).length, 1);
+  assert.equal(reads.filter(reference => reference === projectBReference).length, 1);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.equal(starts.filter(event => event.source === "unassigned_title").length, policyMode ? 2 : 0);
+  for (const event of starts) {
+    assert.equal(Object.hasOwn(event, "requestMetadata"), observationMode);
+    if (observationMode) assert.equal(event.requestMetadata.headers["thread-id"].id, event.threadId);
+    if (event.source === "unassigned_title") for (const field of ["projectId", "ownerThreadId", "routeAlias"])
+      assert.equal(Object.hasOwn(event, field), false);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
 test("exact initial titles forward only when enabled without project ownership",async t => {
   const f=await setup(t, async (req,res) => {
     res.writeHead(201,{"content-type":"text/event-stream"});
@@ -437,7 +828,7 @@ test("title cancellation releases upstream work and lookup cancellation makes ze
   await delay(50);assert.equal(f.calls.length,1);
   assert.equal(JSON.parse(f.logs().trim().split("\n").at(-1)).errorCode,"CANCELLED");
 });
-test("title redirects are not followed or retried",async t => {
+transportTest("title redirects are not followed or retried", async (t, setup, request, token) => {
   const f=await setup(t,async(req,res)=>{res.writeHead(307,{location:"https://example.invalid/ignored"});res.end("redirect");});
   assert.equal((await request(f,{raw:titleHeaders()})).status,307);
   assert.equal(f.calls.length,1);
@@ -494,7 +885,7 @@ test("overlapping requests preserve identities, original body bytes and per-requ
   }
   assert.doesNotMatch(f.logs(), /SENTINEL|KEY_A|KEY_B/);
 });
-test("forwards streamed chunks before the response finishes", async (t) => {
+transportTest("forwards streamed chunks before the response finishes", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.writeHead(201, { "content-type": "text/event-stream" });
     res.write("data: first\n\n");
@@ -557,7 +948,7 @@ test("blocked and unmapped model requests make zero upstream calls", async (t) =
   assert.equal(f.calls.length, 0);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("does not follow redirects or retry upstream responses", async (t) => {
+transportTest("does not follow redirects or retry upstream responses", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.writeHead(307, { location: "https://other.example.invalid" });
     res.end("redirect");
@@ -590,7 +981,7 @@ test("unresolved requests retain only the validated chat identifier for diagnosi
   assert.equal(f.calls.length, 0);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("removes connection-nominated hop headers and sets the upstream host", async (t) => {
+transportTest("removes connection-nominated hop headers and sets the upstream host", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.setHeader("Connection", "x-private-hop");
     res.setHeader("x-private-hop", "not-forwarded");
@@ -609,14 +1000,14 @@ test("removes connection-nominated hop headers and sets the upstream host", asyn
   assert.match(f.calls[0].headers.host, /^127\.0\.0\.1:\d+$/);
   assert.equal(result.headers["x-private-hop"], undefined);
 });
-test("rejects untrusted TLS certificates without disabling verification", async (t) => {
+transportTest("rejects untrusted TLS certificates without disabling verification", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
     untrusted: true,
   });
   assert.equal((await request(f)).status, 502);
   assert.equal(f.calls.length, 0);
 });
-test("upstream disconnect before headers is sanitized and is not retried", async (t) => {
+transportTest("upstream disconnect before headers is sanitized and is not retried", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) =>
     res.destroy(new Error("RESPONSE_SENTINEL")),
   );
@@ -625,7 +1016,7 @@ test("upstream disconnect before headers is sanitized and is not retried", async
   assert.equal(f.calls.length, 1);
   assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
 });
-test("a broken upstream stream closes the client instead of appending a fabricated response", async (t) => {
+transportTest("a broken upstream stream closes the client instead of appending a fabricated response", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.write("partial");
     await delay(20);
@@ -635,12 +1026,12 @@ test("a broken upstream stream closes the client instead of appending a fabricat
   assert.equal(f.calls.length, 1);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("upstream inactivity is bounded without retrying", async (t) => {
+transportTest("upstream inactivity is bounded without retrying", async (t, setup, request, token) => {
   const f = await setup(t, async () => {}, { timeoutMs: 70 });
   assert.equal((await request(f)).status, 502);
   assert.equal(f.calls.length, 1);
 });
-test("slow clients receive the complete streamed body under backpressure", async (t) => {
+transportTest("slow clients receive the complete streamed body under backpressure", async (t, setup, request, token) => {
   let blocked = false;
   const size = 64 * 1024;
   const f = await setup(t, async (req, res) => {
@@ -656,7 +1047,7 @@ test("slow clients receive the complete streamed body under backpressure", async
   assert.equal(result.body.length, size * 64);
   assert.ok(blocked);
 });
-test("client cancellation closes the upstream response and is not reported as an upstream failure", async (t) => {
+transportTest("client cancellation closes the upstream response and is not reported as an upstream failure", async (t, setup, request, token) => {
   let closed;
   const done = new Promise((r) => (closed = r));
   const f = await setup(t, async (req, res) => {
@@ -671,7 +1062,7 @@ test("client cancellation closes the upstream response and is not reported as an
         path: "/v1/responses",
         method: "POST",
         headers: {
-          authorization: "Bearer CREDENTIAL_SENTINEL",
+          authorization: `Bearer ${token}`,
           "thread-id": T1,
         },
       },
@@ -697,7 +1088,7 @@ test("client cancellation closes the upstream response and is not reported as an
   assert.equal(Object.hasOwn(completion, "requestMetadata"), observationMode);
   if (observationMode) assert.equal(completion.requestMetadata.headers["thread-id"].id, T1);
 });
-test("malformed HTTP input produces a fixed response without dumping the packet", async (t) => {
+transportTest("malformed HTTP input produces a fixed response without dumping the packet", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"));
   const text = await new Promise((resolve, reject) => {
     const socket = net.connect(f.proxyPort, "127.0.0.1");

@@ -77,6 +77,7 @@ export function createProxy(
         if (completed) return;
         const safe = safeError(error);
         finish(safe.status, safe.code);
+        controller.abort();
         outgoing?.destroy();
         incoming?.destroy();
         if (res.headersSent) {
@@ -96,9 +97,8 @@ export function createProxy(
           );
         }
       };
-      req.once("aborted", () => controller.abort());
+      req.once("aborted", () => fail(new RouterError("CANCELLED")));
       req.once("error", () => {
-        controller.abort();
         fail(new RouterError("CANCELLED"));
       });
       res.once("error", () => {
