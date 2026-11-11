@@ -30,6 +30,151 @@ import XCTest
         await controller.activate()
         return controller
     }
+    func testQuitBlockReasonDirectPendingIsReadOnly() async throws {
+        // Reading alert guidance must neither accept confirmation nor reconcile or mutate evidence.
+        try store.save(CompanionJournal(selectedConfigurationPath: context.configPath,
+            pending: .init(context: context, phase: .directConfirmation)))
+        let controller = makeController(); await controller.refresh()
+        XCTAssertNil(controller.ownedRouter)
+        let journalBefore = try store.load()
+        let inspectionsBefore = backend.inspectedPaths.count
+        let controlsBefore = backend.controls.count
+        let stopsBefore = backend.stopCount
+        let confirmationBefore = controller.desktopConfirmation
+        let recoveryBefore = controller.recoveryContext
+        let quitBefore = controller.quitRequested
+        for _ in 0..<3 {
+            XCTAssertEqual(controller.quitBlockReason, .directConfirmationPending)
+            XCTAssertFalse(controller.canQuit)
+        }
+        XCTAssertEqual(try store.load(), journalBefore)
+        XCTAssertEqual(backend.inspectedPaths.count, inspectionsBefore)
+        XCTAssertEqual(backend.controls.count, controlsBefore)
+        XCTAssertEqual(backend.stopCount, stopsBefore)
+        XCTAssertEqual(controller.desktopConfirmation, confirmationBefore)
+        XCTAssertEqual(controller.recoveryContext, recoveryBefore)
+        XCTAssertEqual(controller.quitRequested, quitBefore)
+        await controller.requestQuit()
+        XCTAssertFalse(controller.canQuit); XCTAssertFalse(controller.quitRequested)
+    }
+    func testQuitBlockReasonRecoveryAndBusyPriority() async {
+        // In-flight or uncertain work must take precedence over later recovery instructions.
+        let controller = await activated()
+        XCTAssertEqual(controller.quitBlockReason, .directRecoveryRequired)
+        XCTAssertFalse(controller.canQuit)
+        backend.mutationRequiresReconciliation = true
+        XCTAssertFalse(controller.mutationRequiresReconciliation)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        backend.mutationRequiresReconciliation = false
+        let barrier = Barrier<ControlResult>(); backend.controlBarrier = barrier
+        let restore = Task { await controller.restoreDirect() }
+        await waitUntil { barrier.waiting }
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        XCTAssertFalse(controller.canQuit); XCTAssertFalse(controller.quitRequested)
+        backend.snapshot.provider.state = "direct"; backend.snapshot.provider.recordPhase = "restored"
+        backend.snapshot.revision = "direct-after-held-restore"
+        barrier.release(.init(state: "direct", changed: true, restartRequired: true)); await restore.value
+        XCTAssertEqual(controller.quitBlockReason, .directConfirmationPending)
+        backend.mutationRequiresReconciliation = true
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        backend.mutationRequiresReconciliation = false
+        for phase in ["prepared", "active"] {
+            backend.snapshot.provider.recordPhase = phase
+            await controller.refresh()
+            XCTAssertEqual(controller.quitBlockReason, .directRecoveryRequired)
+            XCTAssertFalse(controller.canQuit)
+        }
+        backend.snapshot.provider.recordPhase = "none"; backend.snapshot.provider.recoveryRequired = true
+        await controller.refresh()
+        XCTAssertEqual(controller.quitBlockReason, .directRecoveryRequired)
+        XCTAssertFalse(controller.canQuit); XCTAssertFalse(controller.quitRequested)
+    }
+    func testQuitBlockReasonUsesLiveBackendUncertainty() async {
+        // A backend flag raised between refreshes must not expose stale safe-exit advice.
+        let controller = makeController(); await controller.refresh()
+        XCTAssertNil(controller.quitBlockReason); XCTAssertTrue(controller.canQuit)
+        backend.mutationRequiresReconciliation = true
+        XCTAssertFalse(controller.mutationRequiresReconciliation)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        XCTAssertTrue(controller.canQuit)
+        await controller.requestQuit()
+        XCTAssertFalse(controller.quitRequested); XCTAssertFalse(controller.canQuit)
+        backend.mutationRequiresReconciliation = false
+        XCTAssertTrue(controller.mutationRequiresReconciliation)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        await controller.refresh()
+        XCTAssertNil(controller.quitBlockReason); XCTAssertTrue(controller.canQuit)
+    }
+    func testQuitBlockReasonUnavailableAndFailedStop() async throws {
+        // Incomplete or conflicting evidence cannot prescribe a specific successful recovery step.
+        try store.save(CompanionJournal(selectedConfigurationPath: context.configPath,
+            pending: .init(context: context, phase: .directConfirmation)))
+        let controller = makeController()
+        XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
+        XCTAssertFalse(controller.canQuit)
+        var invalidConfiguration = backend.snapshot; invalidConfiguration.configuration.state = "unavailable"
+        var unmatchedPath = backend.snapshot; unmatchedPath.configuration.path = "/synthetic/other.json"
+        var missingContext = backend.snapshot; missingContext.context = nil
+        var changedContext = backend.snapshot; changedContext.context?.codexHome = "/synthetic/changed"
+        var unavailableProvider = backend.snapshot; unavailableProvider.provider.state = "unavailable"
+        var conflictingProvider = backend.snapshot; conflictingProvider.provider.state = "conflict"
+        var unavailableRecord = backend.snapshot; unavailableRecord.provider.recordPhase = "unavailable"
+        var missingRevision = backend.snapshot; missingRevision.revision = nil
+        for (name, snapshot) in [("configuration", invalidConfiguration), ("path", unmatchedPath),
+            ("missing context", missingContext), ("changed context", changedContext),
+            ("provider", unavailableProvider), ("conflict", conflictingProvider),
+            ("record", unavailableRecord), ("revision", missingRevision)] {
+            backend.snapshot = snapshot
+            await controller.refresh()
+            XCTAssertEqual(controller.quitBlockReason, .contextUnavailable, name)
+            XCTAssertFalse(controller.canQuit, name); XCTAssertFalse(controller.quitRequested, name)
+        }
+        backend.inspectionError = .commandFailed
+        await controller.refresh()
+        XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
+        XCTAssertFalse(controller.canQuit); XCTAssertFalse(controller.quitRequested)
+
+        let failedStore = PrivateStore(directory: root.appendingPathComponent("failed-stop"))
+        try failedStore.save(CompanionJournal(selectedConfigurationPath: context.configPath))
+        let failedBackend = ControlledBackend(context: context)
+        let failedController = RouterController(backend: failedBackend, store: failedStore, browseHome: root)
+        await failedController.refresh(); await failedController.start()
+        failedBackend.stopOutcome = .init(childExited: false, portState: .unknown)
+        await failedController.requestQuit()
+        XCTAssertEqual(failedController.quitBlockReason, .contextUnavailable)
+        XCTAssertFalse(failedController.canQuit); XCTAssertFalse(failedController.quitRequested)
+        XCTAssertNotNil(failedController.ownedRouter)
+        XCTAssertEqual(failedBackend.stopCount, 1)
+    }
+    func testQuitBlockReasonPermittedExceptions() async throws {
+        // Alert projection must preserve normal exits and safe failed-initialization/second-instance exits.
+        let controller = makeController(); await controller.refresh()
+        XCTAssertNil(controller.quitBlockReason); XCTAssertTrue(controller.canQuit)
+        await controller.requestQuit()
+        XCTAssertNil(controller.quitBlockReason); XCTAssertTrue(controller.quitRequested)
+
+        let secondBackend = ControlledBackend(context: context)
+        secondBackend.mutationRequiresReconciliation = true
+        let second = RouterController(backend: secondBackend, store: PrivateStore(directory: store.directory), browseHome: root)
+        XCTAssertEqual(second.error, CompanionError.instanceRunning.rawValue)
+        XCTAssertNil(second.quitBlockReason); XCTAssertTrue(second.canQuit)
+        await second.requestQuit()
+        XCTAssertTrue(second.quitRequested)
+        XCTAssertTrue(secondBackend.inspectedPaths.isEmpty); XCTAssertTrue(secondBackend.controls.isEmpty)
+        XCTAssertEqual(secondBackend.stopCount, 0)
+
+        let invalidStore = root.appendingPathComponent("invalid-store")
+        try Data("SYNTHETIC_PRIVATE_SENTINEL".utf8).write(to: invalidStore)
+        let failedBackend = ControlledBackend(context: context)
+        failedBackend.mutationRequiresReconciliation = true
+        let failed = RouterController(backend: failedBackend, store: PrivateStore(directory: invalidStore), browseHome: root)
+        XCTAssertEqual(failed.error, CompanionError.privateState.rawValue)
+        XCTAssertNil(failed.quitBlockReason); XCTAssertTrue(failed.canQuit)
+        await failed.requestQuit()
+        XCTAssertTrue(failed.quitRequested)
+        XCTAssertTrue(failedBackend.inspectedPaths.isEmpty); XCTAssertTrue(failedBackend.controls.isEmpty)
+        XCTAssertEqual(failedBackend.stopCount, 0)
+    }
     func testActionWaitsForRefreshAndUsesItsOwnFreshInspection() async {
         // A pre-action poll cannot authorize an action or allow a second simultaneous backend inspection.
         let controller = await started()

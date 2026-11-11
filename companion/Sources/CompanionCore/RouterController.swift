@@ -3,6 +3,7 @@ import Observation
 
 @MainActor @Observable public final class RouterController {
     public enum DesktopConfirmation: Equatable { case unknown, routedPending, directPending, confirmedRouted, confirmedDirect }
+    public enum QuitBlockReason: Equatable { case operationInProgress, directConfirmationPending, directRecoveryRequired, contextUnavailable }
     // Comparison metadata is stripped from this presentation snapshot.
     public private(set) var inspection: Inspection?
     public private(set) var selectedConfiguration: URL?
@@ -65,6 +66,20 @@ import Observation
     }
     public var canStop: Bool { !busy && stopPermitted }
     public var canQuit: Bool { secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation && journal.pending == nil) }
+    public var quitBlockReason: QuitBlockReason? {
+        // Presentation follows existing authority without refreshing or changing recovery evidence.
+        if secondInstance || initializationFailed { return nil }
+        if busy || mutationRequiresReconciliation || backend.mutationRequiresReconciliation { return .operationInProgress }
+        if canQuit { return nil }
+        guard usable, let context = matchingContext, let provider = inspection?.provider, revision != nil,
+              ["direct", "router"].contains(provider.state),
+              ["none", "prepared", "active", "restored"].contains(provider.recordPhase) else { return .contextUnavailable }
+        if cleanDirect(context), recoveryObligation || journal.pending != nil { return .directConfirmationPending }
+        if provider.state == "router" || provider.recoveryRequired || ["prepared", "active"].contains(provider.recordPhase) {
+            return .directRecoveryRequired
+        }
+        return .contextUnavailable
+    }
 
     public init(backend: any CompanionBackend, store: PrivateStore, browseHome: URL) {
         self.backend = backend; self.store = store; self.browseHome = browseHome
