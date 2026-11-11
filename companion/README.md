@@ -107,7 +107,10 @@ and optional recovery context/phase, never process IDs, process ownership,
 configuration copies, destinations, credential references or authentication
 commands. The nonblocking advisory instance lock is held until explicit release
 or store lifetime ends; its descriptor is closed on exec and kernel-released on
-process exit. Existing router activation locks are untouched.
+process exit. Existing router activation locks are untouched. If initialization
+fails on corrupt or unsafe private state before this instance can launch a child
+or helper, operational controls remain disabled and normal Quit is available.
+Quit preserves that evidence; it does not repair the store or confirm recovery.
 
 ## Controller state and recovery
 
@@ -147,8 +150,12 @@ Runtime replacement is allowed during recovery without changing the bound contex
 or owned child. Configuration selection stays locked while an owned child or
 pending/imported recovery depends on it. Mapping-only edits invalidate confirmation
 but cannot retarget rollback; a changed home/provider/port blocks recovery until
-the recorded context is restored. Independently readable catalogs remain available
-even when provider/record compatibility fails.
+the recorded context is restored. The activation/rollback helper rechecks the
+retained context against its own loaded configuration before creating a mutation
+lock or writing provider/recovery state. Replacement contents or a retargeted
+configuration symlink that changes that context fail with `ACTIVATION_CONFLICT`.
+Independently readable catalogs remain available even when provider/record
+compatibility fails.
 
 Mutating actions reject conflicting re-entry. Refresh calls coalesce; every async
 inspection carries both a context generation and request sequence. Older polls or

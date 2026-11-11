@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
-import { readFile, writeFile, unlink, realpath } from "node:fs/promises";
+import fs, { readFile, writeFile, unlink, realpath, symlink, readdir } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { configFingerprint } from "../src/config.js";
+import { activate } from "../src/activation.js";
 import { inspectCompanion, runCompanionControl } from "../src/companion.js";
 import { fixture, P1, P2 } from "./helpers/fixtures.js";
 
@@ -165,3 +167,63 @@ test("controls retain competing locks and unsupported provider bytes", async t =
   await assert.rejects(runCompanionControl({ action: "activate", configPath: f.configPath, expectedContext }), { code: "CONFIG_UNSUPPORTED" });
   assert.equal(await readFile(f.providerPath, "utf8"), source);
 });
+
+for (const action of ["activate", "rollback"]) {
+  for (const replacement of ["same-path configuration replacement", "symlink retarget"]) {
+    test(`${action} rejects ${replacement} after companion validation before any lock or write`, async t => {
+      const a = await setup(t), b = await setup(t);
+      const originalConfiguration = await readFile(a.configPath);
+      if (replacement === "symlink retarget") {
+        // Only canonical configuration/recovery location differs; home/provider/port remain authorized A.
+        Object.assign(b.config, a.config);
+        await b.saveConfig();
+      }
+      if (action === "rollback") {
+        if (replacement === "symlink retarget") await activate(b.configPath);
+        else {
+          // Leave valid B recovery evidence where the replacement would load it.
+          await writeFile(a.configPath, JSON.stringify(b.config));
+          await activate(a.configPath);
+          await writeFile(a.configPath, originalConfiguration);
+        }
+      }
+      const snapshot = async f => Object.fromEntries(await Promise.all(
+        (await readdir(f.dir)).filter(name => !(f === a && name === "router.json"))
+          .map(async name => [name, await readFile(join(f.dir, name))]),
+      ));
+      const before = await Promise.all([snapshot(a), snapshot(b)]);
+      const originalRead = fs.readFile, originalOpen = fs.open;
+      let replaced = false;
+      const locks = [];
+      // Keep real reads/writes; replace only the scheduling window after validation's read of A.
+      t.mock.method(fs, "readFile", async (path, ...args) => {
+        const bytes = await originalRead(path, ...args);
+        if (path === a.configPath && !replaced) {
+          replaced = true;
+          if (replacement === "symlink retarget") {
+            await unlink(a.configPath);
+            await symlink(b.configPath, a.configPath);
+          } else await writeFile(a.configPath, JSON.stringify(b.config));
+        }
+        return bytes;
+      });
+      t.mock.method(fs, "open", async (path, ...args) => {
+        if (String(path).endsWith(".activation.lock")) locks.push(path);
+        return originalOpen(path, ...args);
+      });
+      syncBuiltinESMExports();
+      try {
+        await assert.rejects(runCompanionControl({ action, configPath: a.configPath, expectedContext: contextFor(a) }),
+          { code: "ACTIVATION_CONFLICT" });
+      } finally {
+        t.mock.restoreAll();
+        syncBuiltinESMExports();
+      }
+      assert.equal(replaced, true);
+      assert.deepEqual(locks, []);
+      assert.deepEqual(await Promise.all([snapshot(a), snapshot(b)]), before);
+      if (replacement === "symlink retarget") assert.equal(await realpath(a.configPath), b.configPath);
+      else assert.equal(await readFile(a.configPath, "utf8"), JSON.stringify(b.config));
+    });
+  }
+}

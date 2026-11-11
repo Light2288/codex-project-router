@@ -86,5 +86,5 @@ export async function runCompanionControl({ action, configPath, expectedContext 
   }
   if (!isDeepStrictEqual(expectedContext, activationContext(configPath, cfg)))
     throw new RouterError("ACTIVATION_CONFLICT");
-  return { activate, rollback }[action](configPath);
+  return { activate, rollback }[action](configPath, { expectedContext });
 }

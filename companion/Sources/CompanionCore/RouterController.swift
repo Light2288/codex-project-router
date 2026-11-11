@@ -21,6 +21,7 @@ import Observation
     private var journal = CompanionJournal()
     private var usable = false
     private var secondInstance = false
+    private var initializationFailed = false
     private var recoveryObligation = false
     private var dependencyContext: ActivationContext?
     private var hasDepended = false
@@ -63,7 +64,7 @@ import Observation
         return cleanDirect(context)
     }
     public var canStop: Bool { !busy && stopPermitted }
-    public var canQuit: Bool { secondInstance || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation && journal.pending == nil) }
+    public var canQuit: Bool { secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation && journal.pending == nil) }
 
     public init(backend: any CompanionBackend, store: PrivateStore, browseHome: URL) {
         self.backend = backend; self.store = store; self.browseHome = browseHome
@@ -86,6 +87,8 @@ import Observation
             backend.onChildExit = { [weak self] id, _ in self?.childExited(id) }
         } catch {
             secondInstance = (error as? CompanionError) == .instanceRunning
+            // Initialization cannot launch a child/helper; failed private evidence stays untouched.
+            initializationFailed = !secondInstance
             self.error = safe(error)
         }
     }
@@ -206,7 +209,7 @@ import Observation
         await stopOwnedChild()
     }
     public func requestQuit() async {
-        guard !secondInstance else { quitRequested = true; return }
+        guard !secondInstance && !initializationFailed else { quitRequested = true; return }
         guard begin() else { return }
         defer { finish() }
         if ownedRouter != nil { await stopOwnedChild() }

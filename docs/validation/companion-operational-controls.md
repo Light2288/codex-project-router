@@ -45,7 +45,55 @@ For local build and launch instructions, see the [companion documentation](../..
 open "dist/Codex Project Router.app"
 ```
 
-No executable artifact changed for this final-review test/report fix. The fresh preactivation executable evidence above is retained alongside the focused source-denial package verification.
+The source-denial-only test/report fix above did not change executable resources. Its historical checks remain separate from the executable remedies and fresh verification recorded below.
+
+### Final-quality remedies and fresh automated verification
+
+The final quality review found that the companion's retained context was lost
+before the authoritative activation/rollback helper reloaded configuration. The
+remedy forwards that context and compares it with the helper's own loaded
+canonical path/home/provider/port before any mutation lock or write. Four
+synthetic regressions replace configuration contents or retarget the selected
+path to another configuration after companion validation, for both activation
+and rollback. The symlink cases keep home/provider/port identical to isolate
+canonical configuration/recovery-directory identity. Conflicts return
+`ACTIVATION_CONFLICT`, attempt no mutation lock, and preserve both contexts'
+provider, recovery, backup and other setting bytes apart from the deliberately
+replaced selected configuration.
+
+The second remedy explicitly distinguishes private-state initialization failure.
+Such an instance cannot have launched a child/helper: its operational controls
+remain disabled, while normal Quit preserves the corrupt/unsafe journal without
+backend operations or writes. Native regressions cover both malformed journal
+and unsafe-directory initialization. Existing usable-state recovery and in-flight
+mutation/child/stop/Quit guards remain covered by the full suite.
+
+Fresh checks after these executable changes passed; packaging checks used the
+rebuilt app. Every command below exited 0. Full synthetic logs are retained
+outside Git.
+
+| Exact command | Exit | Decisive result |
+|---|---|---|
+| `npm test` | 0 | 664 tests, 664 pass, 0 fail/cancelled/skipped/todo; `duration_ms 45793.593542` |
+| `npm run companion:test` | 0 | 69 core tests (4 store, 15 process backend, 50 controller) plus 4 app tests: 73 pass, 0 failures; core 36.457 seconds, app 0.036 seconds |
+| `npm run companion:build` | 0 | `Build complete! (3,28 secs)`; `Built and ad-hoc signed dist/Codex Project Router.app` |
+| `npm run companion:package-test` | 0 | 3 tests, 3 pass, 0 fail/cancelled/skipped/todo, including native source-denial; `duration_ms 2991.556458` |
+| `node --check src/cli.js` | 0 | No output |
+| `git diff --check` | 0 | No output |
+
+Both new behaviors first failed their targeted regression assertions before the
+fixes: four Node cases reported the missing `ACTIVATION_CONFLICT` rejection;
+two native initialization cases failed Quit availability/request assertions.
+Focused GREEN then passed 53 Node helper/companion tests and all 50 controller
+tests before the full checks above.
+
+These results exercise deterministic synthetic fixtures, not a fresh live race
+or GUI initialization-failure/Quit scenario. The idle user companion remains the
+earlier build and was left untouched. The rebuilt app is the new deliverable;
+earlier live restarts, responses and recovery below remain separately attributed
+historical observations. All MCP preservation, stream/billing, unrun and deferred
+qualifications in this report remain in force. The scoped follow-up review and
+final gate disposition remain pending.
 
 ## Actual native GUI observations
 
@@ -126,7 +174,7 @@ The companion remains running idle. No required live restart, response confirmat
 | AC-10 | Fresh automated/native/build/package evidence, actual GUI observations and operational documentation. Sole integrated sequential specification/quality review is pending |
 | AC-11 | User-confirmed routed/direct restarts and working responses, exact owned-setting/router recovery, preserved unrelated changes, independently stopped listener. No current transport/stream/billing outcome captured |
 
-The final whole-branch gate remains incomplete. Its initial specification review identified the source-denial evidence gap addressed above; scoped re-review and the subsequent quality review remain pending. Task-level review and this evidence report do not substitute for that sequential gate. Missing/unrun acceptance evidence remains qualified regardless of a later review verdict.
+The final whole-branch gate remains incomplete. Its initial specification review identified the source-denial evidence gap addressed above, and the scoped specification re-review passed. The subsequent quality review found the authoritative context-reload race and initialization-failure Quit issue addressed by the documented remedies. Their scoped follow-up specification and quality reviews remain pending. Task-level review and this evidence report do not substitute for that sequential gate. Missing/unrun acceptance evidence remains qualified regardless of a later review verdict.
 
 ## Unrun cases and limits of the current check
 
