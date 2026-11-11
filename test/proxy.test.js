@@ -38,9 +38,9 @@ async function setupProxy(t, handler, options = {}) {
   });
   const port = await listening(upstream(handler, calls), t);
   const globalBaseUrl = `https://127.0.0.1:${port}/api/v1`;
-  const projectBaseUrl = options.projectHandler
-    ? `https://127.0.0.1:${await listening(upstream(options.projectHandler, projectCalls), t)}/region/v1`
-    : globalBaseUrl;
+  const projectUpstream = options.projectHandler ? upstream(options.projectHandler, projectCalls) : undefined;
+  const projectPort = projectUpstream ? await listening(projectUpstream, t) : undefined;
+  const projectBaseUrl = projectUpstream ? `https://127.0.0.1:${projectPort}/region/v1` : globalBaseUrl;
   f.config.upstreamBaseUrl = globalBaseUrl;
   f.config.observeRequestMetadata = options.observeRequestMetadata ?? false;
   f.config.allowUnassignedThreadTitles = options.allowUnassignedThreadTitles ?? false;
@@ -52,6 +52,16 @@ async function setupProxy(t, handler, options = {}) {
   let output = "";
   logs.on("data", (c) => (output += c));
   const agent = new https.Agent({ ca: cert });
+  if (options.untrustedProject) {
+    const createConnection = agent.createConnection;
+    // Keep the healthy origin trusted while exercising a real TLS rejection at the selected origin.
+    agent.createConnection = function (connectionOptions, ...args) {
+      return createConnection.call(this, {
+        ...connectionOptions,
+        ...(Number(connectionOptions.port) === projectPort ? { ca: [] } : {}),
+      }, ...args);
+    };
+  }
   t.after(() => agent.destroy());
   const proxy = createProxy(f.config, {
     diagnostics: logs,
@@ -60,7 +70,7 @@ async function setupProxy(t, handler, options = {}) {
     credentialReader: options.credentialReader,
   });
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -270,6 +280,7 @@ test(`${cancellation} during ${stage} retrieval reaps real child work and preser
     holdClose: cancellation === "delayed child completion",
   });
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
     credentialRouting: credentialRouting, credentialReader: processes.reader,
   });
   let serverRequest, client;
@@ -322,6 +333,7 @@ test(`${cancellation} during ${stage} retrieval reaps real child work and preser
     assert.doesNotMatch(result.body, /SENTINEL/);
   } else assert.ok(result.error);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
   const events = diagnosticEvents(f);
   assert.equal(events.length, 1);
   assert.equal(events[0].event, "completed");
@@ -706,26 +718,27 @@ test("overlapping requests never coalesce global or project credential lookups",
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
 for (const moveAt of ["selected project lookup", "active stream"]) {
-test(`reassignment during ${moveAt} preserves the selected request and changes the next request`, async t => {
+test(`reassignment during ${moveAt} preserves the selected destination and credential snapshot`, async t => {
   const selected = Promise.withResolvers(), releaseLookup = Promise.withResolvers();
   const streamed = Promise.withResolvers(), releaseStream = Promise.withResolvers();
   t.after(() => { releaseLookup.resolve(); releaseStream.resolve(); });
-  const reads = [], values = new Map([
-    [globalReference, "GLOBAL_CREDENTIAL_SENTINEL"],
-    [projectAReference, "PROJECT_A_FIRST_SENTINEL"],
-    [projectBReference, "PROJECT_B_FIRST_SENTINEL"],
-  ]);
-  const f = await setup(t, async (req, res, calls) => {
-    if (calls.length === 1) {
-      res.write("old-route-");
-      await releaseStream.promise;
-      res.end("stream");
-    } else res.end("new-route");
+  const reads = [], reader = syntheticCredentialReader(reads);
+  const f = await setup(t, async (req, res) => {
+    res.write("old-route-");
+    await releaseStream.promise;
+    res.end("stream");
   }, {
-    credentialRouting: credentialRouting,
-    credentialReader: async reference => {
-      reads.push(reference);
-      const value = values.get(reference);
+    projectHandler: async (req, res) => {
+      res.writeHead(400);
+      res.end("GATEWAY_CONTINUATION_REJECTION_SENTINEL");
+    },
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-a"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: async (reference, options) => {
+      const value = await reader(reference, options);
       if (reference === projectAReference) {
         selected.resolve();
         await releaseLookup.promise;
@@ -733,7 +746,9 @@ test(`reassignment during ${moveAt} preserves the selected request and changes t
       return value;
     },
   });
-  const first = request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", onChunk: () => streamed.resolve()});
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  const body = '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}';
+  const first = request(f, {path: "/v1/responses?held=a%2Fb", body, token: "GLOBAL_CREDENTIAL_SENTINEL", onChunk: () => streamed.resolve()});
   await within(selected.promise, "the first request did not select its project credential");
   if (moveAt === "active stream") {
     releaseLookup.resolve();
@@ -743,15 +758,21 @@ test(`reassignment during ${moveAt} preserves the selected request and changes t
   await f.saveState();
   releaseLookup.resolve();
   await within(streamed.promise, "the selected stream did not start");
-  values.set(projectAReference, "PROJECT_A_ROTATED_SENTINEL");
-  values.set(projectBReference, "PROJECT_B_ROTATED_SENTINEL");
-  const next = await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"});
-  assert.equal(next.body, "new-route");
-  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
-    "Bearer PROJECT_A_FIRST_SENTINEL", "Bearer PROJECT_B_ROTATED_SENTINEL",
-  ]);
+  const next = await request(f, {path: "/v1/responses?next=b%2Fc", body, token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(next.status, 400);
+  assert.equal(next.body, "GATEWAY_CONTINUATION_REJECTION_SENTINEL");
   releaseStream.resolve();
   assert.equal((await first).body, "old-route-stream");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 1);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), ["Bearer PROJECT_A_CREDENTIAL_SENTINEL"]);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), ["Bearer PROJECT_B_CREDENTIAL_SENTINEL"]);
+  assert.equal(f.calls[0].url, "/api/v1/responses?held=a%2Fb");
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?next=b%2Fc");
+  for (const call of [...f.calls, ...f.projectCalls])
+    assert.equal(call.body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
   assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
   const starts = diagnosticEvents(f).filter(event => event.event === "started");
   assert.deepEqual(starts.map(event => [event.projectId, event.routeAlias]), [[P1, "route-a"], [P2, "route-b"]]);
@@ -760,67 +781,194 @@ test(`reassignment during ${moveAt} preserves the selected request and changes t
     assert.equal(complete.projectId, start.projectId);
     assert.equal(complete.routeAlias, start.routeAlias);
   }
-  assert.doesNotMatch(f.logs(), /SENTINEL/);
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
 });
 }
-test("routing streams overlap with one global token and independent mapped and title outcomes", async t => {
-  const other = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-  const ids = [T1, T2, CHILD, other], expectedActive = policyMode ? 4 : 2;
+test("routing streams overlap across origins with independent project controller and title outcomes", async t => {
+  const controllerThread = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const controllerProject = "33333333-3333-4333-8333-333333333333";
+  const otherTitle = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const ids = [T1, T2, controllerThread, CHILD, otherTitle], expectedActive = policyMode ? 5 : 3;
+  const statuses = [200, 201, 202, 203, 206];
   const releases = new Map(ids.map(id => [id, Promise.withResolvers()]));
   const firstChunks = new Map(ids.map(id => [id, Promise.withResolvers()]));
   const allActive = Promise.withResolvers(), finished = new Set(), reads = [];
   t.after(() => { for (const gate of releases.values()) gate.resolve(); });
   let active = 0, max = 0;
-  const f = await setup(t, async (req, res) => {
+  const stream = async (req, res) => {
     const id = req.headers["thread-id"], ordinal = ids.indexOf(id);
     max = Math.max(max, ++active);
-    res.writeHead(200 + ordinal, {"content-type": "text/event-stream"});
+    res.writeHead(statuses[ordinal], {"content-type": "text/event-stream"});
     res.write(`stream-${ordinal}-`);
     if (active === expectedActive) allActive.resolve();
     await releases.get(id).promise;
     res.end("done");
     active--;
-  }, {credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads)});
+  };
+  const f = await setup(t, stream, {
+    projectHandler: stream,
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-a"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  f.config.projectRoutes[controllerProject] = "controller";
+  f.state["local-projects"][controllerProject] = {id: controllerProject};
+  f.state["thread-project-assignments"][controllerThread] = {projectKind: "local", projectId: controllerProject};
+  await f.saveState();
   const pending = ids.map((id, index) => request(f, {
-    raw: index < 2 ? headers(id) : titleHeaders(id), token: "GLOBAL_CREDENTIAL_SENTINEL",
+    path: `/v1/responses?stream=${index}`, body: `{"model":"unchanged","input":"STREAM_${index}_SENTINEL"}`,
+    raw: index < 3 ? headers(id) : titleHeaders(id), token: "GLOBAL_CREDENTIAL_SENTINEL",
     onChunk: () => firstChunks.get(id).resolve(),
   }).then(result => { finished.add(id); return result; }));
-  await within(allActive.promise, "streams did not overlap upstream");
+  await within(allActive.promise, "streams did not overlap across origins");
   await within(Promise.all(ids.slice(0, expectedActive).map(id => firstChunks.get(id).promise)), "stream chunks were buffered");
+  assert.equal(active, expectedActive);
   assert.equal(max, expectedActive);
   releases.get(T2).resolve();
   assert.equal((await pending[1]).body, "stream-1-done");
+  for (const id of [T1, controllerThread, ...(policyMode ? [CHILD, otherTitle] : [])]) assert.equal(finished.has(id), false);
+  releases.get(controllerThread).resolve();
+  assert.equal((await pending[2]).body, "stream-2-done");
   assert.equal(finished.has(T1), false);
-  if (policyMode) for (const id of [CHILD, other]) assert.equal(finished.has(id), false);
+  if (policyMode) {
+    releases.get(CHILD).resolve();
+    assert.equal((await pending[3]).body, "stream-3-done");
+    assert.equal(finished.has(otherTitle), false);
+    assert.equal(finished.has(T1), false);
+  }
   for (const gate of releases.values()) gate.resolve();
   const results = await Promise.all(pending);
-  assert.deepEqual(results.map(result => result.status), policyMode ? [200, 201, 202, 203] : [200, 201, 503, 503]);
+  assert.deepEqual(results.map(result => result.status), policyMode ? [200, 201, 202, 203, 206] : [200, 201, 202, 503, 503]);
   assert.deepEqual(results.slice(0, expectedActive).map(result => result.body), policyMode
-    ? ["stream-0-done", "stream-1-done", "stream-2-done", "stream-3-done"]
-    : ["stream-0-done", "stream-1-done"]);
-  const expectedAuthorization = new Map([
-    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL"], [T2, "Bearer PROJECT_B_CREDENTIAL_SENTINEL"],
-    [CHILD, "Bearer GLOBAL_CREDENTIAL_SENTINEL"], [other, "Bearer GLOBAL_CREDENTIAL_SENTINEL"],
+    ? ["stream-0-done", "stream-1-done", "stream-2-done", "stream-3-done", "stream-4-done"]
+    : ["stream-0-done", "stream-1-done", "stream-2-done"]);
+  const firstOrigin = f.calls.map(call => [call.headers["thread-id"], call.headers.authorization, call.url, call.body]).sort();
+  assert.deepEqual(firstOrigin, (policyMode ? [
+    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=0", '{"model":"unchanged","input":"STREAM_0_SENTINEL"}'],
+    [controllerThread, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=2", '{"model":"unchanged","input":"STREAM_2_SENTINEL"}'],
+    [CHILD, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=3", '{"model":"unchanged","input":"STREAM_3_SENTINEL"}'],
+    [otherTitle, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=4", '{"model":"unchanged","input":"STREAM_4_SENTINEL"}'],
+  ] : [
+    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=0", '{"model":"unchanged","input":"STREAM_0_SENTINEL"}'],
+    [controllerThread, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=2", '{"model":"unchanged","input":"STREAM_2_SENTINEL"}'],
+  ]).sort());
+  assert.deepEqual(f.projectCalls.map(call => [call.headers["thread-id"], call.headers.authorization, call.url, call.body]), [
+    [T2, "Bearer PROJECT_B_CREDENTIAL_SENTINEL", "/region/v1/responses?stream=1", '{"model":"unchanged","input":"STREAM_1_SENTINEL"}'],
   ]);
-  for (const call of f.calls)
-    assert.equal(call.headers.authorization, expectedAuthorization.get(call.headers["thread-id"]));
-  assert.deepEqual(f.calls.map(call => call.headers.authorization).sort(), policyMode ? [
-    "Bearer GLOBAL_CREDENTIAL_SENTINEL", "Bearer GLOBAL_CREDENTIAL_SENTINEL",
-    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
-  ] : ["Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL"]);
-  assert.equal(reads.filter(reference => reference === globalReference).length, 4);
+  for (const call of f.calls) assert.equal(call.headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.equal(reads.filter(reference => reference === globalReference).length, 6);
   assert.equal(reads.filter(reference => reference === projectAReference).length, 1);
   assert.equal(reads.filter(reference => reference === projectBReference).length, 1);
   const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.equal(starts.length, expectedActive);
+  assert.equal(starts.find(event => event.threadId === controllerThread).routeAlias, "controller");
   assert.equal(starts.filter(event => event.source === "unassigned_title").length, policyMode ? 2 : 0);
   for (const event of starts) {
     assert.equal(Object.hasOwn(event, "requestMetadata"), observationMode);
     if (observationMode) assert.equal(event.requestMetadata.headers["thread-id"].id, event.threadId);
+    const complete = diagnosticEvents(f).find(completed => completed.event === "completed" && completed.requestId === event.requestId);
+    assert.equal(complete.threadId, event.threadId);
+    assert.equal(complete.projectId, event.projectId);
+    assert.equal(complete.routeAlias, event.routeAlias);
+    if (observationMode) assert.deepEqual(complete.requestMetadata, event.requestMetadata);
     if (event.source === "unassigned_title") for (const field of ["projectId", "ownerThreadId", "routeAlias"])
       assert.equal(Object.hasOwn(event, field), false);
   }
-  assert.doesNotMatch(f.logs(), /SENTINEL/);
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
 });
+for (const failure of ["401", "cross-origin 307", "connection failure", "TLS rejection", "broken stream"]) {
+test(`selected-origin ${failure} never forwards to another origin and leaves a separate target healthy`, async t => {
+  const reads = [], firstChunk = Promise.withResolvers(), tlsRejected = Promise.withResolvers();
+  t.after(() => firstChunk.resolve());
+  const f = await setup(t, async (req, res) => res.end("healthy-target"), {
+    projectHandler: async (req, res) => {
+      if (failure === "401") {
+        res.writeHead(401, {"www-authenticate": "Bearer GATEWAY_AUTH_FRAGMENT_SENTINEL"});
+        res.end("GATEWAY_ERROR_FRAGMENT_SENTINEL");
+      } else if (failure === "cross-origin 307") {
+        res.writeHead(307, {location: `${f.globalBaseUrl}/REDIRECT_DESTINATION_SENTINEL`});
+        res.end("GATEWAY_REDIRECT_FRAGMENT_SENTINEL");
+      } else if (failure === "broken stream") {
+        res.writeHead(200, {"content-type": "text/event-stream"});
+        res.write("GATEWAY_STREAM_FRAGMENT_SENTINEL");
+        await firstChunk.promise;
+        res.destroy(new Error("GATEWAY_STREAM_ERROR_SENTINEL"));
+      } else res.end("unexpected selected-origin success");
+    },
+    untrustedProject: failure === "TLS rejection",
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-b"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  if (failure === "connection failure") {
+    await new Promise(resolve => f.projectUpstream.close(resolve));
+    assert.equal(f.projectUpstream.listening, false);
+  }
+  if (failure === "TLS rejection") f.projectUpstream.once("tlsClientError", () => tlsRejected.resolve());
+  const body = '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}';
+  const chunks = [];
+  const selected = request(f, {
+    path: "/v1/responses?selected=a%2Fb", body, token: "GLOBAL_CREDENTIAL_SENTINEL",
+    onChunk: chunk => { chunks.push(chunk.toString()); firstChunk.resolve(); },
+  });
+  if (failure === "broken stream") {
+    await assert.rejects(within(selected, "broken selected stream did not close"), {code: "ECONNRESET"});
+    assert.equal(chunks.join(""), "GATEWAY_STREAM_FRAGMENT_SENTINEL");
+  } else {
+    const result = await within(selected, "selected-origin failure did not settle");
+    if (failure === "401") {
+      assert.equal(result.status, 401);
+      assert.equal(result.headers["www-authenticate"], "Bearer GATEWAY_AUTH_FRAGMENT_SENTINEL");
+      assert.equal(result.body, "GATEWAY_ERROR_FRAGMENT_SENTINEL");
+    } else if (failure === "cross-origin 307") {
+      assert.equal(result.status, 307);
+      assert.equal(result.headers.location, `${f.globalBaseUrl}/REDIRECT_DESTINATION_SENTINEL`);
+      assert.equal(result.body, "GATEWAY_REDIRECT_FRAGMENT_SENTINEL");
+    } else {
+      assert.equal(result.status, 502);
+      assert.equal(JSON.parse(result.body).error.code, "UPSTREAM_FAILED");
+      assert.doesNotMatch(result.body, /SENTINEL|https:|127\.0\.0\.1/);
+    }
+  }
+  if (failure === "TLS rejection") await within(tlsRejected.promise, "selected origin did not reject TLS");
+  assert.equal(f.calls.length, 0, "failed request reached the fallback or redirect origin");
+  const selectedCalls = failure === "connection failure" || failure === "TLS rejection" ? 0 : 1;
+  assert.equal(f.projectCalls.length, selectedCalls, "selected request was retried");
+  const healthy = await request(f, {path: "/v1/responses?healthy=c%2Fd", raw: headers(T2), body, token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(healthy.status, 200);
+  assert.equal(healthy.body, "healthy-target");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, selectedCalls);
+  assert.equal(f.calls[0].url, "/api/v1/responses?healthy=c%2Fd");
+  assert.equal(f.calls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.calls[0].body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses?selected=a%2Fb");
+    assert.equal(call.headers.authorization, "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  }
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+  const completions = diagnosticEvents(f).filter(event => event.event === "completed");
+  assert.equal(completions.length, 2);
+  assert.equal(completions[0].projectId, P1);
+  assert.equal(completions[0].status, failure === "401" ? 401 : failure === "cross-origin 307" ? 307 : 502);
+  assert.equal(completions[0].errorCode, failure === "401" || failure === "cross-origin 307" ? undefined : "UPSTREAM_FAILED");
+  assert.equal(completions[1].projectId, P2);
+  assert.equal(completions[1].status, 200);
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
+});
+}
 test("exact initial titles forward only when enabled without project ownership",async t => {
   const f=await setup(t, async (req,res) => {
     res.writeHead(201,{"content-type":"text/event-stream"});
