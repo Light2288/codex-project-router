@@ -6,11 +6,11 @@
 
 **Slug:** `companion-operational-controls`
 
-**Status:** Automated checks and the brief user-assisted lifecycle are recorded; the sole sequential whole-branch specification/quality review is pending.
+**Status:** Approved increment complete. Fresh verification and the brief user-assisted lifecycle/recovery are recorded; the sole integrated sequential specification/quality gate passed after scoped corrections. No open findings remain.
 
-This report covers the approved [specification](../superpowers/specs/2026-11-11-companion-operational-controls.md) and [implementation plan](../superpowers/plans/2026-11-11-companion-operational-controls.md). It records controller-observed local facts separately from user-reported restarts and working responses. The document worker used only the controller's sanitized handoff; private checkpoints, process evidence and full logs remain outside Git with owner-only protection.
+This report covers the approved [specification](../superpowers/specs/2026-11-11-companion-operational-controls.md) and [implementation plan](../superpowers/plans/2026-11-11-companion-operational-controls.md). It records controller-observed local facts separately from user-reported restarts and working responses. The document worker used only the controller's sanitized handoff; private live checkpoints, process evidence and full private logs remain outside Git with owner-only protection. Synthetic verification and review results are summarized here.
 
-The real lifecycle used the existing normal **legacy** profile. Both required manual restarts and working-response confirmations were explicitly reported by the user. Direct restoration and the stopped owned listener were independently checked locally. No live restart, response-confirmation or owned-listener cleanup obligation remains. The companion remains running idle. This is not a final whole-branch review verdict or new HTTP, stream-completeness or billing evidence.
+The real lifecycle used the existing normal **legacy** profile. Both required manual restarts and working-response confirmations were explicitly reported by the user. Direct restoration and the stopped owned listener were independently checked locally. No live restart, response-confirmation or owned-listener cleanup obligation remains. The companion remains running idle. These live observations provide no new independent HTTP, stream-completeness or billing evidence. The completed final review is recorded below.
 
 ## Build, runtime and automated verification
 
@@ -92,8 +92,7 @@ or GUI initialization-failure/Quit scenario. The idle user companion remains the
 earlier build and was left untouched. The rebuilt app is the new deliverable;
 earlier live restarts, responses and recovery below remain separately attributed
 historical observations. All MCP preservation, stream/billing, unrun and deferred
-qualifications in this report remain in force. The scoped follow-up review and
-final gate disposition remain pending.
+qualifications in this report remain in force. The scoped follow-up specification and quality reviews passed with both findings addressed and no new findings. Their identities and dispositions are recorded below.
 
 ## Actual native GUI observations
 
@@ -171,10 +170,10 @@ The companion remains running idle. No required live restart, response confirmat
 | AC-07 | Stop/Quit/ownership and port-outcome tests, observed close/reopen and native menu Quit, real direct confirmation followed by owned-child exit and independent empty-port check |
 | AC-08 | Store/process/controller failure and conservative recovery tests plus documented guidance. Crash/relaunch/adoption was not separately exercised live; no supervision claim |
 | AC-09 | Existing Node regressions, synthetic bounded-I/O/privacy/containment checks and clean bundle. Controls did not retrieve real credentials, inspect request bodies or preflight destinations |
-| AC-10 | Fresh automated/native/build/package evidence, actual GUI observations and operational documentation. Sole integrated sequential specification/quality review is pending |
+| AC-10 | Fresh automated/native/build/package evidence, actual GUI observations and operational documentation. Sole integrated sequential specification/quality gate passed after scoped corrections; no open findings |
 | AC-11 | User-confirmed routed/direct restarts and working responses, exact owned-setting/router recovery, preserved unrelated changes, independently stopped listener. No current transport/stream/billing outcome captured |
 
-The final whole-branch gate remains incomplete. Its initial specification review identified the source-denial evidence gap addressed above, and the scoped specification re-review passed. The subsequent quality review found the authoritative context-reload race and initialization-failure Quit issue addressed by the documented remedies. Their scoped follow-up specification and quality reviews remain pending. Task-level review and this evidence report do not substitute for that sequential gate. Missing/unrun acceptance evidence remains qualified regardless of a later review verdict.
+The sole final integrated gate is complete. Initial specification review identified the source-denial evidence gap, closed by the focused package test and scoped specification PASS. Whole-branch quality review then found the Important authoritative-context reload race and Minor initialization-failure Quit trap. The combined correction was committed as `d028350`, with meaningful RED/GREEN and all fresh checks above. Scoped specification review passed first; the same quality reviewer then marked both findings ADDRESSED and returned PASS with no new findings, breakage or out-of-scope observations. The prior unchanged-code assessment was retained; no second whole-branch review seat was dispatched. Missing/unrun evidence retains its qualifications. The extra corrective wave exceeded the base workflow cap under the explicitly recorded user-instruction-precedence ruling below.
 
 ## Unrun cases and limits of the current check
 
@@ -203,4 +202,105 @@ The wider companion direction does not authorize subsequent increments. Deferred
 
 No automatic desktop restart or prompt, startup/activation, connection factory reset, public distribution/notarization, bundled Node, cross-platform/remote-host support, telemetry/export service or network control API is included.
 
-The current increment ends after Task 5 documentation/task review, the sole integrated sequential specification/quality whole-branch review, reviewed evidence/dispositions and the final report. The required live recovery is complete with the owned-setting/MCP qualification above; final review is pending. No push, merge or next-increment specification/planning is authorized.
+The approved increment has reached its endpoint: working local app, verification, user-assisted lifecycle/recovery, task reviews, sole final sequential gate and recorded dispositions. Required live recovery is complete with the owned-setting/MCP qualification above. Work is committed locally on `feat/companion-operational-controls`; no push, merge or subsequent increment was performed.
+
+To use the reviewed rebuilt app, choose **Quit Codex Project Router** from the currently idle older copy, then open `dist/Codex Project Router.app` using the command above. Opening it does not activate routing. The new native build has synthetic launch/package evidence; the earlier human GUI/lifecycle observations retain their recorded build boundary.
+
+
+## Final review identity and reports
+
+The immutable package covered baseline `66cc1c9e24361ea3dd807e4ade2c8a2f37317220` through reviewed product HEAD `d02835080b0b1ffc2c582a0ca2fada1259156627`. The final evidence commit changes documentation only. Parent and both reviewers independently verified the same package bytes and identities; quality opened only after the fresh specification PASS.
+
+- Gate run: `2be3c051-3a90-42aa-92d6-d68802c14bae`
+- Reviewed state: `git:d02835080b0b1ffc2c582a0ca2fada1259156627:419fddd1-da64-4db8-b3f6-b5501e284f21`
+- Review-package SHA-256 (nonsecret review evidence): `d3ed95ea527375b62bee137210ea0fc557666777a3181359fd42e5366bd8150f`
+- Specification reviewer: `review-spec`, `gpt-6-luna`, high reasoning
+- Quality reviewer: `review-quality`, `gpt-6.1-sol`, high reasoning
+
+### Final scoped specification result
+
+```text
+SPEC REVIEW: PASS
+
+GATE_RUN_ID: 2be3c051-3a90-42aa-92d6-d68802c14bae
+REVIEWED_STATE_ID: git:d02835080b0b1ffc2c582a0ca2fada1259156627:419fddd1-da64-4db8-b3f6-b5501e284f21
+PACKAGE_SHA256: d3ed95ea527375b62bee137210ea0fc557666777a3181359fd42e5366bd8150f
+
+The package identities and recomputed hash match the expected values. It contains the approved specification and plan, complete changed-file list and branch diff, scoped corrective diff, verification evidence, integrated mode, and the disclosed execution-policy exception.
+
+Both findings are addressed within approved scope:
+
+- src/activation.js passes the retained context to the authoritative helper, which compares it with its freshly loaded context before directory validation, lock creation, readiness checks, or writes. Synthetic replacement and symlink-retarget regressions cover activation and rollback; they assert ACTIVATION_CONFLICT, no mutation lock, and preserved state.
+- RouterController.swift allows normal Quit after initialization failure, which occurs before this instance launches a child or helper. Operational controls remain disabled, failed journal/store evidence is preserved, and ordinary recovery and Quit guards remain intact. Corrupt-journal and unsafe-store tests cover this path.
+
+The package reports meaningful RED/GREEN results and fresh verification: 664 Node tests, 73 native tests, and 3 package tests passed with zero skips; build, syntax, and whitespace checks also passed. The corrective delta is limited to the helper, controller, tests, and related documentation; no new scope was found.
+
+Declined to judge, retained from the prior assessment: private checkpoint and live-operation truth; GUI control invocation and native-owned router under source denial; unrun live GUI, failure-injection, and listener scenarios; direct foreign-UID and deterministic network unknown-outcome behavior; transport, stream, billing, and historical connection claims; and deferred account, Keychain, assignment, visibility, startup, distribution, and platform capabilities.
+```
+
+### Final scoped quality result
+
+```text
+QUALITY REVIEW: PASS — scoped corrective follow-up.
+
+GATE_RUN_ID: 2be3c051-3a90-42aa-92d6-d68802c14bae
+REVIEWED_STATE_ID: git:d02835080b0b1ffc2c582a0ca2fada1259156627:419fddd1-da64-4db8-b3f6-b5501e284f21
+PACKAGE_SHA256: d3ed95ea527375b62bee137210ea0fc557666777a3181359fd42e5366bd8150f
+
+Expected identities, current package identities/recomputed hash, and the complete fresh SPEC REVIEW: PASS all match. The package remained unchanged.
+
+Reviewed only 0166e4d→d028350, the two original findings, their regression evidence, and possible new breakage from that delta. The prior unchanged-code assessment is retained.
+
+Finding dispositions:
+
+1. Important context-binding race — ADDRESSED. src/companion.js:89 forwards expectedContext. The authoritative helper compares it with its own loaded canonical path, home, provider and port at src/activation.js:156, before directory validation, lock creation, readiness checks or writes. Both mutation paths retain the loaded configuration afterward. Four regressions cover activation/rollback with replacement contents and symlink retargeting, including canonical-path-only differences. They assert ACTIVATION_CONFLICT, zero mutation-lock attempts and preserved state. Calls without the optional guard retain existing CLI behavior.
+
+2. Minor initialization-failure Quit trap — ADDRESSED. RouterController.swift:91 records initialization failure separately. canQuit and requestQuit() allow exit for that state, which occurs before this instance launches any child/helper. Operational controls remain disabled; normal usable-state recovery and mutation guards are unchanged. Corrupt-journal and unsafe-store regressions verify Quit availability, no backend operations, preserved evidence and sanitized errors.
+
+New findings: NONE.
+New breakage: NONE found.
+Out-of-scope observations: NONE.
+
+The supplied evidence records meaningful RED failures followed by passing focused regressions and fresh checks: 664 Node tests, 73 native tests, rebuilt signed app, three package tests with zero skips, syntax and whitespace checks. I reviewed that evidence without rerunning suites or performing operational actions.
+
+Declined-to-judge behaviors:
+- Actual live replacement races and GUI initialization-failure Quit: synthetic evidence only; no fresh live exercise was claimed.
+- Independent truth of private checkpoints, process comparisons and user restarts/responses: prohibited private/operational access; supplied attribution remains intact.
+- GUI controls and a native-owned router under source denial: unobserved; the package establishes native window/store behavior and separately invoked bundled controls.
+- Other disclosed unrun live GUI, crash/relaunch, listener-replacement, failure-injection and keyboard-Quit scenarios: automated evidence does not establish live observations.
+- Direct foreign-UID and deterministic native network-unknown outcomes: direct behavioral evidence remains unobserved.
+- Stream completeness, cancellation cause, independent loaded settings, gateway/team billing, cross-instance continuation and the historical connection issue: evidence remains insufficient.
+- Deferred account/Keychain/default/assignment editing, visibility, startup/supervision, distribution, bundled Node and other platforms: outside approved scope.
+
+Both original findings are closed by this corrective delta. No files were changed and no additional review seat or fix loop was initiated.
+```
+
+## Execution rulings
+
+The following are every ledger ruling, in original order, with the stated cost if wrong. They preserve the implementation decisions before this plan's ignored workspace is removed.
+
+- Ruling: Honor the explicit existing-checkout preference rather than create a worktree — user instructions override isolation defaults — reduced checkout isolation if wrong, with all work confined to the named feature branch.
+
+- Ruling: Task 1 approval/main/branch/artifact step is already complete in b9d97c0; workers verify and consume it, never repeat setup — avoids replaying completed authorized work — rework only if the setup evidence is later disproven.
+
+- Ruling: Package tests may skip a missing app only during ordinary npm test before packaging; npm_lifecycle_event=companion:package-test makes a missing artifact a failure — implements the approved dual invocation contract without a new production flag — failed final package verification if invocation detection is wrong.
+
+- Ruling: For new compile-time interfaces, minimal signature scaffolding may enable meaningful failing behavioral assertions; do not count accidental import/fixture failures as TDD proof — aligns plan RED intent with TDD quality — rework if the reported RED does not exercise the intended behavior.
+
+- Ruling: Preserve exact route-key semantics while validating UUID catalog key/id identity in normalized form; reject ambiguous duplicate normalized identities and leave non-exact case-only mappings catalog_missing — avoids inventing an assignment or changing the existing resolver — malformed-case data may require manual correction if this conservative UI projection rejects it.
+
+- Ruling: Preserve the existing loader's CONFIG_UNAVAILABLE for unreadable/malformed JSON and project fixed companion invalid/unavailable categories without reparsing solely for classification — retains legacy error semantics and privacy — generic correction guidance may be less specific for malformed JSON.
+
+- Ruling: Native decoding follows the reviewed Task 1 wire with proxyReady and recordPhase nested under provider; the planning bullet grouped those provider facts ambiguously — aligns consumers to the actual local bridge without a product-scope change — wire compatibility rework if consumers use a root-level field.
+
+- Ruling: start retains and returns a live owned child after readiness timeout; fresh inspection determines readiness, without a new historical startupReady authority — avoids losing the child or activating from a stale startup observation — a delayed startup remains visibly not-ready until refreshed.
+
+- Ruling: Permit a narrow internal discovery-candidate dependency injection initializer while preserving the public initializer and production candidate order — deadline tests need deterministic slow executables without editing real installations or HOME — extra internal testability seam may need removal if it diverges from production execution.
+
+- Ruling: Add explicit CompanionBackend.mutationRequiresReconciliation property (ProcessBackend: mutationInFlight || needsReconciliation), with no default-false protocol extension — controller must not accept direct/routed confirmation or cleanup from apparently direct disk while an uncertain provider helper still runs — additive internal API/test work; false reporting by a backend would remain unsafe. This implements existing approved uncertainty/cleanup scope under the plan's allowed core extensions.
+
+- Ruling: Enforce strict inspection single-flight across refresh and action inspections inside RouterController during Task 4 integration; UI busy gating alone is insufficient — approved Task 4 explicitly requires one inspection in flight and coalescing, and action authorization must stay fresh after prior reads — narrow scheduler/test changes may need rework if they weaken generation safety or queue stale requests. This fulfills existing scope, not a new concurrency product design.
+
+- Ruling: Strengthen package validation with isolated macOS filesystem denial of the checkout while leaving the actual checkout intact — the final specification review requires direct AC-01 evidence beyond the approved plan's relocation/resource tests — extra platform-specific verification work, and an honest remaining limitation if the isolation mechanism cannot demonstrate that condition.
+
+- Ruling: Make one additional combined corrective wave and scoped sequential follow-up for both quality findings, despite the base final-review single-wave cap — the user explicitly requires completing the approved increment autonomously with no extra gates between ordinary implementation tasks, and the context-binding guard/failure handling are already approved requirements; this higher-priority authorization takes precedence over stopping at the skill cap — additional implementation/review cost and rework if the narrow remediation broadens or weakens recovery. This is a disclosed execution-policy exception, not a new increment, artifact-scope change, or permission to push/merge.
