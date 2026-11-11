@@ -59,3 +59,51 @@ authoritative; there is no cross-file transaction against external editors.
 Readiness proves neither desktop-loaded settings nor gateway/key acceptance.
 Restart Codex manually after provider changes and explicitly confirm a working
 response. Native lifecycle and recovery controls are documented with the app.
+
+## Native core verification
+
+`npm run companion:test` builds the macOS Swift package and runs its XCTest
+suite. Tests use private temporary directories and controlled fixture processes;
+they do not select or modify actual router/provider configuration or Keychain.
+
+The `CompanionCore` library contains the wire types, `PrivateStore`, and the
+main-actor `ProcessBackend`. It currently has no executable or UI target.
+`ProcessBackend(resourcesURL:nodeExecutable:)` expects a resource directory with
+`src/companion-cli.js` and `src/cli.js`; packaging must include their production
+modules and dependencies. Paths containing spaces are passed as individual
+arguments to `Process`, never interpreted by a shell.
+
+Runtime discovery validates an explicit/saved executable first, then
+`/opt/homebrew/bin/node`, `/usr/local/bin/node`, `/usr/bin/node`, and versioned
+Node 24 installations under `~/.nvm/versions/node/`. It never searches the GUI
+`PATH` or reads a shell profile. Commands pass `--use-system-ca`; their environment
+contains only ordinary identity, locale and temporary-directory variables.
+`NODE_OPTIONS`, `NODE_PATH`, dynamic-loader variables and unrelated secret-bearing
+environment variables are excluded.
+
+Read-only requests have a five-second deadline. One-shot stdout is limited to
+1 MiB and stderr to 16 KiB; error messages never contain raw child output.
+Timeout, cancellation, overflow, invalid responses or unsuccessful exit after a
+provider operation begins leave its outcome uncertain. A live mutation keeps
+draining and is never killed or retried automatically. Further writes remain
+blocked until it exits and a fresh matching inspection reconciles the context.
+
+A router start retains the actual child `Process` and a session-local UUID.
+Matching readiness is polled for at most five seconds after launch. If the child
+is still live after that interval, the caller receives its retained handle and
+must inspect fresh readiness rather than assume startup succeeded. Stopping
+accepts only that exact currently live handle. Its result distinguishes child
+exit from the loopback port being empty, occupied or unknown. An occupied port
+can belong to another listener, which is never adopted or signalled.
+
+The app supplies `~/.codex-project-router/companion/` as the production private
+store directory. It must be owned by the current user with mode 0700; `state.json`
+and `instance.lock` must be regular, singly linked, owner-only mode-0600 files.
+Symlinks, foreign ownership, unsafe modes, corrupt/unknown journal fields and
+unsupported schemas fail visibly. State is atomically replaced and synced;
+existing unsafe evidence is preserved. The schema stores only selected paths
+and optional recovery context/phase, never process IDs, process ownership,
+configuration copies, destinations, credential references or authentication
+commands. The nonblocking advisory instance lock is held until explicit release
+or store lifetime ends; its descriptor is closed on exec and kernel-released on
+process exit. Existing router activation locks are untouched.
