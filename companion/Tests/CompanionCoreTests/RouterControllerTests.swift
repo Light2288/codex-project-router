@@ -86,6 +86,75 @@ import XCTest
         XCTAssertEqual(backend.maximumConcurrentInspections, 1)
         XCTAssertNotNil(controller.ownedRouter)
     }
+    func testQueuedPollingDoesNotPreventStart() async {
+        let controller = makeController(); await controller.refresh()
+        XCTAssertTrue(controller.canStart)
+        await withQueuedPolling(controller) { await controller.start() }
+        XCTAssertEqual(backend.startCount, 1)
+        XCTAssertNotNil(controller.ownedRouter)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventActivation() async {
+        let controller = await started()
+        await withQueuedPolling(controller) { await controller.activate() }
+        XCTAssertEqual(backend.controls.count, 1)
+        XCTAssertEqual(controller.inspection?.provider.state, "router")
+        XCTAssertEqual(controller.desktopConfirmation, .routedPending)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventDirectRestoration() async throws {
+        let controller = await activated()
+        await withQueuedPolling(controller) { await controller.restoreDirect() }
+        XCTAssertEqual(backend.controls.count, 2)
+        XCTAssertEqual(backend.controls.last?.0, .rollback)
+        XCTAssertEqual(controller.inspection?.provider.state, "direct")
+        XCTAssertEqual(try store.load().pending?.phase, .directConfirmation)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventRoutedConfirmation() async {
+        let controller = await activated()
+        await withQueuedPolling(controller) { await controller.confirmRoutedResponse() }
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventDirectConfirmation() async throws {
+        let controller = await activated(); await controller.restoreDirect()
+        await withQueuedPolling(controller) { await controller.confirmDirectResponse() }
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedDirect)
+        XCTAssertNil(try store.load().pending)
+        XCTAssertTrue(controller.canStop)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventStop() async {
+        let controller = await started()
+        await withQueuedPolling(controller) { await controller.stop() }
+        XCTAssertEqual(backend.stopCount, 1)
+        XCTAssertNil(controller.ownedRouter)
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertNil(controller.error)
+    }
+    func testQueuedPollingDoesNotPreventQuit() async {
+        let controller = makeController(); await controller.refresh()
+        await withQueuedPolling(controller) { await controller.requestQuit() }
+        XCTAssertTrue(controller.quitRequested)
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertNil(controller.error)
+    }
+    private func withQueuedPolling(_ controller: RouterController, action: @escaping () async -> Void) async {
+        // Queuing timer requests is not newer evidence and cannot discard this unchanged action inspection.
+        let baseline = backend.inspectedPaths.count
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let operation = Task { await action() }
+        await waitUntil { barrier.waiting }
+        var pollStarted = false
+        let poll = Task { pollStarted = true; await controller.refresh() }
+        await waitUntil { pollStarted }
+        for _ in 0..<20 { await controller.refresh() }
+        barrier.release(backend.snapshot)
+        await operation.value; await poll.value
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertLessThanOrEqual(backend.inspectedPaths.count, baseline + 4)
+    }
     func testConfirmationPresentationGuardsFollowFreshContextAndReconciliation() async {
         let controller = await activated()
         XCTAssertTrue(controller.canSelectNode)
@@ -465,8 +534,8 @@ import XCTest
         XCTAssertEqual(controller.desktopConfirmation, .confirmedDirect)
     }
 
-    func testStaleDirectConfirmationCannotReplaceNewerRouterSnapshot() async throws {
-        // An older confirmation response must not clear recovery after a newer inspection found router state.
+    func testLaterObservedRouterStateInvalidatesQueuedDirectConfirmation() async throws {
+        // A poll that actually observes reactivation must reopen recovery after an unchanged confirmation read.
         let controller = await activated(); await controller.restoreDirect()
         let oldDirect = backend.snapshot
         let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
@@ -481,17 +550,31 @@ import XCTest
         XCTAssertNotNil(try store.load().pending)
         XCTAssertFalse(controller.canStop); XCTAssertFalse(controller.canQuit)
     }
-    func testStaleActivationInspectionCannotOverrideNewerReadinessLoss() async {
-        // A held readiness check cannot authorize activation after a later inspection lost readiness.
+    func testConfirmationRejectsChangedRevisionWhenPollingIsQueued() async throws {
+        // Changed evidence returned by confirmation must retain recovery even while timer requests are queued.
+        let controller = await activated(); await controller.restoreDirect()
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let confirmation = Task { await controller.confirmDirectResponse() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.state = "router"; backend.snapshot.provider.recordPhase = "active"; backend.snapshot.revision = "external-reactivation"
+        let refresh = Task { await controller.refresh() }
+        await Task.yield()
+        barrier.release(backend.snapshot); await confirmation.value; await refresh.value
+        XCTAssertEqual(controller.inspection?.provider.state, "router")
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertNotNil(try store.load().pending)
+        XCTAssertFalse(controller.canStop); XCTAssertFalse(controller.canQuit)
+    }
+    func testActivationRejectsReadinessLossWhenPollingIsQueued() async {
+        // A held action inspection returning lost readiness cannot authorize activation, regardless of queued polls.
         let controller = await started()
-        let oldReady = backend.snapshot
         let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
         let activation = Task { await controller.activate() }
         await waitUntil { barrier.waiting }
         backend.snapshot.provider.proxyReady = false
         let refresh = Task { await controller.refresh() }
         await Task.yield()
-        barrier.release(oldReady); await activation.value; await refresh.value
+        barrier.release(backend.snapshot); await activation.value; await refresh.value
         XCTAssertEqual(backend.controls.count, 0)
         XCTAssertEqual(controller.inspection?.provider.proxyReady, false)
     }

@@ -255,12 +255,13 @@ import Observation
         else { inspectionWaiters.removeFirst().resume() }
     }
     @discardableResult private func inspectNow() async -> Bool {
-        inspectionSequence &+= 1
-        let requestSequence = inspectionSequence
         // Actions must inspect after prior work ends; a pre-action snapshot cannot authorize them.
         // There is at most one action and one coalesced refresh caller waiting here.
         await acquireInspectionSlot()
         defer { releaseInspectionSlot() }
+        // Only a started inspection can produce newer evidence. A queued timer cannot supersede an action.
+        inspectionSequence &+= 1
+        let requestSequence = inspectionSequence
         let requestGeneration = generation
         defer { mutationRequiresReconciliation = backend.mutationRequiresReconciliation }
         do {
