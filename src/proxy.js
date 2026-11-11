@@ -136,7 +136,8 @@ export function createProxy(
           );
           return;
         }
-        let authorization = req.headers.authorization;
+        let authorization = req.headers.authorization,
+          upstreamBaseUrl = config.upstreamBaseUrl;
         if (config.credentialRouting) {
           const globalCredential = await credentialReader(
             config.credentialRouting.globalCredential,
@@ -161,21 +162,23 @@ export function createProxy(
             : { source: "catalog" };
         if (controller.signal.aborted || res.destroyed || completed) return;
         if (config.credentialRouting && resolution.routeAlias !== undefined) {
-          const references = config.credentialRouting.routeCredentials;
-          if (!Object.hasOwn(references, resolution.routeAlias))
+          const targets = config.credentialRouting.routeTargets;
+          if (!Object.hasOwn(targets, resolution.routeAlias))
             throw new RouterError("CREDENTIAL_UNMAPPED");
+          const target = targets[resolution.routeAlias];
+          upstreamBaseUrl = target.upstreamBaseUrl;
           const projectCredential = await credentialReader(
-            references[resolution.routeAlias],
+            target.credential,
             { signal: controller.signal },
           );
           if (controller.signal.aborted || res.destroyed || completed) return;
           authorization = `Bearer ${projectCredential}`;
         }
+        const url = new URL(
+          upstreamBaseUrl.replace(/\/$/, "") + admission.upstreamPath,
+        );
         record("started");
         if (controller.signal.aborted || res.destroyed || completed) return;
-        const url = new URL(
-          config.upstreamBaseUrl.replace(/\/$/, "") + admission.upstreamPath,
-        );
         const headers = endToEnd(req.headers);
         if (config.credentialRouting) headers.authorization = authorization;
         headers.host = url.host;

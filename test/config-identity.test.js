@@ -12,12 +12,16 @@ const credentialReference = () => ({
   service: "synthetic-service",
   account: "synthetic-account",
 });
+const routeTarget = (credential = credentialReference()) => ({
+  upstreamBaseUrl: "https://project.example.invalid/region/v1",
+  credential,
+});
 const credentialRouting = () => ({
   globalCredential: credentialReference(),
-  routeCredentials: { "route-a": credentialReference() },
+  routeTargets: { "route-a": routeTarget() },
 });
 
-test("legacy loading omits credential routing and enabled references are deeply frozen", async (t) => {
+test("legacy loading omits credential routing and enabled targets are deeply frozen", async (t) => {
   const f = await fixture(t);
   assert.equal(Object.hasOwn(await loadRouterConfig(f.configPath), "credentialRouting"), false);
   f.config.credentialRouting = credentialRouting();
@@ -25,26 +29,28 @@ test("legacy loading omits credential routing and enabled references are deeply 
   const config = await loadRouterConfig(f.configPath);
   assert.deepEqual(config.credentialRouting, credentialRouting());
   for (const value of [config, config.credentialRouting,
-    config.credentialRouting.globalCredential, config.credentialRouting.routeCredentials,
-    config.credentialRouting.routeCredentials["route-a"]])
+    config.credentialRouting.globalCredential, config.credentialRouting.routeTargets,
+    config.credentialRouting.routeTargets["route-a"], config.credentialRouting.routeTargets["route-a"].credential])
     assert.ok(Object.isFrozen(value));
   assert.throws(() => { config.credentialRouting.globalCredential.account = "changed"; }, TypeError);
-  assert.throws(() => { config.credentialRouting.routeCredentials["route-a"].service = "changed"; }, TypeError);
+  assert.throws(() => { config.credentialRouting.routeTargets["route-a"].upstreamBaseUrl = "changed"; }, TypeError);
+  assert.throws(() => { config.credentialRouting.routeTargets["route-a"].credential.service = "changed"; }, TypeError);
 });
 
-test("credential routing permits empty maps, shared items, unused aliases and own constructor aliases", async (t) => {
-  const f = await fixture(t);
-  for (const routeCredentials of [{}, {
-    "route-a": credentialReference(), "route-b": credentialReference(),
-    unused: credentialReference(), constructor: credentialReference(), ["a".repeat(64)]: credentialReference(),
+test("credential routing permits empty maps, shared targets, unused aliases and own aliases", async (t) => {
+  const f = await fixture(t), shared = routeTarget();
+  for (const routeTargets of [{}, {
+    "route-a": shared, "route-b": shared,
+    unused: routeTarget(), constructor: routeTarget(), toString: routeTarget(), ["a".repeat(64)]: routeTarget(),
   }]) {
-    f.config.credentialRouting = { globalCredential: credentialReference(), routeCredentials };
+    f.config.credentialRouting = { globalCredential: credentialReference(), routeTargets };
     await f.saveConfig();
     const config = await loadRouterConfig(f.configPath);
-    assert.deepEqual(config.credentialRouting.routeCredentials, routeCredentials);
-    if (Object.hasOwn(routeCredentials, "constructor")) {
-      assert.ok(Object.hasOwn(config.credentialRouting.routeCredentials, "constructor"));
-      assert.ok(Object.isFrozen(config.credentialRouting.routeCredentials.constructor));
+    assert.deepEqual(config.credentialRouting.routeTargets, routeTargets);
+    for (const alias of ["constructor", "toString"]) if (Object.hasOwn(routeTargets, alias)) {
+      assert.ok(Object.hasOwn(config.credentialRouting.routeTargets, alias));
+      assert.ok(Object.isFrozen(config.credentialRouting.routeTargets[alias]));
+      assert.ok(Object.isFrozen(config.credentialRouting.routeTargets[alias].credential));
     }
   }
 });
@@ -52,30 +58,51 @@ test("credential routing permits empty maps, shared items, unused aliases and ow
 test("credential references accept the 1024-character boundary and preserve literal absolute paths", async (t) => {
   const f = await fixture(t);
   const reference = { keychainPath: "/" + "p".repeat(1023), service: "s".repeat(1024), account: "a".repeat(1024) };
-  f.config.credentialRouting = { globalCredential: reference, routeCredentials: { "route-a": reference } };
+  f.config.credentialRouting = { globalCredential: reference, routeTargets: { "route-a": routeTarget(reference) } };
   await f.saveConfig();
-  assert.deepEqual((await loadRouterConfig(f.configPath)).credentialRouting.globalCredential, reference);
+  const config = await loadRouterConfig(f.configPath);
+  assert.deepEqual(config.credentialRouting.globalCredential, reference);
+  assert.deepEqual(config.credentialRouting.routeTargets["route-a"].credential, reference);
   const literal = "/$HOME/${SYNTHETIC_HOME}/~/synthetic.keychain-db";
   f.config.credentialRouting.globalCredential.keychainPath = literal;
   await f.saveConfig();
   assert.equal((await loadRouterConfig(f.configPath)).credentialRouting.globalCredential.keychainPath, literal);
 });
 
-test("credential routing rejects malformed structure and aliases without reflecting values", async (t) => {
+test("explicit target schema rejects obsolete and incomplete routing", async (t) => {
   const f = await fixture(t);
   const invalid = [
     null, true, false, [], "SECRET_SENTINEL", 1, {},
     { globalCredential: credentialReference() },
-    { routeCredentials: {} },
+    { routeTargets: {} },
+    { globalCredential: credentialReference(), routeCredentials: {} },
+    { ...credentialRouting(), routeCredentials: { "route-a": credentialReference() } },
     { ...credentialRouting(), unexpected: "SECRET_SENTINEL" },
     ...[null, [], true, "SECRET_SENTINEL"].map(globalCredential => ({ ...credentialRouting(), globalCredential })),
-    ...[null, [], true, "SECRET_SENTINEL"].map(routeCredentials => ({ ...credentialRouting(), routeCredentials })),
+    ...[null, [], true, "SECRET_SENTINEL"].map(routeTargets => ({ ...credentialRouting(), routeTargets })),
     ...["", "_route", "route.invalid", "route\nSECRET_SENTINEL", "a".repeat(65)].map(alias => ({
-      globalCredential: credentialReference(), routeCredentials: { [alias]: credentialReference() },
+      globalCredential: credentialReference(), routeTargets: { [alias]: routeTarget() },
     })),
+    ...[null, [], true, "SECRET_SENTINEL", {}, credentialReference(),
+      { credential: credentialReference() }, { upstreamBaseUrl: "https://project.example.invalid/v1" },
+      { ...routeTarget(), extra: "SECRET_SENTINEL" },
+    ].map(target => ({ ...credentialRouting(), routeTargets: { "route-a": target } })),
   ];
   for (const [index, value] of invalid.entries()) await t.test(`invalid structure ${index}`, async () => {
     f.config.credentialRouting = value;
+    await f.saveConfig();
+    await assert.rejects(loadRouterConfig(f.configPath), error =>
+      error.code === "CONFIG_INVALID" && error.message === "Router configuration is invalid or unsupported.");
+  });
+  // Global and project destinations must enforce the same URL policy, including unused targets.
+  for (const url of ["http://project.example.invalid/v1", "ftp://project.example.invalid/v1",
+    "https://user:SECRET_SENTINEL@project.example.invalid/v1", "https://user@project.example.invalid/v1",
+    "https://project.example.invalid/v1?SECRET_SENTINEL", "https://project.example.invalid/v1#SECRET_SENTINEL",
+    "/region/v1", "//project.example.invalid/v1", "SECRET_SENTINEL", "", null, true, {},
+  ]) for (const location of ["global", "target"]) await t.test(`invalid ${location} URL ${JSON.stringify(url)}`, async () => {
+    f.config.credentialRouting = credentialRouting();
+    f.config.upstreamBaseUrl = location === "global" ? url : "https://global.example.invalid/api/v1";
+    f.config.credentialRouting.routeTargets.unused = { ...routeTarget(), upstreamBaseUrl: location === "target" ? url : routeTarget().upstreamBaseUrl };
     await f.saveConfig();
     await assert.rejects(loadRouterConfig(f.configPath), error =>
       error.code === "CONFIG_INVALID" && error.message === "Router configuration is invalid or unsupported.");
@@ -98,7 +125,7 @@ test("both global and route references require exactly three bounded control-fre
     await t.test(`${location} malformed reference ${index}`, async () => {
       const routing = credentialRouting();
       if (location === "global") routing.globalCredential = reference;
-      else routing.routeCredentials["route-a"] = reference;
+      else routing.routeTargets["route-a"].credential = reference;
       f.config.credentialRouting = routing;
       await f.saveConfig();
       await assert.rejects(loadRouterConfig(f.configPath), error =>
@@ -106,33 +133,50 @@ test("both global and route references require exactly three bounded control-fre
     });
 });
 
-test("enabled fingerprints ignore field and alias order but include every reference and mapping", async (t) => {
+test("target fingerprints preserve legacy compatibility and include normalized destinations", async (t) => {
   const f = await fixture(t);
+  assert.equal(configFingerprint({ ...f.config, codexHome: "/Users/example/.codex" }),
+    "e9cc34013d43cefc6db257f4cc9b78301221267c20638afa165e9caa574111fc");
   const routing = credentialRouting();
-  routing.routeCredentials.constructor = { ...credentialReference(), service: "synthetic-other" };
-  const config = { ...f.config, credentialRouting: routing };
+  routing.routeTargets.constructor = routeTarget({ ...credentialReference(), service: "synthetic-other" });
+  f.config.credentialRouting = routing;
+  await f.saveConfig();
+  const config = await loadRouterConfig(f.configPath);
   const reverseReference = reference => ({ account: reference.account, service: reference.service, keychainPath: reference.keychainPath });
-  const reordered = { ...config, credentialRouting: {
-    routeCredentials: { constructor: reverseReference(routing.routeCredentials.constructor), "route-a": reverseReference(routing.routeCredentials["route-a"]) },
+  f.config.credentialRouting = {
+    routeTargets: Object.fromEntries(Object.entries(routing.routeTargets).reverse().map(([alias, target]) => [alias, {
+      credential: reverseReference(target.credential),
+      upstreamBaseUrl: "https://PROJECT.example.invalid:443/region/./v1/",
+    }])),
     globalCredential: reverseReference(routing.globalCredential),
-  } };
+  };
+  f.config.upstreamBaseUrl = "https://GATEWAY.example.invalid:443/api/./v1/";
+  await f.saveConfig();
+  const reordered = await loadRouterConfig(f.configPath);
   const fingerprint = configFingerprint(config);
+  assert.equal(reordered.credentialRouting.routeTargets["route-a"].upstreamBaseUrl, "https://project.example.invalid/region/v1");
   assert.match(fingerprint, /^[a-f0-9]{64}$/);
   assert.equal(fingerprint, configFingerprint(reordered));
-  assert.notEqual(fingerprint, configFingerprint(f.config));
+  const legacy = { ...config }; delete legacy.credentialRouting;
+  assert.notEqual(fingerprint, configFingerprint(legacy));
   for (const location of ["global", "route"]) for (const field of ["keychainPath", "service", "account"]) {
     const changed = structuredClone(config);
-    const reference = location === "global" ? changed.credentialRouting.globalCredential : changed.credentialRouting.routeCredentials["route-a"];
+    const reference = location === "global" ? changed.credentialRouting.globalCredential : changed.credentialRouting.routeTargets["route-a"].credential;
     reference[field] += "-changed";
     assert.notEqual(fingerprint, configFingerprint(changed), `${location} ${field} must affect readiness`);
   }
+  for (const url of ["https://other.example.invalid/region/v1", "https://project.example.invalid/other/v1"]) {
+    const changed = structuredClone(config);
+    changed.credentialRouting.routeTargets["route-a"].upstreamBaseUrl = url;
+    assert.notEqual(fingerprint, configFingerprint(changed), "destination must affect readiness");
+  }
   const changed = structuredClone(config);
-  changed.credentialRouting.routeCredentials["route-b"] = changed.credentialRouting.routeCredentials["route-a"];
+  changed.credentialRouting.routeTargets["route-b"] = changed.credentialRouting.routeTargets["route-a"];
   assert.notEqual(fingerprint, configFingerprint(changed));
-  delete changed.credentialRouting.routeCredentials["route-a"];
+  delete changed.credentialRouting.routeTargets["route-a"];
   assert.notEqual(fingerprint, configFingerprint(changed));
-  const empty = { ...f.config, credentialRouting: { globalCredential: credentialReference(), routeCredentials: {} } };
-  assert.notEqual(configFingerprint(empty), configFingerprint(f.config));
+  const empty = { ...legacy, credentialRouting: { globalCredential: credentialReference(), routeTargets: {} } };
+  assert.notEqual(configFingerprint(empty), configFingerprint(legacy));
   assert.notEqual(configFingerprint(empty), fingerprint);
 });
 

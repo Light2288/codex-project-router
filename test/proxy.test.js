@@ -28,20 +28,26 @@ async function listening(server, t) {
   return server.address().port;
 }
 async function setupProxy(t, handler, options = {}) {
-  const f = await fixture(t),
-    calls = [];
-  const upstream = https.createServer({ key, cert }, async (req, res) => {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    calls.push({ url: req.url, headers: req.headers, body });
-    await handler(req, res, calls);
+  const f = await fixture(t), calls = [], projectCalls = [];
+  const upstream = (handler, captured) => https.createServer({ key, cert }, async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const bodyBytes = Buffer.concat(chunks);
+    captured.push({ url: req.url, headers: req.headers, body: bodyBytes.toString(), bodyBytes });
+    await handler(req, res, captured);
   });
-  const port = await listening(upstream, t);
-  f.config.upstreamBaseUrl = `https://127.0.0.1:${port}/api/v1`;
+  const port = await listening(upstream(handler, calls), t);
+  const globalBaseUrl = `https://127.0.0.1:${port}/api/v1`;
+  const projectBaseUrl = options.projectHandler
+    ? `https://127.0.0.1:${await listening(upstream(options.projectHandler, projectCalls), t)}/region/v1`
+    : globalBaseUrl;
+  f.config.upstreamBaseUrl = globalBaseUrl;
   f.config.observeRequestMetadata = options.observeRequestMetadata ?? false;
   f.config.allowUnassignedThreadTitles = options.allowUnassignedThreadTitles ?? false;
   if (options.credentialRouting !== undefined)
-    f.config.credentialRouting = options.credentialRouting;
+    f.config.credentialRouting = typeof options.credentialRouting === "function"
+      ? options.credentialRouting({ globalBaseUrl, projectBaseUrl })
+      : options.credentialRouting;
   const logs = new PassThrough();
   let output = "";
   logs.on("data", (c) => (output += c));
@@ -54,7 +60,7 @@ async function setupProxy(t, handler, options = {}) {
     credentialReader: options.credentialReader,
   });
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -123,10 +129,14 @@ const projectBReference = {
   service: "PROJECT_SERVICE_SENTINEL",
   account: "PROJECT_B_ACCOUNT_SENTINEL",
 };
-function credentialRouting() {
+function credentialRouting({ globalBaseUrl, projectBaseUrl }) {
   return {
     globalCredential: globalReference,
-    routeCredentials: { "route-a": projectAReference, "route-b": projectBReference },
+    routeTargets: {
+      "route-a": { upstreamBaseUrl: projectBaseUrl, credential: projectAReference },
+      "route-b": { upstreamBaseUrl: projectBaseUrl, credential: projectBReference },
+      controller: { upstreamBaseUrl: globalBaseUrl, credential: globalReference },
+    },
   };
 }
 function syntheticCredentialReader(reads) {
@@ -214,7 +224,7 @@ const transportTest = (name, run) => {
       const f = await setup(t, handler, {
         ...options,
         credentialReader: syntheticCredentialReader(reads),
-        ...(routingMode ? {credentialRouting: credentialRouting()} : {}),
+        ...(routingMode ? {credentialRouting: credentialRouting} : {}),
       });
       fixtures.push(f);
       return f;
@@ -232,7 +242,7 @@ test("terminal credential failures record their initiating outcome before aborti
   for (const failure of ["mismatch", "project unavailable"]) {
     let requestSignal, eventsAtAbort;
     const f = await setup(t, async (req, res) => res.end("unexpected"), {
-      credentialRouting: credentialRouting(),
+      credentialRouting: credentialRouting,
       credentialReader: async (reference, {signal}) => {
         if (!requestSignal) {
           requestSignal = signal;
@@ -260,7 +270,7 @@ test(`${cancellation} during ${stage} retrieval reaps real child work and preser
     holdClose: cancellation === "delayed child completion",
   });
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
-    credentialRouting: credentialRouting(), credentialReader: processes.reader,
+    credentialRouting: credentialRouting, credentialReader: processes.reader,
   });
   let serverRequest, client;
   f.proxy.once("request", req => { serverRequest = req; });
@@ -327,7 +337,7 @@ test(`${cancellation} during ${stage} retrieval reaps real child work and preser
 test("credential routing rejects global mismatch before broken state or observations", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
-    credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
   });
   await writeFile(f.statePath, "{STATE_SENTINEL");
   for (const token of ["WRONG_CREDENTIAL_SENTINEL", "global_credential_sentinel", "GLOBAL_CREDENTIAL_SENTINEL_EXTRA"]) {
@@ -348,7 +358,7 @@ test("credential routing rejects global mismatch before broken state or observat
 test("global credential failure precedes identity lookup and project reads", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
-    credentialRouting: credentialRouting(),
+    credentialRouting: credentialRouting,
     credentialReader: async reference => { reads.push(reference); throw new RouterError("CREDENTIAL_UNAVAILABLE"); },
   });
   await writeFile(f.statePath, "{STATE_SENTINEL");
@@ -363,64 +373,108 @@ test("global credential failure precedes identity lookup and project reads", asy
     assert.equal(Object.hasOwn(event, field), false);
   assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
 });
-test("mapped responses and compaction substitute project keys after case-insensitive bearer parsing", async t => {
+test("mapped route selects its exact credential destination and prefix", async t => {
   const reads = [];
-  const f = await setup(t, async (req, res) => res.end("accepted"), {
-    credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads),
+  const f = await setup(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
   });
+  const bodyBytes = Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0xa9, 0xff, 0x22, 0x7d]);
+  const result = await request(f, {
+    path: "/v1/responses?x=a%2Fb&x=2", body: bodyBytes,
+    raw: [...headers(T1), "Connection", "authorization, x-drop", "x-drop", "DROP_SENTINEL"],
+    token: "GLOBAL_CREDENTIAL_SENTINEL",
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body, "project");
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?x=a%2Fb&x=2");
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+  assert.deepEqual(f.projectCalls[0].bodyBytes, bodyBytes);
+  assert.equal(f.projectCalls[0].headers["x-drop"], undefined);
   f.edge(T1, CHILD);
+  const fork = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  f.state["thread-project-assignments"][fork] = { projectKind: "local", projectId: P2 };
+  await f.saveState();
   for (const [path, raw] of [
-    ["/v1/responses?unchanged=yes", headers(T1)],
     ["/v1/responses/compact?unchanged=yes", headers(T2)],
     ["/v1/responses", headers(CHILD)],
     ["/v1/responses", titleHeaders(T1)],
+    ["/v1/responses", headers(fork, { forked_from_thread_id: T2 })],
+    ["/v1/responses", headers(fork)],
   ]) {
-    const result = await request(f, {
-      path, raw: [...raw, "Connection", "authorization, x-drop", "x-drop", "DROP_SENTINEL"],
-      authorization: "bEaReR GLOBAL_CREDENTIAL_SENTINEL",
-    });
-    assert.equal(result.status, 200);
+    assert.equal((await request(f, { path, raw, authorization: "bEaReR GLOBAL_CREDENTIAL_SENTINEL" })).body, "project");
   }
-  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
     "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
     "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_A_CREDENTIAL_SENTINEL",
+    "Bearer PROJECT_B_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
   ]);
-  assert.deepEqual(f.calls.map(call => call.url), [
-    "/api/v1/responses?unchanged=yes", "/api/v1/responses/compact?unchanged=yes",
-    "/api/v1/responses", "/api/v1/responses",
+  assert.deepEqual(f.projectCalls.map(call => call.url), [
+    "/region/v1/responses?x=a%2Fb&x=2", "/region/v1/responses/compact?unchanged=yes",
+    "/region/v1/responses", "/region/v1/responses", "/region/v1/responses", "/region/v1/responses",
   ]);
-  for (const call of f.calls) {
-    assert.equal(call.headers["x-drop"], undefined);
+  for (const call of f.projectCalls.slice(1)) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
     assert.equal(call.body, '{"model":"unchanged","input":"PROMPT_SENTINEL"}');
   }
   assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference,
-    globalReference, projectAReference, globalReference, projectAReference]);
-  const starts = f.logs().trim().split("\n").map(JSON.parse).filter(event => event.event === "started");
+    globalReference, projectAReference, globalReference, projectAReference,
+    globalReference, projectBReference, globalReference, projectBReference]);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
   assert.equal(starts[2].source, "ancestor");
   assert.equal(starts[2].ownerThreadId, T1);
   assert.equal(starts[3].projectId, P1);
   assert.equal(starts[3].source, "direct");
   for (const event of starts) assert.equal(Object.hasOwn(event, "requestMetadata"), observationMode);
-  assert.doesNotMatch(f.logs(), /SENTINEL/);
+  // The controller is an ordinary explicit target, deliberately sharing the global pair.
+  f.config.projectRoutes[P1] = "controller";
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"})).body, "global");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 6);
+  assert.equal(f.calls[0].url, "/api/v1/responses");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.calls[0].headers.authorization, "Bearer GLOBAL_CREDENTIAL_SENTINEL");
+  assert.deepEqual(reads.slice(-2), [globalReference, globalReference]);
+  assert.equal(diagnosticEvents(f).filter(event => event.event === "started").at(-1).routeAlias, "controller");
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
 });
 test("shared aliases and shared references select the same exact project credential", async t => {
-  const reads = [], routing = credentialRouting();
-  routing.routeCredentials["route-b"] = projectAReference;
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets["route-b"] = routing.routeTargets["route-a"];
+    return routing;
+  };
   const f = await setup(t, async (req, res) => res.end("accepted"), {
+    projectHandler: async (req, res) => res.end("accepted"),
     credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
   });
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
   f.config.projectRoutes[P2] = "route-a";
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
-  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
     "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_A_CREDENTIAL_SENTINEL",
   ]);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
   assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectAReference]);
 });
 test("missing credential mappings reject only the affected project with no fallback", async t => {
-  const reads = [], routing = credentialRouting();
-  delete routing.routeCredentials["route-a"];
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    delete routing.routeTargets["route-a"];
+    return routing;
+  };
   const f = await setup(t, async (req, res) => res.end("healthy"), {
+    projectHandler: async (req, res) => res.end("healthy"),
     credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
   });
   for (const alias of ["route-a", "constructor", "toString"]) {
@@ -431,33 +485,49 @@ test("missing credential mappings reject only the affected project with no fallb
   }
   assert.deepEqual(reads, [globalReference, globalReference, globalReference]);
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).body, "healthy");
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
   const starts = f.logs().trim().split("\n").map(JSON.parse).filter(event => event.event === "started");
   assert.equal(starts.length, 1);
   assert.equal(starts[0].projectId, P2);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.url, "/region/v1/responses");
+  }
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
 test("explicit own constructor and toString credential mappings work", async t => {
-  const reads = [], routing = credentialRouting();
-  routing.routeCredentials.constructor = projectAReference;
-  routing.routeCredentials.toString = projectBReference;
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets.constructor = routing.routeTargets["route-a"];
+    routing.routeTargets.toString = routing.routeTargets["route-b"];
+    return routing;
+  };
   const f = await setup(t, async (req, res) => res.end("accepted"), {
+    projectHandler: async (req, res) => res.end("accepted"),
     credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
   });
   f.config.projectRoutes[P1] = "constructor";
   f.config.projectRoutes[P2] = "toString";
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"})).status, 200);
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
-  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
     "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
   ]);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
   assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
 });
 test("project credential failure keeps a second project healthy and records no start for rejection", async t => {
   const reads = [], reader = syntheticCredentialReader(reads);
   const f = await setup(t, async (req, res) => res.end("healthy"), {
-    credentialRouting: credentialRouting(),
+    projectHandler: async (req, res) => res.end("healthy"),
+    credentialRouting: credentialRouting,
     credentialReader: async (reference, options) => {
       if (reference === projectAReference) { reads.push(reference); throw new RouterError("CREDENTIAL_UNAVAILABLE"); }
       return reader(reference, options);
@@ -467,20 +537,26 @@ test("project credential failure keeps a second project healthy and records no s
   assert.equal(rejected.status, 503);
   assert.equal(JSON.parse(rejected.body).error.code, "CREDENTIAL_UNAVAILABLE");
   assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).body, "healthy");
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
   assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
   const events = f.logs().trim().split("\n").map(JSON.parse);
   assert.equal(events.filter(event => event.event === "started").length, 1);
   assert.equal(events[0].event, "completed");
   assert.equal(events[0].projectId, P1);
   assert.equal(Object.hasOwn(events[0], "requestMetadata"), observationMode);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.url, "/region/v1/responses");
+  }
   assert.doesNotMatch(rejected.body + f.logs(), /SENTINEL/);
 });
 test("catalog and eligible unassigned titles retain verified authorization without project reads", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("accepted"), {
-    credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads),
+    projectHandler: async (req, res) => res.end("unexpected"),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
   });
   const authorization = "bEaReR GLOBAL_CREDENTIAL_SENTINEL";
   assert.equal((await request(f, {path: "/v1/models?unchanged=yes", method: "GET", raw: ["Connection", "authorization"], authorization, body: ""})).status, 200);
@@ -488,7 +564,13 @@ test("catalog and eligible unassigned titles retain verified authorization witho
   assert.equal(title.status, policyMode ? 200 : 503);
   assert.deepEqual(reads, [globalReference, globalReference]);
   assert.equal(f.calls.length, policyMode ? 2 : 1);
-  for (const call of f.calls) assert.equal(call.headers.authorization, authorization);
+  assert.equal(f.projectCalls.length, 0);
+  assert.equal(f.calls[0].url, "/api/v1/models?unchanged=yes");
+  if (policyMode) assert.equal(f.calls[1].url, "/api/v1/responses");
+  for (const call of f.calls) {
+    assert.equal(call.headers.authorization, authorization);
+    assert.equal(call.headers.host, new URL(f.globalBaseUrl).host);
+  }
   const starts = f.logs().trim().split("\n").map(JSON.parse).filter(event => event.event === "started");
   assert.equal(starts[0].source, "catalog");
   if (policyMode) {
@@ -503,7 +585,7 @@ test("catalog and eligible unassigned titles retain verified authorization witho
 test("health and rejected admission make no credential reads in routing mode", async t => {
   const reads = [];
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
-    credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
   });
   assert.equal((await request(f, {path: "/healthz", method: "GET", authenticated: false, raw: [], body: ""})).status, 200);
   assert.equal((await request(f, {authenticated: false})).status, 401);
@@ -527,7 +609,7 @@ test("fresh global and project reads observe rotation and deletion without stale
     [projectBReference, "PROJECT_B_FIRST_SENTINEL"],
   ]);
   const f = await setup(t, async (req, res) => res.end("accepted"), {
-    credentialRouting: credentialRouting(),
+    credentialRouting: credentialRouting,
     credentialReader: async reference => {
       reads.push(reference);
       if (!values.has(reference)) throw new RouterError("CREDENTIAL_UNAVAILABLE");
@@ -565,8 +647,12 @@ test("fresh global and project reads observe rotation and deletion without stale
   assert.doesNotMatch(deleted.body + stale.body + globalDeleted.body + f.logs(), /SENTINEL/);
 });
 test("a reference shared by global and project roles is read independently for each role", async t => {
-  const reads = [], routing = credentialRouting();
-  routing.routeCredentials["route-a"] = globalReference;
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets["route-a"].credential = globalReference;
+    return routing;
+  };
   const values = ["SHARED_CALLER_SENTINEL", "SHARED_PROJECT_SENTINEL", "ROTATED_CALLER_SENTINEL", "ROTATED_PROJECT_SENTINEL"];
   const f = await setup(t, async (req, res) => res.end("accepted"), {
     credentialRouting: routing,
@@ -585,7 +671,7 @@ test("overlapping requests never coalesce global or project credential lookups",
   let globals = 0, projects = 0;
   t.after(() => { bothGlobal.resolve(); bothProject.resolve(); });
   const f = await setup(t, async (req, res) => res.end("accepted"), {
-    credentialRouting: credentialRouting(),
+    credentialRouting: credentialRouting,
     credentialReader: async reference => {
       if (reference === globalReference) {
         if (++globals === 2) bothGlobal.resolve();
@@ -628,7 +714,7 @@ test(`reassignment during ${moveAt} preserves the selected request and changes t
       res.end("stream");
     } else res.end("new-route");
   }, {
-    credentialRouting: credentialRouting(),
+    credentialRouting: credentialRouting,
     credentialReader: async reference => {
       reads.push(reference);
       const value = values.get(reference);
@@ -686,7 +772,7 @@ test("routing streams overlap with one global token and independent mapped and t
     await releases.get(id).promise;
     res.end("done");
     active--;
-  }, {credentialRouting: credentialRouting(), credentialReader: syntheticCredentialReader(reads)});
+  }, {credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads)});
   const pending = ids.map((id, index) => request(f, {
     raw: index < 2 ? headers(id) : titleHeaders(id), token: "GLOBAL_CREDENTIAL_SENTINEL",
     onChunk: () => firstChunks.get(id).resolve(),

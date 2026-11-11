@@ -9,6 +9,20 @@ const object = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const routeAlias = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 const referenceFields = ["keychainPath", "service", "account"];
+function normalizeUpstreamBaseUrl(value) {
+  let upstream;
+  try {
+    upstream = new URL(value);
+  } catch {
+    throw new RouterError("CONFIG_INVALID");
+  }
+  if (
+    upstream.protocol !== "https:" || upstream.username || upstream.password ||
+    upstream.search || upstream.hash
+  )
+    throw new RouterError("CONFIG_INVALID");
+  return upstream.href.replace(/\/$/, "");
+}
 function credentialReference(value) {
   if (
     !object(value) ||
@@ -25,15 +39,21 @@ function credentialRouting(value) {
   if (
     !object(value) || Object.keys(value).length !== 2 ||
     !Object.hasOwn(value, "globalCredential") ||
-    !Object.hasOwn(value, "routeCredentials") || !object(value.routeCredentials)
+    !Object.hasOwn(value, "routeTargets") || !object(value.routeTargets)
   )
     throw new RouterError("CONFIG_INVALID");
   const globalCredential = credentialReference(value.globalCredential);
-  const routeCredentials = Object.fromEntries(Object.entries(value.routeCredentials).map(([alias, reference]) => {
-    if (!routeAlias.test(alias)) throw new RouterError("CONFIG_INVALID");
-    return [alias, credentialReference(reference)];
+  const routeTargets = Object.fromEntries(Object.entries(value.routeTargets).map(([alias, target]) => {
+    if (
+      !routeAlias.test(alias) || !object(target) || Object.keys(target).length !== 2 ||
+      !Object.hasOwn(target, "upstreamBaseUrl") || !Object.hasOwn(target, "credential")
+    ) throw new RouterError("CONFIG_INVALID");
+    return [alias, Object.freeze({
+      upstreamBaseUrl: normalizeUpstreamBaseUrl(target.upstreamBaseUrl),
+      credential: credentialReference(target.credential),
+    })];
   }));
-  return Object.freeze({ globalCredential, routeCredentials: Object.freeze(routeCredentials) });
+  return Object.freeze({ globalCredential, routeTargets: Object.freeze(routeTargets) });
 }
 const root = fileURLToPath(new URL("../", import.meta.url));
 export async function loadRouterConfig(configPath) {
@@ -79,19 +99,9 @@ export async function loadRouterConfig(configPath) {
     !object(value.projectRoutes)
   )
     throw new RouterError("CONFIG_INVALID");
-  let upstream;
-  try {
-    upstream = new URL(value.upstreamBaseUrl);
-  } catch {
-    throw new RouterError("CONFIG_INVALID");
-  }
+  const upstreamBaseUrl = normalizeUpstreamBaseUrl(value.upstreamBaseUrl);
   const port = value.listenPort ?? 8787;
   if (
-    upstream.protocol !== "https:" ||
-    upstream.username ||
-    upstream.password ||
-    upstream.search ||
-    upstream.hash ||
     !Number.isInteger(port) ||
     port < 1 ||
     port > 65535
@@ -108,7 +118,7 @@ export async function loadRouterConfig(configPath) {
   return Object.freeze({
     ...value,
     codexHome: resolve(value.codexHome),
-    upstreamBaseUrl: upstream.href.replace(/\/$/, ""),
+    upstreamBaseUrl,
     listenPort: port,
     observeRequestMetadata: value.observeRequestMetadata ?? false,
     allowUnassignedThreadTitles: value.allowUnassignedThreadTitles ?? false,
@@ -135,9 +145,9 @@ export function configFingerprint(config) {
     canonical.push([
       "credentialRouting",
       reference(config.credentialRouting.globalCredential),
-      Object.entries(config.credentialRouting.routeCredentials)
+      Object.entries(config.credentialRouting.routeTargets)
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([alias, item]) => [alias, reference(item)]),
+        .map(([alias, target]) => [alias, target.upstreamBaseUrl, reference(target.credential)]),
     ]);
   }
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
