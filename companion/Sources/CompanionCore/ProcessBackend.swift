@@ -43,55 +43,84 @@ private final class RunningCommand {
     public var onChildExit: ((UUID, Int32) -> Void)?
     private let resourcesURL: URL
     private var nodeExecutable: URL?
+    private let discoveryCandidates: [URL]?
     private var owned: [UUID: (child: OwnedRouter, command: RunningCommand)] = [:]
     private var mutationInFlight = false
     private var mutationProcess: RunningCommand?
     private var needsReconciliation = false
     private var uncertainContext: ActivationContext?
+    private var mutationGeneration = UUID()
 
     public init(resourcesURL: URL, nodeExecutable: URL?) {
         self.resourcesURL = resourcesURL; self.nodeExecutable = nodeExecutable
+        self.discoveryCandidates = nil
+    }
+    internal init(resourcesURL: URL, nodeExecutable: URL?, discoveryCandidates: [URL]) {
+        self.resourcesURL = resourcesURL; self.nodeExecutable = nodeExecutable
+        self.discoveryCandidates = discoveryCandidates
     }
     public func setNodeExecutable(_ validatedPath: URL) { nodeExecutable = validatedPath }
 
     public func validateNode(_ path: URL) async throws -> URL {
+        try await validateNode(path, deadline: Date().addingTimeInterval(5))
+    }
+    private func validateNode(_ path: URL, deadline: Date) async throws -> URL {
+        try requireTime(before: deadline)
         guard path.isFileURL, path.path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path.path) else { throw CompanionError.nodeUnavailable }
         let canonical = path.resolvingSymlinksInPath()
         do {
             let command = try launch(executable: canonical, arguments: ["--version"])
-            let bytes = try await wait(command, mutating: false)
+            let bytes = try await wait(command, mutating: false, deadline: deadline)
+            try requireTime(before: deadline)
             guard bytes.count <= 128, let text = String(data: bytes, encoding: .utf8),
                   text.range(of: "^v24\\.[0-9]+\\.[0-9]+\\n?$", options: .regularExpression) != nil else { throw CompanionError.nodeUnavailable }
             return canonical
-        } catch { throw CompanionError.nodeUnavailable }
+        } catch CompanionError.timedOut { throw CompanionError.timedOut }
+        catch { throw CompanionError.nodeUnavailable }
     }
-    private func runtime() async throws -> URL {
+    private func runtime(deadline: Date) async throws -> URL {
+        try requireTime(before: deadline)
         if let nodeExecutable {
-            do { return try await validateNode(nodeExecutable) }
+            do { return try await validateNode(nodeExecutable, deadline: deadline) }
             catch CompanionError.nodeUnavailable { /* Continue discovery after a stale saved path. */ }
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        var candidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].map { URL(fileURLWithPath: $0) }
-        let versions = home.appendingPathComponent(".nvm/versions/node")
-        if let directories = try? FileManager.default.contentsOfDirectory(at: versions, includingPropertiesForKeys: nil) {
-            candidates += directories.filter { $0.lastPathComponent.hasPrefix("v24.") }
-                .sorted { $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedDescending }
-                .map { $0.appendingPathComponent("bin/node") }
+        var candidates: [URL]
+        if let discoveryCandidates { candidates = discoveryCandidates }
+        else {
+            candidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].map { URL(fileURLWithPath: $0) }
+            let versions = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
+            if let directories = try? FileManager.default.contentsOfDirectory(at: versions, includingPropertiesForKeys: nil) {
+                candidates += directories.filter { $0.lastPathComponent.hasPrefix("v24.") }
+                    .sorted { $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedDescending }
+                    .map { $0.appendingPathComponent("bin/node") }
+            }
         }
         for candidate in candidates {
-            if let validated = try? await validateNode(candidate) { nodeExecutable = validated; return validated }
+            try requireTime(before: deadline)
+            do {
+                let validated = try await validateNode(candidate, deadline: deadline)
+                nodeExecutable = validated
+                return validated
+            } catch CompanionError.nodeUnavailable { continue }
         }
+        try requireTime(before: deadline)
         throw CompanionError.nodeUnavailable
+    }
+    private func requireTime(before deadline: Date) throws {
+        guard !Task.isCancelled, Date() < deadline else { throw CompanionError.timedOut }
     }
     public func inspect(configPath: URL?, browseHome: URL) async throws -> Inspection {
         try await inspect(configPath: configPath, browseHome: browseHome, deadline: Date().addingTimeInterval(5))
     }
     private func inspect(configPath: URL?, browseHome: URL, deadline: Date) async throws -> Inspection {
+        // Only a request begun after the uncertain child exits can reconcile that generation.
+        let reconciliationGeneration = needsReconciliation && !mutationInFlight ? mutationGeneration : nil
         var request: [String: Any] = ["schemaVersion": 1, "action": "inspect", "configPath": configPath?.path as Any? ?? NSNull()]
         if configPath == nil { request["browseHome"] = browseHome.path }
         let result: Inspection = try await requestResult(request, mutating: false, deadline: deadline)
         guard valid(result) else { throw CompanionError.protocolFailure }
-        if !mutationInFlight, let context = uncertainContext, result.context == context,
+        if let reconciliationGeneration, reconciliationGeneration == mutationGeneration,
+           needsReconciliation, !mutationInFlight, let context = uncertainContext, result.context == context,
            ["direct", "router"].contains(result.provider.state), result.provider.recordPhase != "unavailable" {
             needsReconciliation = false; uncertainContext = nil
         }
@@ -100,6 +129,7 @@ private final class RunningCommand {
     public func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult {
         guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
         mutationInFlight = true
+        mutationGeneration = UUID()
         defer { if mutationProcess == nil { mutationInFlight = false } }
         uncertainContext = expectedContext
         do {
@@ -125,11 +155,13 @@ private final class RunningCommand {
         return path
     }
     private func requestResult<Result: Codable>(_ request: [String: Any], mutating: Bool, deadline: Date? = nil) async throws -> Result {
+        let deadline = deadline ?? Date().addingTimeInterval(5)
         let script = try resource("companion-cli.js")
-        let executable = try await runtime()
+        let executable = try await runtime(deadline: deadline)
         let input: Data
         do { input = try JSONSerialization.data(withJSONObject: request) } catch { throw CompanionError.protocolFailure }
         guard input.count <= 16 * 1024 else { throw CompanionError.protocolFailure }
+        try requireTime(before: deadline)
         let command = try launch(executable: executable, arguments: ["--use-system-ca", script.path], input: input)
         if mutating { mutationProcess = command }
         let bytes = try await wait(command, mutating: mutating, deadline: deadline)
@@ -206,7 +238,7 @@ private final class RunningCommand {
         let before = try await inspect(configPath: configPath, browseHome: configPath.deletingLastPathComponent())
         guard let context = before.context, before.configuration.state == "valid", !owned.values.contains(where: { $0.child.context == context && $0.child.process.isRunning }) else { throw CompanionError.startupFailed }
         let script = try resource("cli.js")
-        let executable = try await runtime()
+        let executable = try await runtime(deadline: Date().addingTimeInterval(5))
         let command = try launch(executable: executable, arguments: ["--use-system-ca", script.path, "serve", "--config", configPath.path])
         let child = OwnedRouter(process: command.process, context: context)
         owned[child.id] = (child, command)

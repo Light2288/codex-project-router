@@ -7,6 +7,8 @@ if len(sys.argv) == 4 and sys.argv[1] == '--hold-port':
     while True:
         c, _ = listener.accept(); c.close()
 if sys.argv[1:] == ['--version']:
+    with open(sys.argv[0] + '.version-started', 'w') as f: f.write(str(os.getpid()))
+    if 'slow' in sys.argv[0]: time.sleep(3)
     print('v23.0.0' if 'wrong' in sys.argv[0] else 'v24.10.0')
     sys.exit(0)
 if sys.argv[1:2] == ['--use-system-ca']: del sys.argv[1]
@@ -35,6 +37,10 @@ if len(sys.argv) > 2 and sys.argv[2] == 'serve':
         except socket.timeout: pass
 request = json.load(sys.stdin)
 mode = behavior.get('mode', 'valid')
+if mode == 'heldMutation' and request['action'] != 'inspect':
+    with open(os.path.join(root, 'mutation-started'), 'w') as f: f.write('started')
+    while not os.path.exists(os.path.join(root, 'release-mutation')): time.sleep(.01)
+    with open(os.path.join(root, 'provider-state'), 'w') as f: f.write('router')
 if mode == 'stall' or (mode == 'mutationStall' and request['action'] != 'inspect'):
     time.sleep(6.3 if mode == 'mutationStall' else 30)
 if mode == 'stderr': os.write(2, b'SENTINEL_PRIVATE' * 100000)
@@ -52,11 +58,17 @@ if request['action'] == 'inspect':
             try:
                 c = socket.create_connection(('127.0.0.1', cfg['port']), .05); c.close(); ready = True
             except OSError: pass
+        provider_state = 'direct'
+        if os.path.exists(os.path.join(root, 'provider-state')):
+            with open(os.path.join(root, 'provider-state')) as f: provider_state = f.read()
         result = dict(configuration=dict(state='valid', path=config, mode='legacy'), context=context,
-                      revision='fixture_revision', provider=dict(state='direct', recoveryRequired=False, proxyReady=ready, recordPhase='none'), catalog=dict(state='ready', entries=[]))
+                      revision='fixture_revision', provider=dict(state=provider_state, recoveryRequired=provider_state == 'router', proxyReady=ready, recordPhase='active' if provider_state == 'router' else 'none'), catalog=dict(state='ready', entries=[]))
     else:
         result = dict(configuration=dict(state='missing'), provider=dict(state='unavailable', recoveryRequired=False, proxyReady=None, recordPhase='unavailable'), catalog=dict(state='ready', entries=[dict(id='A',name='Project',routeAlias=None,routeState='unmapped')]))
 else: result = dict(state='active' if request['action'] == 'activate' else 'direct', changed=True, restartRequired=True)
+if mode == 'delayedInspection' and request['action'] == 'inspect':
+    with open(os.path.join(root, 'snapshot-captured'), 'w') as f: f.write('captured')
+    while not os.path.exists(os.path.join(root, 'release-snapshot')): time.sleep(.01)
 if mode == 'overflow' and request['action'] == 'inspect':
     result['catalog']['entries'] = [dict(id='A', name='SENTINEL_PRIVATE' * 100000, routeAlias=None, routeState='unmapped')]
 print(json.dumps(dict(schemaVersion=1, ok=True, result=result)))

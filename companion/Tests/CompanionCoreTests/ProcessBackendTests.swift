@@ -167,6 +167,92 @@ import Darwin
         catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
         XCTAssertTrue(replacement.isRunning)
     }
+    func testPreExitInspectionCannotReconcileUncertainMutation() async throws {
+        // A snapshot captured while the mutation is running must not authorize the next write.
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context)
+        try setMode("heldMutation")
+        defer { try? releaseFixture("release-mutation"); try? releaseFixture("release-snapshot") }
+        let mutation = Task { try await backend.control(action: .activate, configPath: config, expectedContext: context) }
+        try await waitForFixture("mutation-started")
+        let mutationPID = try fixturePID()
+        mutation.cancel()
+        do { _ = try await mutation.value; XCTFail("Cancelled mutation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        try setMode("delayedInspection")
+        let stale = Task { try await backend.inspect(configPath: config, browseHome: root) }
+        try await waitForFixture("snapshot-captured")
+        try releaseFixture("release-mutation")
+        try await waitForExit(mutationPID)
+        try releaseFixture("release-snapshot")
+        let snapshot = try await stale.value
+        XCTAssertEqual(snapshot.provider.state, "direct")
+        XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/provider-state")), "router")
+        try setMode("valid")
+        do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Pre-exit snapshot authorized a mutation") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
+        let fresh = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertEqual(fresh.provider.state, "router")
+        _ = try await backend.control(action: .rollback, configPath: config, expectedContext: context)
+    }
+    func testInterveningMutationInvalidatesReconciliationInspection() async throws {
+        // A reconciliation request for one mutation cannot clear a later mutation's uncertainty.
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context)
+        try setMode("exitFailure")
+        do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Failed mutation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        try setMode("delayedInspection")
+        defer { try? releaseFixture("release-snapshot") }
+        let stale = Task { try await backend.inspect(configPath: config, browseHome: root) }
+        try await waitForFixture("snapshot-captured")
+        try setMode("valid")
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        try setMode("exitFailure")
+        do { _ = try await backend.control(action: .rollback, configPath: config, expectedContext: context); XCTFail("Failed mutation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        try releaseFixture("release-snapshot")
+        _ = try await stale.value
+        try setMode("valid")
+        do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Earlier generation authorized a mutation") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        _ = try await backend.control(action: .rollback, configPath: config, expectedContext: context)
+    }
+    func testRuntimeDiscoverySharesInspectionDeadline() async throws {
+        // Giving each candidate a new timeout lets discovery exceed the whole inspection deadline.
+        let first = root.appendingPathComponent("slow wrong node one")
+        let second = root.appendingPathComponent("slow wrong node two")
+        try FileManager.default.copyItem(at: node, to: first)
+        try FileManager.default.copyItem(at: node, to: second)
+        let discovering = ProcessBackend(resourcesURL: resources, nodeExecutable: first, discoveryCandidates: [second, node])
+        let started = Date()
+        do { _ = try await discovering.inspect(configPath: nil, browseHome: root); XCTFail("Slow discovery accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .timedOut) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5.75)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: node.path + ".version-started"), "Discovery continued after the shared deadline")
+        for candidate in [first, second] {
+            let pid = try XCTUnwrap(Int32(String(contentsOfFile: candidate.path + ".version-started")))
+            XCTAssertNotEqual(kill(pid, 0), 0, "Validation child survived its deadline")
+        }
+    }
+    private func releaseFixture(_ name: String) throws { try Data().write(to: resources.appendingPathComponent("src/\(name)")) }
+    private func waitForFixture(_ name: String) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while !FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/\(name)").path) {
+            guard Date() < deadline else { XCTFail("Fixture did not reach \(name)"); throw CompanionError.timedOut }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+    private func waitForExit(_ pid: Int32) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while kill(pid, 0) == 0 {
+            guard Date() < deadline else { XCTFail("Fixture did not exit"); throw CompanionError.timedOut }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        // Allow the backend's independent drain task to observe the already exited child.
+        try await Task.sleep(nanoseconds: 60_000_000)
+    }
     private func setMode(_ mode: String) throws { try JSONSerialization.data(withJSONObject: ["mode": mode]).write(to: resources.appendingPathComponent("src/behavior.json")) }
     private func fixturePID() throws -> Int32 { try XCTUnwrap(Int32(String(contentsOf: resources.appendingPathComponent("src/pid")))) }
     private func unusedPort() throws -> Int {
