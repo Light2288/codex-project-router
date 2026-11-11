@@ -1,14 +1,14 @@
-# Project Credential Routing — Implementation Plan
+# Project Credential Routing — Amended Implementation Plan
 
-> **For agentic workers:** Use `personal-workflows:spec-implement` with `superpowers:subagent-driven-development`. Execute tasks sequentially with fresh implementers and task reviews. Steps use checkbox syntax.
+> **For agentic workers:** Use `personal-workflows:spec-implement` with `superpowers:subagent-driven-development`. Execute the remaining tasks sequentially with fresh implementers and task reviews. Steps use checkbox syntax. Resume at Task 6; do not repeat completed work.
 
-**Goal:** Select each mapped chat’s API credential from Keychain while preserving authenticated global-credential handling for catalogs and qualifying unassigned titles.
+**Goal:** Complete project credential routing by selecting an explicit Keychain credential and full HTTPS API base URL together, while preserving the global target for catalogs and qualifying unassigned titles.
 
-**Architecture:** Extend private configuration and its readiness fingerprint. Add one bounded Keychain reader, then integrate authentication and credential selection into the existing proxy without changing identity resolution or title eligibility.
+**Architecture:** Replace the unmerged key-only configuration with deeply frozen route targets. Extend the existing request-local selection to include the destination, using the existing bounded credential reader, authentication, identity resolution and transport. Configuration and its proxy consumer change together so tests and runtime do not require a transitional configuration dialect.
 
-**Tech Stack:** Node.js 24, JavaScript ES modules, built-in child-process/crypto/HTTP/HTTPS/test APIs, existing `smol-toml@1.9.1`. No new dependency or CLI command.
+**Tech Stack:** Node.js 24, JavaScript ES modules, built-in child-process/crypto/HTTP/HTTPS/test APIs, existing `smol-toml@1.9.1`. No new dependency, public API or CLI command.
 
-**Spec:** [Approved specification](../specs/2026-11-11-project-credential-routing.md)
+**Spec:** [Approved amended specification](../specs/2026-11-11-project-credential-routing.md)
 
 **Slug:** `project-credential-routing`
 
@@ -24,199 +24,148 @@
 
 **Execution method:** Subagent-driven
 
-**Provenance:** Separately approved specification and subsequent native selection of subagent-driven execution. The user separately approved this implementation plan in the latest `PLEASE IMPLEMENT THIS PLAN` message reproducing it. Saved after returning to Default mode; implementation of this approved scope is authorized.
+**Provenance:** Revision of `docs/superpowers/plans/2026-11-11-project-credential-routing.md`; its original approved content remains in Git at `639cbeb`. The user separately approved the amended scope/design with `confirm`, then the amended specification with `approved`. Native answers selected explicit credential/URL pairs and replacement of the unmerged key-only format. Preserve the earlier explicit subagent-driven execution choice. The subsequent separate `approved` message, immediately following this revised DRAFT plan handoff, approves this revised plan and authorizes Stage 4 implementation of the amendment.
 
-## 1. Evidence, constraints and review focus
+## 1. Repository evidence and resumption
 
-Repository HEAD at planning was `cd58067e3a4c613c13533e5f4836f12a5c86922e` on `main`. The approved specification was the only untracked change. Specification resolution was `NEW_ONLY`; plan resolution was `MISSING` before this plan was saved.
+Planning HEAD is `639cbeb` on `feat/project-credential-routing`, in the existing checkout. Artifact resolution is `NEW_ONLY` for both paths above; slug and Spec reference agree. Product files are unchanged during planning. Node reports `v24.21.0`. Latest recorded verification is 586/586 tests, syntax and whitespace checks passing; these tests were not rerun while planning.
 
-No architecture map or ADR exists. Map freshness and recorded map HEAD are therefore unavailable. Planning checked the configuration, admission, proxy, identity, diagnostics, activation, CLI and test paths against this repository HEAD. Node is `24.21.0`; the recorded baseline is 259 passing tests, not rerun during planning.
+No architecture map or ADR was discovered under the repository's architecture/ADR locations. Map freshness and map HEAD are unavailable; do not generate a map. Inspected configuration/fingerprints, proxy admission/forwarding, credential-reader interfaces, activation/CLI controls, test fixtures and validation evidence against the planning HEAD. No material planning question remains unresolved.
 
-Command sources are the current package script, README development/operation instructions and the approved specification:
+The package script (`node --test test/*.test.js`), README development checks and approved specification supply the exact required commands: `npm test`, `node --check src/cli.js`, `git diff --check`. Live operation uses the existing `serve`, `status`, `activate` and `rollback` commands with an explicit private configuration path, as documented in README. Do not introduce gateway probes or real Keychain access into synthetic checks.
 
-- `npm test`
-- `node --check src/cli.js`
-- `git diff --check`
-- Existing `serve`, `status`, `activate` and `rollback` CLI commands with an explicit private configuration path.
+| Original work | Retained state |
+|---|---|
+| Task 1 / configuration | `520bb04`, task review passed |
+| Task 2 / bounded reader | `fedac84`, task review passed; retain reader and its tests |
+| Task 3 / authentication and key selection | `80e0e3b`, task review passed |
+| Task 4 / lifecycle and transport | `04fe73d`, task review passed |
+| Task 5 automated controls/documentation | `8a61a30`, implemented; task review still pending |
+| Failed live validation and completed recovery | `639cbeb`, sanitized report committed; AC-09 remains incomplete |
 
-Global constraints:
+Original Tasks 1–4 are complete. Do not rerun their implementers or reviews. Original Task 5's remaining obligations are allocated to Tasks 6 and 8 below; do not dispatch it again. Task 6's review also covers the original unreviewed Task 5 automation/documentation. Task 8's reviewed live evidence closes the remaining original Task 5 obligations. Preserve prior briefs/reports in this plan's SDD workspace; use new task numbers and filenames.
 
-- Preserve legacy behavior and fingerprints when `credentialRouting` is absent; perform zero Keychain calls in that mode.
-- Preserve `schemaVersion: 1`, existing identity resolution, title eligibility, transport and privacy boundaries.
-- Enforce the specification’s five-second lookup timeout, separate 16 KiB output limits and 1–8,192-byte visible-ASCII token limit.
-- Read credentials per request; never cache, fall back, retry another key, rewrite payloads or follow redirects.
-- Keep secrets and actual runtime evidence outside Git and tool output.
-- Use the existing checkout. Save both approved artifacts before product edits; update `main` safely and create `feat/project-credential-routing` only after plan approval.
-- Preserve unrelated work. No worktree, push or merge into another branch.
-- Resolve the managed `full` implementation role at execution time. Each implementer receives that model explicitly with high reasoning. Preserve per-task reviews and the sole integrated sequential final review.
-- Material specification or plan changes return to their respective approval gates.
+## Global Constraints
 
-Review focus, each covered below:
+- Retain `schemaVersion: 1`, existing private-file validation and the current configuration interface.
+- Omitting `credentialRouting` preserves existing behavior and makes **zero Keychain calls**.
+- The object contains exactly `globalCredential` and `routeTargets`. Each target contains exactly `upstreamBaseUrl` and `credential`.
+- The old `routeCredentials` property is rejected, including when supplied alongside `routeTargets`; there is no implicit migration or compatibility mode for the unmerged key-only format.
+- Limit each lookup to five seconds and stdout/stderr to 16 KiB each. Terminate and reap the child on timeout, overflow or cancellation. Accept only 1–8,192 visible ASCII token bytes after removing at most one final LF.
+- No failure triggers another credential or destination, a global fallback, a model-request retry or redirect following.
+- Do not rewrite models, payloads or continuation identifiers to repair cross-credential or cross-instance gateway incompatibilities.
+- Configuration loading, startup, health, status, activation and rollback perform no credential retrieval or upstream-destination preflight. Existing local readiness probes remain permitted.
+- Actual endpoints, references, mappings, credentials, gateway error fragments and runtime evidence remain private outside Git and tool output. Only synthetic examples and sanitized symbolic results belong in committed material.
+- Use the existing checkout and branch. Preserve initial approvals, commits and completed reviews. No `main` update, new branch, worktree, push or merge is authorized.
+- After plan approval, save both approved artifact revisions before product edits. Resolve the managed `full` role at execution time; each fresh implementer explicitly uses that exact model with high reasoning. No implementation subagents run concurrently or spawn their own reviewers.
 
-1. A bad global token must fail before observations or desktop-state access, even when identity state is broken.
-2. Missing aliases named `constructor` or `toString` must not resolve through inherited object properties.
-3. Split output chunks, invalid bytes and successful-looking output from a failed child must never produce a credential.
-4. Cancellation during either lookup must terminate pending work and prevent forwarding.
-5. Rotation, project movement and unavailable Keychain access must preserve request snapshots and recovery.
+## Review Focus
 
-## 2. Implementation tasks
+1. A leading-slash URL join must not discard a target's API prefix, and its Host must not retain the global host — Task 6 tests distinct ports/prefixes and literal query bytes.
+2. Missing/old-format targets and inherited `constructor`/`toString` entries must never create a global fallback — Task 6 covers loading and runtime own-property selection.
+3. A bad global token must fail before observation, desktop-state access or project-key lookup, even with distinct destinations — Task 6 retains precedence tests with broken state and zero calls at both origins.
+4. Moving a chat during selected-key retrieval or an active stream must not mix the previous destination with the next credential — Task 7 uses barriers and exact per-origin authorization assertions.
+5. A project destination's rejection, redirect, TLS failure or disconnect must not send its key to another destination or impair a healthy route — Task 7 asserts per-origin request counts, outcomes and no retry.
 
-### Task 1: Validate credential configuration and preserve readiness compatibility [size: M | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security]
+---
 
-**Acceptance criteria:** AC-01, AC-07, AC-08
+## 2. Remaining implementation tasks
 
-**Risk:** Configuration must identify only explicit credential references and preserve safe activation/recovery.
+### Task 6: Integrate explicit route targets and retain control safety [size: L | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,auth]
 
-**Files:** Modify [config.js](/Users/davide/Personal/Projects/codex-project-router/src/config.js), [errors.js](/Users/davide/Personal/Projects/codex-project-router/src/errors.js), [config-identity.test.js](/Users/davide/Personal/Projects/codex-project-router/test/config-identity.test.js), [activation.test.js](/Users/davide/Personal/Projects/codex-project-router/test/activation.test.js) and [admission-diagnostics.test.js](/Users/davide/Personal/Projects/codex-project-router/test/admission-diagnostics.test.js).
+**Acceptance criteria:** AC-01, AC-02, AC-03, AC-04, AC-05, AC-07, AC-08
 
-**Interfaces:** Preserve `loadRouterConfig(configPath)` and `configFingerprint(config)`. Loaded enabled configurations expose deeply frozen `credentialRouting.globalCredential` and `credentialRouting.routeCredentials`. Legacy configurations omit the new property.
+**Risk:** Configuration, authorization and destination must agree. Keep this integration atomic rather than inventing temporary compatibility behavior. Concurrency stress belongs to Task 7.
 
-- [ ] Record the separate specification and plan approvals. Save both artifacts, inspect all changes, fetch `origin`, fast-forward `main` safely, create `feat/project-credential-routing`, and commit only the approved pair. Preserve conflicting work rather than resetting or forcing.
-- [ ] Add tests for the exact optional schema: required fields, unknown fields, absolute paths, empty/control-containing/overlength strings, malformed references, valid shared/unused references and an empty credential map. Retain the existing historical fingerprint assertion.
-- [ ] Assert deep freezing, equivalent fingerprints under reordered fields/maps, and fingerprint changes for routing/reference changes. Include valid own alias names such as `constructor`.
-- [ ] Add fixed error definitions and assertions:
+**Files:** Modify `src/config.js`, `src/proxy.js`, `test/config-identity.test.js`, `test/proxy.test.js`, `test/activation.test.js`, `test/cli.test.js`, `README.md` and `examples/router.credentials.example.json`. Preserve `examples/router.example.json`, the existing credential reader/error definitions and earlier validation history. Inspect unchanged diagnostics only for concrete privacy/interface risks; do not refactor them speculatively.
 
-  ```text
-  AUTH_INVALID          401  The incoming bearer credential is not accepted.
-  CREDENTIAL_UNMAPPED   422  The assigned route has no credential reference.
-  CREDENTIAL_UNAVAILABLE 503 The required credential could not be retrieved.
-  ```
-
-- [ ] Run `npm test`. **Expected RED:** New configuration or error assertions fail against the baseline.
-- [ ] Implement strict validation without environment/tilde expansion. Canonicalize references in fixed field order and sort alias entries before fingerprinting; append enabled routing data without changing the legacy canonical representation.
-- [ ] Run `npm test`. **Expected GREEN:** Configuration, diagnostics and activation regressions pass.
-- [ ] Commit as `feat: validate project credential routing configuration`, then complete the task review.
-
-### Task 2: Implement bounded, private Keychain retrieval [size: M | risk: security | mechanical: false | clear_pattern: false | objectively_verifiable: true | concerns: security]
-
-**Acceptance criteria:** AC-04, AC-06, AC-07
-
-**Risk:** Subprocess failures and malformed output must never leak or authorize credentials.
-
-**Files:** Create `/Users/davide/Personal/Projects/codex-project-router/src/credentials.js` and `/Users/davide/Personal/Projects/codex-project-router/test/credentials.test.js`.
-
-**Interface:**
+**Interfaces:** Preserve `loadRouterConfig(configPath)`, `configFingerprint(config)`, `createProxy(config, { diagnostics, upstreamAgent, inactivityTimeoutMs, credentialReader })` and `readKeychainCredential(reference, { signal })`. Loaded enabled configuration exposes:
 
 ```text
-readKeychainCredential(
-  reference,
-  { signal, spawnProcess = spawn } = {}
-) → Promise<string>
+credentialRouting = {
+  globalCredential: { keychainPath, service, account },
+  routeTargets: { [alias]: { upstreamBaseUrl, credential: { keychainPath, service, account } } }
+}
 ```
 
-`spawnProcess` is an in-process test seam, unavailable through configuration or CLI. The function returns a validated token or throws a fresh sanitized `CREDENTIAL_UNAVAILABLE`/`CANCELLED` error.
+Use an internal `normalizeUpstreamBaseUrl(value)` in `src/config.js` for both global and target validation, preserving current global URL semantics. Deep-freeze targets/maps/references. Canonical enabled fingerprint data is global reference plus alias-sorted `[alias, normalizedUrl, referenceFieldsInFixedOrder]`; preserve the legacy canonical representation exactly.
 
-- [ ] Write reader tests that inspect the exact executable, separate arguments and piped output:
+Extend the private `setupProxy` test helper to optionally start a second local HTTPS upstream (`projectHandler`), retaining existing `calls` for global traffic and exposing separate `projectCalls`. Return `globalBaseUrl` (first listener plus `/api/v1`) and `projectBaseUrl` (second listener plus `/region/v1`, or the first base URL if no second listener). Its `credentialRouting` option accepts a configuration or a factory receiving `{ globalBaseUrl, projectBaseUrl }`. Change the local routing factory and its consumers to construct complete targets using those known URLs. Do not silently rewrite explicit target URLs in the helper. Reuse the committed public test-only certificate/CA and request helper; preserve existing string body capture and additionally capture raw `bodyBytes` buffers.
 
-  ```text
-  /usr/bin/security
-  find-generic-password -a ACCOUNT -s SERVICE -w ABSOLUTE_KEYCHAIN_PATH
+- [ ] Record amended specification approval (`approved`) and the separately obtained plan approval. Confirm the checkout/HEAD and only the expected artifact edits; commit the approved pair on the existing branch as `docs: approve explicit route target amendment`. Preserve any conflicting/unrelated work and stop rather than resetting. Do not repeat fetch/main/branch setup.
+- [ ] Add `explicit target schema rejects obsolete and incomplete routing` and `target fingerprints preserve legacy compatibility and include normalized destinations` tests: exact required fields; reject old/both formats, invalid URL schemes/user info/query/fragment/relative URLs, malformed targets/references and unknown fields; retain reference bounds, historical fingerprint, empty/shared/unused targets and valid own aliases. Assert normalized URL/field/map reordering equivalence, deep freezing, and URL/reference changes affecting readiness. Migrate control-test fixtures to the new format, retaining fail-on-use reader/subprocess guards and offline/legacy-record recovery. With distinct local origins configured, assert startup/health/status/activation/rollback send no destination-preflight requests to either origin.
+- [ ] Add `mapped route selects its exact credential destination and prefix` with one incoming `GLOBAL_CREDENTIAL_SENTINEL` and raw `bodyBytes` containing non-ASCII bytes. Pin the first A request with the assertions below. Add controller/global, catalog/title, compaction, ancestry, fork/follow-up, mapped title priority, shared target, missing alias and own `constructor`/`toString` variants. Assert no project reads for catalog/title and exact original authorization there. Retain the observation/title mode matrix and authentication-before-broken-state failures.
+
+  ```js
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?x=a%2Fb&x=2");
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+  assert.deepEqual(f.projectCalls[0].bodyBytes, bodyBytes);
   ```
+- [ ] Run `npm test`. Expected RED: new enabled configurations/target forwarding fail against the current key-only implementation; retain decisive failure output, not incidental fixture/import errors.
+- [ ] Implement strict target loading/fingerprints and the proxy selection. After global verification and ordinary resolution, require `Object.hasOwn(routeTargets, alias)`, capture its destination, await its credential, and fix the pair before `started`. Build the URL from the full selected prefix plus admitted suffix/query; explicitly set authorization after hop filtering and Host from the selected URL. Keep cancellation checks, request-local secrets and all existing error text/codes. Missing aliases retain `CREDENTIAL_UNMAPPED`; malformed supplied targets fail configuration. Do not add a public selection API or touch the bounded reader without an evidenced defect.
+- [ ] Migrate the README/example to explicit pairs and correct gateway-instance selection. Explain manual format migration, controller/global behavior, full prefixes, restart/readiness, no preflight/fallback, unchanged Keychain items and continuation limits. Preserve documented lookup limits, trust/privacy and exact recovery. Run `npm test`, `node --check src/cli.js`, `git diff --check`. Expected GREEN: all migrated tests and existing regressions pass, syntax/whitespace clean; retain exact commands/exits/proof lines.
+- [ ] Self-review and commit only assigned changes as `feat: route project credentials to explicit API targets`. Complete the task review before Task 7. **Review range:** `04fe73d..TASK6_HEAD`, deliberately including unreviewed `8a61a30`/`639cbeb` automation, docs and truthful failed-run report alongside this task's amendment. Record the actual implementer BASE separately; fixes use that task's fix-round bases. Do not rereview completed Tasks 1–4 or interpret the earlier failed live report as AC-09 completion.
 
-  Require no shell and ignored stdin.
-
-- [ ] Test token lengths 0, 1, 8,192 and 8,193; no terminal LF, one LF and multiple LFs; CRLF, spaces, tabs, NUL, DEL and non-ASCII bytes. Exercise chunk boundaries before decoding.
-- [ ] Test spawn errors, nonzero exit, signal termination, plausible stdout followed by failure, independent stdout/stderr overflow, timeout and cancellation before/during lookup. Verify rejection waits for child cleanup.
-- [ ] Use fake process streams for deterministic boundaries and Node-only synthetic children for actual termination/reaping coverage. Never execute Keychain in tests.
-- [ ] Run `npm test`. **Expected RED:** The reader is absent or fails the specified contract.
-- [ ] Implement byte-counted output handling and a five-second timer. On cancellation, timeout or overflow, terminate the direct child and await closure; clear timers/listeners on every terminal path. Do not expose raw process errors or output.
-- [ ] Run `npm test`. **Expected GREEN:** Reader boundaries and cleanup tests pass, without surviving synthetic children.
-- [ ] Commit as `feat: add bounded Keychain credential retrieval`, then complete the task review.
-
-### Task 3: Authenticate callers and select outgoing credentials [size: M | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,auth]
-
-**Acceptance criteria:** AC-02, AC-03, AC-04, AC-05, AC-07
-
-**Risk:** Stored project keys must be reachable only after successful global-token verification and ordinary project resolution.
-
-**Files:** Modify [proxy.js](/Users/davide/Personal/Projects/codex-project-router/src/proxy.js) and [proxy.test.js](/Users/davide/Personal/Projects/codex-project-router/test/proxy.test.js).
-
-**Interfaces:** Extend the existing options without changing existing defaults:
-
-```text
-createProxy(config, {
-  diagnostics,
-  upstreamAgent,
-  inactivityTimeoutMs,
-  credentialReader = readKeychainCredential
-})
-```
-
-The reader receives a reference and `{ signal }`. Keep admission and identity interfaces unchanged. Extend the existing test helpers to accept routing configuration, an injected reader and an explicit authorization value.
-
-- [ ] Add failing tests for global mismatch, case-sensitive token comparison, case-insensitive scheme parsing and global retrieval failure. Use broken desktop state to prove authentication takes precedence; assert no observations, project lookup or upstream call.
-- [ ] Test exact project-key substitution for Responses and dedicated compaction, shared aliases/references, saved ancestry and mapped requests carrying title markers.
-- [ ] Test missing credential mappings and failed project reads alongside a healthy second project. Use `Object.hasOwn` semantics: absent `constructor`/`toString` entries produce `CREDENTIAL_UNMAPPED`, while explicit own entries work.
-- [ ] Test catalog and qualifying unassigned-title forwarding with the original caller authorization. Assert no project-key reads and unchanged title attribution/eligibility.
-- [ ] Run `npm test`. **Expected RED:** Requests still forward caller credentials or fail the new authentication assertions.
-- [ ] Authenticate after admission/health handling and before observation or identity resolution. Compare equal-length token buffers with `timingSafeEqual`.
-- [ ] Select credentials only after the existing resolver succeeds. Explicitly set the intended authorization after hop filtering, including when `Connection` names `authorization`. Record `started` only after credential selection succeeds.
-- [ ] Check cancellation after asynchronous stages and immediately before forwarding. Keep secret values in local variables, outside resolution objects and diagnostics.
-- [ ] Run `npm test`. **Expected GREEN:** Selection, precedence and privacy assertions pass.
-- [ ] Commit as `feat: route authenticated requests with project credentials`, then complete the task review.
-
-### Task 4: Verify lifecycle isolation and transport parity [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency]
+### Task 7: Verify destination snapshots and transport isolation [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,security]
 
 **Acceptance criteria:** AC-03, AC-04, AC-05, AC-06, AC-07
 
-**Risk:** Overlapping requests, cancellation and rotation must not share credentials or retain pending work.
+**Risk:** Concurrent requests and reassignment must not combine credentials and destinations from different snapshots.
 
-**Files:** Modify the existing proxy and proxy/credential tests where necessary. Reuse Task 2 and Task 3 interfaces; add no public API.
+**Files:** Modify `test/proxy.test.js`; change `src/proxy.js` only for demonstrated in-scope lifecycle defects. Retain the existing reader tests and process seam; change them only if composition exposes a causal defect.
 
-- [ ] Add overlapping mapped/title streams with one incoming global token and distinct outgoing credentials. Use barriers to prove simultaneous upstream activity and independent outcomes.
-- [ ] Move a chat while its project lookup/stream is in progress. Assert that the existing request retains its selected alias/key and the next request uses the new assignment.
-- [ ] Rotate/delete fake stored values between requests. Assert fresh reads, rejection of stale global tokens, affected-project failure and continued operation for another project. Include an explicit global/project reference shared by both roles; perform both lookups without deduplication.
-- [ ] Cover disconnects during global and project retrieval, request errors, forced connection closure and delayed child completion. Require zero forwarding after cancellation and preservation of the initiating `499/CANCELLED` outcome.
-- [ ] Run `npm test`. **Expected RED where behavior is missing:** New lifecycle assertions expose any teardown or snapshot defect; retain already-passing regressions.
-- [ ] Ensure terminal proxy failures abort pending lookups after recording their initiating outcome. Preserve existing streaming, backpressure, TLS, inactivity and upstream-error behavior.
-- [ ] Exercise enabled routing under both observation/title settings, alongside the existing legacy matrix. Include streaming, slow consumers, redirects without retries, malformed HTTP and sentinel filtering.
-- [ ] Run `npm test`. **Expected GREEN:** All mode combinations and lifecycle regressions pass.
-- [ ] Commit as `test: verify credential routing lifecycle isolation`, including any necessary fixes, then complete the task review.
+**Interfaces:** Consume Task 6's complete target shape and two-origin helper/factory. Add no public interface. Existing real synthetic-child cancellation tests remain mandatory regressions.
 
-### Task 5: Document operation and complete desktop validation/recovery [size: M | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: false | concerns: security]
+- [ ] Add barriers for overlapping A/B project streams and global controller/title streams, using distinct origins, fixed credential expectations and independently controlled completions. Require simultaneous active forwarding and no cross-origin/cross-request credential leakage under all four observation/title combinations; disabled titles still reject as before.
+- [ ] Extend reassignment tests at both `selected project lookup` and `active stream`: explicitly configure A at the first origin with its project key and B at the second origin with its different project key. A's held request keeps that URL/key, while the next request goes to B. After both settle, assert first-origin authorization values equal exactly `["Bearer PROJECT_A_CREDENTIAL_SENTINEL"]` and second-origin values exactly `["Bearer PROJECT_B_CREDENTIAL_SENTINEL"]`; also assert each literal path/body and one call per origin. Keep fake rotation/deletion, stale-global rejection, shared global/project references and no-coalescing tests. Unchanged continuation IDs/body must be forwarded even when the simulated destination rejects them.
+- [ ] Test selected-origin 401, a cross-origin 307 redirect, connection failure, TLS rejection and broken stream. Assert no request to a fallback/redirect origin and continued success for a separately healthy target. Retain streaming, backpressure, inactivity, malformed HTTP, hop headers and disconnect-during-global/project-lookup tests; require initiating `499/CANCELLED` and child reaping with zero post-cancellation forwarding. Sentinel checks exclude URLs/references/keys and gateway response fragments from router diagnostics while preserving opaque upstream HTTP content.
+- [ ] Run `npm test`. Expected: newly added cases may expose defects; record any genuine RED before a fix, and do not claim or manufacture RED for already-correct behavior. Investigate unexpected failures through the integrated debugging workflow, retaining initiating outcomes and exact evidence.
+- [ ] Apply only demonstrated causal fixes, then run `npm test`, `node --check src/cli.js`, `git diff --check`. Expected GREEN: lifecycle/transport cases and prior regressions pass with no surviving synthetic child/listener; no warnings or whitespace/syntax failures.
+- [ ] Commit as `test: verify project destination lifecycle isolation`, including necessary fixes, and complete the task review before live validation.
+
+### Task 8: Renew desktop validation and finish recovery evidence [size: M | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: false | concerns: security]
 
 **Acceptance criteria:** AC-01, AC-02, AC-08, AC-09
 
-**Risk:** Provider activation affects desktop availability; completion also requires user-observed desktop outcomes.
+**Risk:** Activation affects desktop availability. User-confirmed outcomes and exact recovery are required; unsupported gateway behavior remains visibly failed.
 
-**Files:** Update [README.md](/Users/davide/Personal/Projects/codex-project-router/README.md) and relevant activation/CLI tests. Create `/Users/davide/Personal/Projects/codex-project-router/examples/router.credentials.example.json` and `/Users/davide/Personal/Projects/codex-project-router/docs/validation/project-credential-routing.md`.
+**Files:** Update `docs/validation/project-credential-routing.md` and, only where live evidence requires clarification, `README.md` and `examples/router.credentials.example.json`. No actual configuration, references, endpoints or runtime evidence enter Git.
 
-**Interfaces:** Preserve the existing CLI and activation record schema. Keep the current legacy example; provide a separate synthetic enabled example.
+**Ownership/interfaces:** The controller owns private checkpointing, instance/reference verification, separate-Terminal operation and recovery; the user owns provisioning and desktop interactions/restarts. Task 6 already provides operational documentation. After live evidence/recovery, dispatch a fresh full-role Task 8 implementer with a sanitized symbolic handoff to write/commit the final report; it must not read private runtime files. Its task review evaluates the report and changed docs. This completes the remaining original Task 5 obligations without repeating its implementation.
 
-- [ ] Add control-path regressions with credential routing configured: startup, health, status, activation and rollback must not retrieve credentials. Cover changed fingerprints, existing activation records, interrupted/offline recovery and unrelated TOML edits.
-- [ ] Run `npm test`. **Expected:** These compatibility assertions pass; correct any in-scope regression without introducing credential preflight into control commands.
-- [ ] Document manual Keychain Access provisioning, explicit references, optional enablement, missing-key behavior, token refresh, lookup limits, trust/privacy boundaries and recovery.
-- [ ] Run `npm test`, `node --check src/cli.js` and `git diff --check`. **Expected:** Zero failures and clean syntax/whitespace checks. Retain exact commands, exit statuses and decisive output.
-- [ ] Privately checkpoint the direct URL and exact prior configuration, including omitted properties. Obtain user-provisioned references for distinct A/B keys, the global key and an explicit controller route. Do not copy secret values into tools, reports or Git.
-- [ ] Follow the README’s existing direct-baseline, separate-Terminal `serve`, `status` and `activate` procedure. The user performs desktop interactions and required restarts.
-- [ ] Validate fresh A/B responses and automatic titles, overlapping requests, same-chat follow-up, reassignment and the subsequent request. Exercise fork/subagent/compaction opportunistically and record unrun cases.
-- [ ] Record symbolic aliases, sources, outcomes and intervals. Timestamp intervals exclude preceding lookup work; `elapsedMs` includes it. Local selection/transport evidence does not establish gateway account or billing attribution.
-- [ ] Restore exact prior settings and direct URL while preserving unrelated edits. Use rollback, restart as required, obtain a user-confirmed direct response, then stop the proxy and verify no listener remains.
-- [ ] Commit the documentation and sanitized report, then complete the task review. Missing required actions/evidence leaves AC-09 pending; failures remain visibly failed.
+- [ ] Recheck direct operation and no listener, then create a new owner-only run/checkpoint outside Git. Capture exact prior provider/router bytes and optional-property presence. Reuse the already provisioned items without changing real key values. Privately construct explicit A/B project-instance targets and the controller's global target using the user-supplied complete API prefixes. Preserve the earlier failed run and recovery evidence separately. Obtain fresh user-confirmed direct A/B response/title baselines for this run.
+- [ ] Before activation, run `npm test`, `node --check src/cli.js`, `git diff --check`; require exit 0 and retain exact evidence. Follow README's separate-Terminal `serve`, `status`, `activate` sequence with the explicit private config path. Verify matching readiness and URL-only provider edits; have the user restart and confirm controller operation. Keychain permission dialogs remain user-controlled; the bounded reader's timeout is unchanged.
+- [ ] Have the user send fresh A/B requests with automatic titles and enough overlap to record simultaneous intervals, then test a same-chat follow-up and reassignment between A/B followed by another request. Capture symbolic route/source/transport results and user success/failure confirmations. Required synthetic coverage proves exact credential/URL selection; live evidence proves observed operation, not independent gateway billing attribution. Fork/saved-subagent/compaction live cases remain opportunistic and explicitly marked unrun if absent.
+- [ ] If any gateway rejects keys, models or continuation state, retain the real failure classification; do not change keys, rewrite payloads, retry through another target or expand scope. Required missing/failed capabilities leave AC-09 incomplete. Proceed with recovery even when validation fails.
+- [ ] Roll back through the existing CLI, restore exact prior owned settings/property omission while preserving unrelated edits, have the user restart and confirm a working direct response, then stop the positively identified validation proxy. Independently verify no listener and direct status with no recovery required. Keep checkpoints private. Do not stop the listener before direct-response confirmation.
+- [ ] Give the fresh implementer only sanitized evidence and prior-report context. Retain the original failed-run history, distinguish the renewed run, classify every case, and record exact required checks/exits, lookup-excluding timestamp intervals, lookup-including `elapsedMs`, recovery and limitations. Update operational docs only as evidenced. Run `git diff --check` for documentation-only final edits; rerun required executable checks when code/tests changed. Commit as `docs: record project target validation and recovery` and complete Task 8 review. Close original Task 5 only when its automation/docs review and required live/recovery evidence are complete.
 
-## 3. Traceability, final review and handoff
+## 3. Traceability, final gate and handoff
 
-| Criteria | Owning tasks |
+| Criteria | Remaining task ownership / retained evidence |
 |---|---|
-| AC-01 | 1, 5 |
-| AC-02 | 3, 5 |
-| AC-03 | 3, 4 |
-| AC-04 | 2, 3, 4 |
-| AC-05 | 3, 4 |
-| AC-06 | 2, 4 |
-| AC-07 | 1–4 |
-| AC-08 | 1, 5 and final gate |
-| AC-09 | 5 |
+| AC-01 | 6 schema/fingerprints/migration, 8 recovery; original Task 1 legacy evidence |
+| AC-02 | 6 authentication/control regressions, 8 activation; original Tasks 2–3 |
+| AC-03 | 6 exact origins/paths/keys, 7 overlap/reassignment; original ancestry/fork tests |
+| AC-04 | 6 missing targets, 7 destination failure isolation; original bounded-reader cases |
+| AC-05 | 6 global/title/controller selection, 7 mode/overlap matrix |
+| AC-06 | 7 snapshots/rotation/cancellation; original reader cleanup tests |
+| AC-07 | 6–7 isolation/privacy/transport; original sentinel tests |
+| AC-08 | 6 docs/control review, 8 report and final gate |
+| AC-09 | 8 user-assisted live outcomes and exact recovery |
 
-After all task reviews and required validation:
+After required task reviews and validation:
 
-- [ ] Run the required final checks and retain observed evidence.
-- [ ] Invoke `personal-workflows:code-review` exactly once in integrated mode as the sole whole-branch review seat. Use one immutable package containing the approved artifacts, complete diff, changed-file list and observed evidence. Run specification review first; quality review opens only after its verified PASS.
-- [ ] Handle findings under the selected subagent workflow’s fix-loop policy. Do not add a duplicate generic final reviewer.
-- [ ] Commit final evidence/dispositions and finish with the implementation branch local. Report working behavior, tests, desktop evidence, recovery, limitations and pending integration.
+- [ ] Run `npm test`, `node --check src/cli.js`, `git diff --check` against the final reviewed code; retain exact commands, exits and decisive output. Do not count earlier runs as fresh final evidence.
+- [ ] Invoke `personal-workflows:code-review` exactly once in integrated mode as the sole whole-branch seat; it has not run yet. Package the approved amended pair, complete changed-file list and diff from `cd58067` to the review HEAD, observed synthetic/sanitized live evidence, original-task dispositions, failed-run history and enclosing fix-loop policy in one immutable identity/hash-verified package. Specification review runs first; quality opens only after its verified PASS. Resolve managed review roles at execution; preserve the spec/quality ordering and full-role quality judgment.
+- [ ] Handle findings under the selected subagent workflow's single final fix-wave/scoped-re-review policy. Do not add a duplicate generic final reviewer or independent review loop. A failed/missing required live capability stays incomplete and must not be reported as an overall PASS.
+- [ ] Commit final evidence/dispositions on the existing local branch. Report working behavior, actual tests, live outcomes, recovery, limitations and pending integration. Stop; do not push, merge or start a later increment.
 
-**Execution endpoint:** Complete this credential-routing increment, verification and review; restore direct operation and exact prior settings; verify a direct response and stopped listener; report the result; stop before later increments. Push and merge remain unauthorized.
+**Execution endpoint:** Complete the amended credential-routing increment, verification and review; restore exact prior settings and direct operation; confirm a direct response and stopped listener; report evidence and limitations; then stop before later work. Push and merge remain unauthorized.
 
-**Self-review:** All nine acceptance criteria have task coverage; interfaces agree across tasks; each review-focus case has explicit tests. No material planning decision remains unresolved.
+**Self-review:** All nine stable acceptance IDs are covered. New configuration and proxy consumer change atomically, so no temporary format is needed. Task 6 explicitly reviews the previously unreviewed Task 5 commits; Task 8 owns its remaining live acceptance. Interfaces, own-property rules, URL prefix/Host behavior and review-focus cases agree with the approved specification. The existing execution choice and completed work are preserved. No material decision remains unresolved.
 
-**Approval record:** The specification was separately approved in the earlier `PLEASE IMPLEMENT THIS PLAN` message reproducing the specification, and the user approved this separately presented plan in the latest `PLEASE IMPLEMENT THIS PLAN` message reproducing this plan. Current stage: Stage 4 — implementation authorized. Both approved artifacts are saved before product changes.
+**Current stage:** Stage 4 — implementation authorized. The amended specification and revised plan were separately presented and approved by two distinct `approved` messages. Both approved revisions are saved before further product edits. Push and merge remain unauthorized.
