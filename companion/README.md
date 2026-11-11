@@ -260,7 +260,22 @@ routed use, keep the app/listener running until direct restoration and a working
 direct response have been confirmed. Closing the window leaves them running.
 Quit (including keyboard/application termination) always requests guarded cleanup;
 it remains blocked by unresolved recovery or an owned child that cannot safely
-stop. An occupied or unknown port after owned-child exit remains distinct from
+stop. A denied Quit presents the native **Cannot quit yet** alert with fixed
+guidance for the current blocker. Pending direct confirmation reads:
+“Direct-response confirmation is pending. Open Controls to complete the check.”
+**Open Controls** (Return) reveals the existing controls window, including when
+closed or minimized. **Keep Running** (Escape/cancel) dismisses the alert without
+changing window visibility. Complete any required direct restoration and manual
+Codex restart/working-response confirmation in Controls before requesting Quit
+again. Neither alert action confirms recovery or performs a routing operation;
+opening Controls retains its ordinary refresh behavior. Repeated Quit requests
+during cleanup or the alert do not queue another attempt or dialog. Dismissal
+never retries Quit, even if the state became safe while the alert was visible.
+Successful guarded Quit, including the existing safe initialization-failure and
+second-instance exceptions, exits without showing this alert. These messages do
+not diagnose or fix why a prior confirmation might reopen.
+
+An occupied or unknown port after owned-child exit remains distinct from
 matching readiness. External listeners are never adopted or signalled.
 
 Real native launch/menu/window appearance, first-launch behavior, selection panels,

@@ -20,6 +20,9 @@ import CompanionCore
     private var polling: Timer?
     private var quitInProgress = false
     private var terminationApproved = false
+    private let presentQuitAlert: @MainActor (NSAlert) async -> NSApplication.ModalResponse
+    private let showControls: (@MainActor () -> Void)?
+    private let terminate: @MainActor () -> Void
 
     override convenience init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -29,8 +32,17 @@ import CompanionCore
             browseHome: home.appendingPathComponent(".codex"))
         self.init(controller: controller)
     }
-    init(controller: RouterController) {
+    init(controller: RouterController,
+         presentQuitAlert: @escaping @MainActor (NSAlert) async -> NSApplication.ModalResponse = {
+             NSApp.activate(ignoringOtherApps: true)
+             return $0.runModal()
+         },
+         showControls: (@MainActor () -> Void)? = nil,
+         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
         self.controller = controller
+        self.presentQuitAlert = presentQuitAlert
+        self.showControls = showControls
+        self.terminate = terminate
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -79,16 +91,24 @@ import CompanionCore
         requestQuit()
         return .terminateCancel
     }
-    func requestQuit() {
-        guard !quitInProgress else { return }
+    @discardableResult func requestQuit() -> Task<Void, Never>? {
+        guard !quitInProgress else { return nil }
+        // Claim before scheduling, and hold through the modal run loop and its response.
         quitInProgress = true
-        Task {
+        return Task {
+            defer { quitInProgress = false }
             await controller.requestQuit()
-            quitInProgress = false
             if controller.quitRequested && controller.canQuit {
                 terminationApproved = true
-                NSApp.terminate(nil)
-            } else { openControls() }
+                terminate()
+            } else {
+                let reason = controller.quitBlockReason ?? .contextUnavailable
+                let response = await presentQuitAlert(QuitAlert.make(reason: reason))
+                if response == .alertFirstButtonReturn {
+                    if let showControls { showControls() }
+                    else { openControls() }
+                }
+            }
         }
     }
     func applicationWillTerminate(_ notification: Notification) { polling?.invalidate() }
