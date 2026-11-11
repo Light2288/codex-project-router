@@ -7,10 +7,15 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { activate, rollback, status } from "../src/activation.js";
 import { configFingerprint } from "../src/config.js";
+import { createProxy } from "../src/proxy.js";
 import { fixture } from "./helpers/fixtures.js";
-async function setup(t, { ready = true, mismatch = false } = {}) {
+async function setup(t, { ready = true, mismatch = false, credentialReader } = {}) {
   const f = await fixture(t);
-  const server = http.createServer((req, res) => {
+  if (credentialReader) f.config.credentialRouting = credentialRouting();
+  const server = credentialReader ? createProxy(f.config, {
+    diagnostics: { write() {} },
+    credentialReader,
+  }) : http.createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
@@ -44,6 +49,41 @@ async function setup(t, { ready = true, mismatch = false } = {}) {
 const credentialRouting = () => ({
   globalCredential: { keychainPath: "/nonexistent/synthetic.keychain-db", service: "synthetic-global", account: "synthetic-account" },
   routeCredentials: { "route-a": { keychainPath: "/nonexistent/synthetic.keychain-db", service: "synthetic-project", account: "synthetic-account" } },
+});
+test("real proxy readiness and activation recovery never read configured credentials", async (t) => {
+  let credentialReads = 0;
+  const f = await setup(t, {
+    credentialReader: async () => {
+      credentialReads++;
+      throw new Error("control paths must not retrieve credentials");
+    },
+  });
+  assert.equal(credentialReads, 0);
+  assert.deepEqual(await status(f.configPath), {
+    state: "direct", proxyReady: true, recoveryRequired: false,
+  });
+  assert.equal((await activate(f.configPath)).changed, true);
+  assert.equal((await activate(f.configPath)).changed, false);
+  assert.equal((await status(f.configPath)).state, "active");
+  assert.equal((await rollback(f.configPath)).state, "direct");
+  assert.equal(credentialReads, 0);
+
+  await activate(f.configPath);
+  const record = JSON.parse(await readFile(f.recordPath, "utf8"));
+  record.phase = "prepared";
+  await writeFile(f.recordPath, JSON.stringify(record));
+  const edited = f.original.replace('"test-model"', '"changed-model"');
+  await writeFile(f.codexConfigPath, edited.replace(f.config.upstreamBaseUrl, f.localUrl));
+  await f.stopProxy();
+  f.config.credentialRouting.globalCredential.service = "changed-synthetic-global";
+  await f.saveConfig();
+  assert.equal((await status(f.configPath)).recoveryRequired, true);
+  assert.equal((await rollback(f.configPath)).state, "direct");
+  assert.equal(await readFile(f.codexConfigPath, "utf8"), edited);
+  assert.deepEqual(await status(f.configPath), {
+    state: "direct", proxyReady: false, recoveryRequired: false,
+  });
+  assert.equal(credentialReads, 0);
 });
 for (const runningEnabled of [false, true])
   test(`activation refuses opposite credential routing mode (running ${runningEnabled})`, async (t) => {

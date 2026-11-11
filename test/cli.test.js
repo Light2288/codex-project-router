@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { fixture } from "./helpers/fixtures.js";
-function cli(args) {
+function cli(args, nodeArgs = []) {
   return new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, ["src/cli.js", ...args], {
+    const p = spawn(process.execPath, [...nodeArgs, "src/cli.js", ...args], {
       cwd: new URL("../", import.meta.url),
     });
     let stdout = "",
@@ -28,17 +30,52 @@ test("CLI usage and failures never echo supplied arguments or parse errors", asy
   assert.notEqual(invalid.code, 0);
   assert.doesNotMatch(invalid.stdout + invalid.stderr, /SENTINEL|SyntaxError/);
 });
-test("serve listens on loopback and terminates cleanly on SIGTERM", async (t) => {
+for (const routingEnabled of [false, true])
+test(`CLI controls and startup avoid credential reads (routing ${routingEnabled})`, async (t) => {
   const f = await fixture(t);
+  if (routingEnabled) f.config.credentialRouting = {
+    globalCredential: {
+      keychainPath: "/nonexistent/synthetic.keychain-db",
+      service: "synthetic-global", account: "synthetic-account",
+    },
+    routeCredentials: {},
+  };
+  const attemptedChild = join(f.dir, "unexpected-child-process");
+  const preloadPath = join(f.dir, "deny-child-process.mjs");
+  // Block the real boundary before CLI modules load; even a swallowed lookup
+  // leaves evidence, and no test can accidentally contact the user's Keychain.
+  await writeFile(preloadPath, `
+import childProcess from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+childProcess.spawn = () => {
+  writeFileSync(${JSON.stringify(attemptedChild)}, "attempted");
+  throw new Error("unexpected child process");
+};
+syncBuiltinESMExports();
+`);
+  const nodeArgs = ["--import", pathToFileURL(preloadPath).href];
+  const original = `model_provider = "test_gateway"
+model = "test-model"
+[model_providers.test_gateway]
+base_url = "${f.config.upstreamBaseUrl}"
+wire_api = "responses"
+supports_websockets = false
+[model_providers.test_gateway.auth]
+command = "/definitely-not-a-key-helper"
+`;
+  const codexConfigPath = join(f.dir, "config.toml");
+  await writeFile(codexConfigPath, original);
   f.config.listenPort = 0;
   await f.saveConfig();
-  assert.notEqual((await cli(["serve", "--config", f.configPath])).code, 0);
+  assert.notEqual((await cli(["serve", "--config", f.configPath], nodeArgs)).code, 0);
   const reserve = http.createServer();
   await new Promise((r) => reserve.listen(0, "127.0.0.1", r));
   f.config.listenPort = reserve.address().port;
   await new Promise((r) => reserve.close(r));
   await f.saveConfig();
   const p = spawn(process.execPath, [
+    ...nodeArgs,
     "src/cli.js",
     "serve",
     "--config",
@@ -60,7 +97,25 @@ test("serve listens on loopback and terminates cleanly on SIGTERM", async (t) =>
   });
   assert.equal(ready.host, "127.0.0.1");
   assert.equal(ready.state, "listening");
+  const inspect = await cli(["status", "--config", f.configPath], nodeArgs);
+  assert.equal(inspect.code, 0);
+  assert.deepEqual(JSON.parse(inspect.stdout), {
+    state: "direct", proxyReady: true, recoveryRequired: false,
+  });
+  const activation = await cli(["activate", "--config", f.configPath], nodeArgs);
+  assert.equal(activation.code, 0);
+  assert.equal(JSON.parse(activation.stdout).state, "active");
+  await writeFile(codexConfigPath, (await readFile(codexConfigPath, "utf8"))
+    .replace('"test-model"', '"changed-model"'));
   p.kill("SIGTERM");
-  await new Promise((r) => p.on("exit", r));
+  assert.equal(await new Promise((r) => p.on("exit", r)), 0);
+  const recovery = await cli(["rollback", "--config", f.configPath], nodeArgs);
+  assert.equal(recovery.code, 0);
+  assert.equal(JSON.parse(recovery.stdout).state, "direct");
+  assert.equal(await readFile(codexConfigPath, "utf8"),
+    original.replace('"test-model"', '"changed-model"'));
+  await assert.rejects(access(attemptedChild), { code: "ENOENT" });
   assert.doesNotMatch(stderr, /SENTINEL/);
+  assert.doesNotMatch(inspect.stdout + activation.stdout + recovery.stdout,
+    /synthetic-global|synthetic-account|synthetic\.keychain-db/);
 });
