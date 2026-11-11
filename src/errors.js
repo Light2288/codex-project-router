@@ -15,6 +15,9 @@ const definitions = {
   CANCELLED: [499, "The request was cancelled."],
   ROUTE_UNSUPPORTED: [404, "This operation is not supported by the router."],
   AUTH_REQUIRED: [401, "Existing provider bearer authentication is required."],
+  AUTH_INVALID: [401, "The incoming bearer credential is not accepted."],
+  CREDENTIAL_UNMAPPED: [422, "The assigned route has no credential reference."],
+  CREDENTIAL_UNAVAILABLE: [503, "The required credential could not be retrieved."],
   UPSTREAM_FAILED: [502, "The upstream connection failed."],
   INTERNAL_ERROR: [500, "The router could not complete this operation."],
   ACTIVATION_CONFLICT: [

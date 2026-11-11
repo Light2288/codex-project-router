@@ -1,12 +1,13 @@
 import http from "node:http";
 import https from "node:https";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { configFingerprint } from "./config.js";
 import { admitRequest } from "./admission.js";
 import { identifyProject } from "./identity.js";
 import { emitDiagnostic } from "./diagnostics.js";
 import { collectRequestMetadata } from "./request-metadata.js";
 import { RouterError, safeError } from "./errors.js";
+import { readKeychainCredential } from "./credentials.js";
 const hop = new Set([
   "connection",
   "keep-alive",
@@ -34,6 +35,7 @@ export function createProxy(
     diagnostics = process.stderr,
     upstreamAgent,
     inactivityTimeoutMs = 300000,
+    credentialReader = readKeychainCredential,
   } = {},
 ) {
   const server = http.createServer(
@@ -75,6 +77,7 @@ export function createProxy(
         if (completed) return;
         const safe = safeError(error);
         finish(safe.status, safe.code);
+        controller.abort();
         outgoing?.destroy();
         incoming?.destroy();
         if (res.headersSent) {
@@ -94,8 +97,10 @@ export function createProxy(
           );
         }
       };
-      req.once("aborted", () => controller.abort());
-      req.once("error", () => fail(new RouterError("CANCELLED")));
+      req.once("aborted", () => fail(new RouterError("CANCELLED")));
+      req.once("error", () => {
+        fail(new RouterError("CANCELLED"));
+      });
       res.once("error", () => {
         finish(499, "CANCELLED");
         controller.abort();
@@ -115,8 +120,6 @@ export function createProxy(
       });
       try {
         const admission = admitRequest(req.method, req.url, req.rawHeaders);
-        if (admission.kind === "model" && config.observeRequestMetadata === true)
-          requestMetadata = collectRequestMetadata(req.rawHeaders);
         operation = admission.kind === "model"
           ? admission.upstreamPath.split("?")[0] === "/responses/compact"
             ? "compact"
@@ -133,6 +136,23 @@ export function createProxy(
           );
           return;
         }
+        let authorization = req.headers.authorization,
+          upstreamBaseUrl = config.upstreamBaseUrl;
+        if (config.credentialRouting) {
+          const globalCredential = await credentialReader(
+            config.credentialRouting.globalCredential,
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted || res.destroyed || completed) return;
+          const callerToken = Buffer.from(authorization.slice(7)),
+            expectedToken = Buffer.from(globalCredential);
+          if (
+            callerToken.length !== expectedToken.length ||
+            !timingSafeEqual(callerToken, expectedToken)
+          ) throw new RouterError("AUTH_INVALID");
+        }
+        if (admission.kind === "model" && config.observeRequestMetadata === true)
+          requestMetadata = collectRequestMetadata(req.rawHeaders);
         resolution =
           admission.kind === "model"
             ? await identifyProject(req.rawHeaders, config, {
@@ -140,14 +160,29 @@ export function createProxy(
                 allowUnassignedTitle: operation === "responses",
               })
             : { source: "catalog" };
-        if (controller.signal.aborted || res.destroyed) return;
-        record("started");
-        if (res.destroyed) return;
+        if (controller.signal.aborted || res.destroyed || completed) return;
+        if (config.credentialRouting && resolution.routeAlias !== undefined) {
+          const targets = config.credentialRouting.routeTargets;
+          if (!Object.hasOwn(targets, resolution.routeAlias))
+            throw new RouterError("CREDENTIAL_UNMAPPED");
+          const target = targets[resolution.routeAlias];
+          upstreamBaseUrl = target.upstreamBaseUrl;
+          const projectCredential = await credentialReader(
+            target.credential,
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted || res.destroyed || completed) return;
+          authorization = `Bearer ${projectCredential}`;
+        }
         const url = new URL(
-          config.upstreamBaseUrl.replace(/\/$/, "") + admission.upstreamPath,
+          upstreamBaseUrl.replace(/\/$/, "") + admission.upstreamPath,
         );
+        record("started");
+        if (controller.signal.aborted || res.destroyed || completed) return;
         const headers = endToEnd(req.headers);
+        if (config.credentialRouting) headers.authorization = authorization;
         headers.host = url.host;
+        if (controller.signal.aborted || res.destroyed || completed) return;
         outgoing = https.request(
           url,
           { method: req.method, headers, agent: upstreamAgent },

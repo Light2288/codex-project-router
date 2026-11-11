@@ -3,8 +3,31 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { admitRequest } from "../src/admission.js";
 import { emitDiagnostic } from "../src/diagnostics.js";
+import { RouterError } from "../src/errors.js";
 import { headers, T1, P1 } from "./helpers/fixtures.js";
 const auth = ["Authorization", "Bearer CREDENTIAL_SENTINEL"];
+for (const [code, status, message] of [
+  ["AUTH_INVALID", 401, "The incoming bearer credential is not accepted."],
+  ["CREDENTIAL_UNMAPPED", 422, "The assigned route has no credential reference."],
+  ["CREDENTIAL_UNAVAILABLE", 503, "The required credential could not be retrieved."],
+]) test(`${code} exposes a fixed sanitized error and diagnostic code`, () => {
+  const error = new RouterError(code);
+  assert.equal(error.code, code);
+  assert.equal(error.status, status);
+  assert.equal(error.message, message);
+  let output = "";
+  const stream = new Writable({ write(chunk, encoding, cb) { output += chunk; cb(); } });
+  emitDiagnostic(stream, {
+    event: "rejected", errorCode: error.code, status: error.status,
+    credentialRouting: { globalCredential: { keychainPath: "/REFERENCE_SENTINEL", service: "SERVICE_SENTINEL", account: "ACCOUNT_SENTINEL" } },
+    credential: "CREDENTIAL_SENTINEL", credentialHash: "HASH_SENTINEL", credentialPrefix: "PREFIX_SENTINEL",
+    stdout: "STDOUT_SENTINEL", stderr: "STDERR_SENTINEL", error: new Error("EXCEPTION_SENTINEL"),
+  });
+  const diagnostic = JSON.parse(output);
+  assert.equal(diagnostic.errorCode, code);
+  assert.equal(diagnostic.status, status);
+  assert.doesNotMatch(output, /SENTINEL/);
+});
 for (const [method, path, kind, suffix] of [
   ["GET", "/healthz", "health", null],
   ["GET", "/v1/models?client_version=1", "catalog", "/models?client_version=1"],

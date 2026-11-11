@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
-import { once } from "node:events";
+import { EventEmitter, getEventListeners, once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
+import { RouterError } from "../src/errors.js";
+import { readKeychainCredential } from "../src/credentials.js";
 import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 const key = await readFile(
   new URL("./fixtures/tls/test-only-key.pem", import.meta.url),
@@ -25,30 +28,49 @@ async function listening(server, t) {
   return server.address().port;
 }
 async function setupProxy(t, handler, options = {}) {
-  const f = await fixture(t),
-    calls = [];
-  const upstream = https.createServer({ key, cert }, async (req, res) => {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    calls.push({ url: req.url, headers: req.headers, body });
-    await handler(req, res, calls);
+  const f = await fixture(t), calls = [], projectCalls = [];
+  const upstream = (handler, captured) => https.createServer({ key, cert }, async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const bodyBytes = Buffer.concat(chunks);
+    captured.push({ url: req.url, headers: req.headers, body: bodyBytes.toString(), bodyBytes });
+    await handler(req, res, captured);
   });
-  const port = await listening(upstream, t);
-  f.config.upstreamBaseUrl = `https://127.0.0.1:${port}/api/v1`;
+  const port = await listening(upstream(handler, calls), t);
+  const globalBaseUrl = `https://127.0.0.1:${port}/api/v1`;
+  const projectUpstream = options.projectHandler ? upstream(options.projectHandler, projectCalls) : undefined;
+  const projectPort = projectUpstream ? await listening(projectUpstream, t) : undefined;
+  const projectBaseUrl = projectUpstream ? `https://127.0.0.1:${projectPort}/region/v1` : globalBaseUrl;
+  f.config.upstreamBaseUrl = globalBaseUrl;
   f.config.observeRequestMetadata = options.observeRequestMetadata ?? false;
   f.config.allowUnassignedThreadTitles = options.allowUnassignedThreadTitles ?? false;
+  if (options.credentialRouting !== undefined)
+    f.config.credentialRouting = typeof options.credentialRouting === "function"
+      ? options.credentialRouting({ globalBaseUrl, projectBaseUrl })
+      : options.credentialRouting;
   const logs = new PassThrough();
   let output = "";
   logs.on("data", (c) => (output += c));
   const agent = new https.Agent({ ca: cert });
+  if (options.untrustedProject) {
+    const createConnection = agent.createConnection;
+    // Keep the healthy origin trusted while exercising a real TLS rejection at the selected origin.
+    agent.createConnection = function (connectionOptions, ...args) {
+      return createConnection.call(this, {
+        ...connectionOptions,
+        ...(Number(connectionOptions.port) === projectPort ? { ca: [] } : {}),
+      }, ...args);
+    };
+  }
   t.after(() => agent.destroy());
   const proxy = createProxy(f.config, {
     diagnostics: logs,
     upstreamAgent: options.untrusted ? undefined : agent,
     inactivityTimeoutMs: options.timeoutMs,
+    credentialReader: options.credentialReader,
   });
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -57,6 +79,7 @@ function request(
     method = "POST",
     raw = headers(),
     token = "CREDENTIAL_SENTINEL",
+    authorization = `Bearer ${token}`,
     authenticated = true,
     body = '{"model":"unchanged","input":"PROMPT_SENTINEL"}',
     onChunk,
@@ -73,7 +96,7 @@ function request(
         headers: [
           "Host",
           "127.0.0.1",
-          ...(authenticated ? ["Authorization", `Bearer ${token}`] : []),
+          ...(authenticated ? ["Authorization", authorization] : []),
           ...raw,
         ],
       },
@@ -101,9 +124,851 @@ function request(
     req.end(body);
   });
 }
+const globalReference = {
+  keychainPath: "/synthetic/KEYCHAIN_REFERENCE_SENTINEL",
+  service: "GLOBAL_SERVICE_SENTINEL",
+  account: "GLOBAL_ACCOUNT_SENTINEL",
+};
+const projectAReference = {
+  keychainPath: "/synthetic/KEYCHAIN_REFERENCE_SENTINEL",
+  service: "PROJECT_SERVICE_SENTINEL",
+  account: "PROJECT_A_ACCOUNT_SENTINEL",
+};
+const projectBReference = {
+  keychainPath: "/synthetic/KEYCHAIN_REFERENCE_SENTINEL",
+  service: "PROJECT_SERVICE_SENTINEL",
+  account: "PROJECT_B_ACCOUNT_SENTINEL",
+};
+function credentialRouting({ globalBaseUrl, projectBaseUrl }) {
+  return {
+    globalCredential: globalReference,
+    routeTargets: {
+      "route-a": { upstreamBaseUrl: projectBaseUrl, credential: projectAReference },
+      "route-b": { upstreamBaseUrl: projectBaseUrl, credential: projectBReference },
+      controller: { upstreamBaseUrl: globalBaseUrl, credential: globalReference },
+    },
+  };
+}
+function syntheticCredentialReader(reads) {
+  return async (reference, { signal }) => {
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(signal.aborted, false);
+    reads.push(reference);
+    if (reference === globalReference) return "GLOBAL_CREDENTIAL_SENTINEL";
+    if (reference === projectAReference) return "PROJECT_A_CREDENTIAL_SENTINEL";
+    if (reference === projectBReference) return "PROJECT_B_CREDENTIAL_SENTINEL";
+    throw new Error("Unexpected synthetic reference");
+  };
+}
+async function within(promise, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 3000); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function diagnosticEvents(f) {
+  return f.logs().trim().split("\n").filter(Boolean).map(JSON.parse);
+}
+function processCredentialReader(t, blockedReference, {holdClose = false} = {}) {
+  const ready = Promise.withResolvers(), runs = [];
+  const reader = (reference, {signal}) => {
+    assert.ok(reference === globalReference || reference === projectAReference);
+    const closed = Promise.withResolvers(), releaseClose = Promise.withResolvers();
+    const run = {reference, signal, closed: false, settled: false, releaseClose};
+    const token = reference === globalReference ? "GLOBAL_CREDENTIAL_SENTINEL" : "PROJECT_A_CREDENTIAL_SENTINEL";
+    const blocked = reference === blockedReference;
+    const lookup = readKeychainCredential(reference, {
+      signal,
+      spawnProcess(_executable, _args, options) {
+        const source = blocked
+          ? `process.stdout.write(${JSON.stringify(token)}); process.stderr.write("READY"); setInterval(() => {}, 1000);`
+          : `process.stdout.write(${JSON.stringify(token)});`;
+        const child = spawn(process.execPath, ["--input-type=module", "-e", source], options);
+        run.child = child;
+        // Hold only notification of a real child's closure to test late reader settlement.
+        const readerChild = holdClose && blocked ? new EventEmitter() : child;
+        if (readerChild !== child) {
+          readerChild.stdout = child.stdout;
+          readerChild.stderr = child.stderr;
+          readerChild.kill = terminationSignal => child.kill(terminationSignal);
+          child.once("error", error => readerChild.emit("error", error));
+        }
+        child.once("close", (code, terminationSignal) => {
+          run.closed = true;
+          closed.resolve();
+          if (readerChild !== child)
+            releaseClose.promise.then(() => readerChild.emit("close", code, terminationSignal));
+        });
+        if (blocked) child.stderr.once("data", () => ready.resolve(run));
+        return readerChild;
+      },
+    });
+    run.outcome = lookup.then(value => ({value}), error => ({error})).then(outcome => {
+      run.settled = true;
+      return outcome;
+    });
+    run.whenClosed = closed.promise;
+    runs.push(run);
+    t.after(async () => {
+      releaseClose.resolve();
+      if (!run.closed) run.child.kill("SIGKILL");
+      await within(closed.promise, "synthetic credential child survived cleanup");
+      await within(run.outcome, "synthetic credential lookup survived cleanup");
+    });
+    return lookup;
+  };
+  return {reader, ready: ready.promise, runs};
+}
 for (const observationMode of [false, true]) for (const policyMode of [false,true]) {
 const test = (name, run) => nodeTest(`${name} (observation ${observationMode}, title policy ${policyMode})`, run);
 const setup = (t, handler, options = {}) => setupProxy(t, handler, {...options, observeRequestMetadata: observationMode, allowUnassignedThreadTitles:policyMode});
+const transportTest = (name, run) => {
+  for (const routingMode of [false, true]) test(`${name} (credential routing ${routingMode})`, async t => {
+    const fixtures = [], reads = [], token = routingMode ? "GLOBAL_CREDENTIAL_SENTINEL" : "CREDENTIAL_SENTINEL";
+    const transportSetup = async (t, handler, options = {}) => {
+      const f = await setup(t, handler, {
+        ...options,
+        credentialReader: syntheticCredentialReader(reads),
+        ...(routingMode ? {credentialRouting: credentialRouting} : {}),
+      });
+      fixtures.push(f);
+      return f;
+    };
+    await run(t, transportSetup, (f, options) => request(f, {token, ...options}), token);
+    for (const f of fixtures) {
+      if (routingMode) for (const call of f.calls) assert.equal(call.headers.authorization,
+        call.headers["thread-id"] === CHILD ? "Bearer GLOBAL_CREDENTIAL_SENTINEL" : "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+      assert.doesNotMatch(f.logs(), /SENTINEL/);
+    }
+    if (!routingMode) assert.deepEqual(reads, []);
+  });
+};
+test("terminal credential failures record their initiating outcome before aborting request work", async t => {
+  for (const failure of ["mismatch", "project unavailable"]) {
+    let requestSignal, eventsAtAbort;
+    const f = await setup(t, async (req, res) => res.end("unexpected"), {
+      credentialRouting: credentialRouting,
+      credentialReader: async (reference, {signal}) => {
+        if (!requestSignal) {
+          requestSignal = signal;
+          signal.addEventListener("abort", () => { eventsAtAbort = diagnosticEvents(f); }, {once: true});
+        }
+        if (reference === projectAReference) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return "GLOBAL_CREDENTIAL_SENTINEL";
+      },
+    });
+    const result = await request(f, {token: failure === "mismatch" ? "WRONG_CREDENTIAL_SENTINEL" : "GLOBAL_CREDENTIAL_SENTINEL"});
+    const expectedCode = failure === "mismatch" ? "AUTH_INVALID" : "CREDENTIAL_UNAVAILABLE";
+    assert.equal(result.status, failure === "mismatch" ? 401 : 503);
+    assert.equal(JSON.parse(result.body).error.code, expectedCode);
+    assert.equal(requestSignal.aborted, true, "terminal failure retained request work");
+    assert.equal(eventsAtAbort.length, 1);
+    assert.equal(eventsAtAbort[0].errorCode, expectedCode);
+    assert.equal(diagnosticEvents(f).length, 1);
+    assert.equal(f.calls.length, 0);
+    assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
+  }
+});
+for (const stage of ["global", "project"]) for (const cancellation of ["client disconnect", "forced connection closure", "request error", "delayed child completion"]) {
+test(`${cancellation} during ${stage} retrieval reaps real child work and preserves cancellation`, async t => {
+  const processes = processCredentialReader(t, stage === "global" ? globalReference : projectAReference, {
+    holdClose: cancellation === "delayed child completion",
+  });
+  const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
+    credentialRouting: credentialRouting, credentialReader: processes.reader,
+  });
+  let serverRequest, client;
+  f.proxy.once("request", req => { serverRequest = req; });
+  const clientOutcome = new Promise(resolve => {
+    client = http.request({
+      host: "127.0.0.1", port: f.proxyPort, path: "/v1/responses", method: "POST",
+      headers: ["Host", "127.0.0.1", "Authorization", "Bearer GLOBAL_CREDENTIAL_SENTINEL", ...headers()],
+    }, res => {
+      let body = "";
+      res.on("data", chunk => { body += chunk; });
+      res.on("end", () => resolve({status: res.statusCode, body}));
+      res.on("error", error => resolve({error}));
+    });
+    client.on("error", error => resolve({error}));
+    client.end("{}");
+  });
+  t.after(() => client.destroy());
+  const pending = await within(processes.ready, "synthetic lookup did not become pending");
+  assert.equal(pending.settled, false);
+  let eventsAtAbort;
+  pending.signal.addEventListener("abort", () => { eventsAtAbort = diagnosticEvents(f); }, {once: true});
+  if (cancellation === "request error") serverRequest.emit("error", new Error("REQUEST_ERROR_SENTINEL"));
+  else if (cancellation === "forced connection closure") f.proxy.closeAllConnections();
+  else client.destroy();
+  await within(pending.whenClosed, "cancelled credential child was not reaped");
+  assert.ok(pending.child.exitCode !== null || pending.child.signalCode !== null);
+  assert.throws(() => process.kill(pending.child.pid, 0), {code: "ESRCH"});
+  if (cancellation === "delayed child completion") {
+    assert.equal(pending.settled, false, "reader settled before child close notification");
+    const completed = diagnosticEvents(f);
+    assert.equal(completed.length, 1);
+    assert.equal(completed[0].status, 499);
+    assert.equal(completed[0].errorCode, "CANCELLED");
+    pending.releaseClose.resolve();
+  }
+  const outcome = await within(pending.outcome, "cancelled credential lookup did not settle");
+  assert.equal(outcome.error.code, "CANCELLED");
+  assert.equal(pending.signal.aborted, true);
+  assert.equal(eventsAtAbort.length, 1, "cancellation was not recorded before aborting child work");
+  assert.equal(eventsAtAbort[0].status, 499);
+  assert.equal(eventsAtAbort[0].errorCode, "CANCELLED");
+  assert.equal(getEventListeners(pending.signal, "abort").length, 0);
+  assert.deepEqual(processes.runs.map(run => run.reference), stage === "global"
+    ? [globalReference] : [globalReference, projectAReference]);
+  const result = await within(clientOutcome, "cancelled client did not settle");
+  if (cancellation === "request error") {
+    assert.equal(result.status, 499);
+    assert.equal(JSON.parse(result.body).error.code, "CANCELLED");
+    assert.doesNotMatch(result.body, /SENTINEL/);
+  } else assert.ok(result.error);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
+  const events = diagnosticEvents(f);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "completed");
+  assert.equal(events[0].status, 499);
+  assert.equal(events[0].errorCode, "CANCELLED");
+  assert.equal(Object.hasOwn(events[0], "requestMetadata"), stage === "project" && observationMode);
+  if (stage === "project") assert.equal(events[0].projectId, P1);
+  else for (const field of ["threadId", "projectId", "routeAlias", "source"])
+    assert.equal(Object.hasOwn(events[0], field), false);
+  assert.doesNotMatch(f.logs(), /SENTINEL|READY/);
+});
+}
+test("credential routing rejects global mismatch before broken state or observations", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.notEqual(f.globalBaseUrl, f.projectBaseUrl);
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  await writeFile(f.statePath, "{STATE_SENTINEL");
+  for (const token of ["WRONG_CREDENTIAL_SENTINEL", "global_credential_sentinel", "GLOBAL_CREDENTIAL_SENTINEL_EXTRA"]) {
+    const result = await request(f, {token, raw: titleHeaders()});
+    assert.equal(result.status, 401);
+    assert.equal(JSON.parse(result.body).error.code, "AUTH_INVALID");
+    assert.doesNotMatch(result.body, /SENTINEL/);
+  }
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference]);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
+  for (const event of f.logs().trim().split("\n").map(JSON.parse)) {
+    assert.equal(event.event, "completed");
+    for (const field of ["requestMetadata", "threadId", "projectId", "source"])
+      assert.equal(Object.hasOwn(event, field), false);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("global credential failure precedes identity lookup and project reads", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
+    credentialRouting: credentialRouting,
+    credentialReader: async reference => { reads.push(reference); throw new RouterError("CREDENTIAL_UNAVAILABLE"); },
+  });
+  assert.notEqual(f.globalBaseUrl, f.projectBaseUrl);
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  await writeFile(f.statePath, "{STATE_SENTINEL");
+  const result = await request(f, {raw: titleHeaders(), token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(result.status, 503);
+  assert.equal(JSON.parse(result.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.deepEqual(reads, [globalReference]);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 0);
+  const event = JSON.parse(f.logs().trim());
+  assert.equal(event.event, "completed");
+  for (const field of ["requestMetadata", "threadId", "projectId", "source"])
+    assert.equal(Object.hasOwn(event, field), false);
+  assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
+});
+test("mapped route selects its exact credential destination and prefix", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
+  });
+  const bodyBytes = Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0xa9, 0xff, 0x22, 0x7d]);
+  const result = await request(f, {
+    path: "/v1/responses?x=a%2Fb&x=2", body: bodyBytes,
+    raw: [...headers(T1), "Connection", "authorization, x-drop", "x-drop", "DROP_SENTINEL"],
+    token: "GLOBAL_CREDENTIAL_SENTINEL",
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body, "project");
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?x=a%2Fb&x=2");
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+  assert.deepEqual(f.projectCalls[0].bodyBytes, bodyBytes);
+  assert.equal(f.projectCalls[0].headers["x-drop"], undefined);
+  f.edge(T1, CHILD);
+  const fork = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  f.state["thread-project-assignments"][fork] = { projectKind: "local", projectId: P2 };
+  await f.saveState();
+  for (const [path, raw] of [
+    ["/v1/responses/compact?unchanged=yes", headers(T2)],
+    ["/v1/responses", headers(CHILD)],
+    ["/v1/responses", titleHeaders(T1)],
+    ["/v1/responses", headers(fork, { forked_from_thread_id: T2 })],
+    ["/v1/responses", headers(fork)],
+  ]) {
+    assert.equal((await request(f, { path, raw, authorization: "bEaReR GLOBAL_CREDENTIAL_SENTINEL" })).body, "project");
+  }
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
+    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_A_CREDENTIAL_SENTINEL",
+    "Bearer PROJECT_B_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
+  ]);
+  assert.deepEqual(f.projectCalls.map(call => call.url), [
+    "/region/v1/responses?x=a%2Fb&x=2", "/region/v1/responses/compact?unchanged=yes",
+    "/region/v1/responses", "/region/v1/responses", "/region/v1/responses", "/region/v1/responses",
+  ]);
+  for (const call of f.projectCalls.slice(1)) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.body, '{"model":"unchanged","input":"PROMPT_SENTINEL"}');
+  }
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference,
+    globalReference, projectAReference, globalReference, projectAReference,
+    globalReference, projectBReference, globalReference, projectBReference]);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.equal(starts[2].source, "ancestor");
+  assert.equal(starts[2].ownerThreadId, T1);
+  assert.equal(starts[3].projectId, P1);
+  assert.equal(starts[3].source, "direct");
+  for (const event of starts) assert.equal(Object.hasOwn(event, "requestMetadata"), observationMode);
+  // The controller is an ordinary explicit target, deliberately sharing the global pair.
+  f.config.projectRoutes[P1] = "controller";
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"})).body, "global");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 6);
+  assert.equal(f.calls[0].url, "/api/v1/responses");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.calls[0].headers.authorization, "Bearer GLOBAL_CREDENTIAL_SENTINEL");
+  assert.deepEqual(reads.slice(-2), [globalReference, globalReference]);
+  assert.equal(diagnosticEvents(f).filter(event => event.event === "started").at(-1).routeAlias, "controller");
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
+});
+test("shared aliases and shared references select the same exact project credential", async t => {
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets["route-b"] = routing.routeTargets["route-a"];
+    return routing;
+  };
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    projectHandler: async (req, res) => res.end("accepted"),
+    credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
+  f.config.projectRoutes[P2] = "route-a";
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_A_CREDENTIAL_SENTINEL",
+  ]);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectAReference]);
+});
+test("missing credential mappings reject only the affected project with no fallback", async t => {
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    delete routing.routeTargets["route-a"];
+    return routing;
+  };
+  const f = await setup(t, async (req, res) => res.end("healthy"), {
+    projectHandler: async (req, res) => res.end("healthy"),
+    credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
+  });
+  for (const alias of ["route-a", "constructor", "toString"]) {
+    f.config.projectRoutes[P1] = alias;
+    const result = await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: titleHeaders(T1)});
+    assert.equal(result.status, 422);
+    assert.equal(JSON.parse(result.body).error.code, "CREDENTIAL_UNMAPPED");
+  }
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference]);
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).body, "healthy");
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  const starts = f.logs().trim().split("\n").map(JSON.parse).filter(event => event.event === "started");
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].projectId, P2);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.url, "/region/v1/responses");
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("explicit own constructor and toString credential mappings work", async t => {
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets.constructor = routing.routeTargets["route-a"];
+    routing.routeTargets.toString = routing.routeTargets["route-b"];
+    return routing;
+  };
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    projectHandler: async (req, res) => res.end("accepted"),
+    credentialRouting: routing, credentialReader: syntheticCredentialReader(reads),
+  });
+  f.config.projectRoutes[P1] = "constructor";
+  f.config.projectRoutes[P2] = "toString";
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"})).status, 200);
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).status, 200);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "Bearer PROJECT_B_CREDENTIAL_SENTINEL",
+  ]);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+});
+test("project credential failure keeps a second project healthy and records no start for rejection", async t => {
+  const reads = [], reader = syntheticCredentialReader(reads);
+  const f = await setup(t, async (req, res) => res.end("healthy"), {
+    projectHandler: async (req, res) => res.end("healthy"),
+    credentialRouting: credentialRouting,
+    credentialReader: async (reference, options) => {
+      if (reference === projectAReference) { reads.push(reference); throw new RouterError("CREDENTIAL_UNAVAILABLE"); }
+      return reader(reference, options);
+    },
+  });
+  const rejected = await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: titleHeaders(T1)});
+  assert.equal(rejected.status, 503);
+  assert.equal(JSON.parse(rejected.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.equal((await request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL", raw: headers(T2)})).body, "healthy");
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+  const events = f.logs().trim().split("\n").map(JSON.parse);
+  assert.equal(events.filter(event => event.event === "started").length, 1);
+  assert.equal(events[0].event, "completed");
+  assert.equal(events[0].projectId, P1);
+  assert.equal(Object.hasOwn(events[0], "requestMetadata"), observationMode);
+  assert.equal(f.calls.length, 0);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.url, "/region/v1/responses");
+  }
+  assert.doesNotMatch(rejected.body + f.logs(), /SENTINEL/);
+});
+test("catalog and eligible unassigned titles retain verified authorization without project reads", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    projectHandler: async (req, res) => res.end("unexpected"),
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
+  });
+  const authorization = "bEaReR GLOBAL_CREDENTIAL_SENTINEL";
+  assert.equal((await request(f, {path: "/v1/models?unchanged=yes", method: "GET", raw: ["Connection", "authorization"], authorization, body: ""})).status, 200);
+  const title = await request(f, {raw: [...titleHeaders(), "Connection", "authorization"], authorization});
+  assert.equal(title.status, policyMode ? 200 : 503);
+  assert.deepEqual(reads, [globalReference, globalReference]);
+  assert.equal(f.calls.length, policyMode ? 2 : 1);
+  assert.equal(f.projectCalls.length, 0);
+  assert.equal(f.calls[0].url, "/api/v1/models?unchanged=yes");
+  if (policyMode) assert.equal(f.calls[1].url, "/api/v1/responses");
+  for (const call of f.calls) {
+    assert.equal(call.headers.authorization, authorization);
+    assert.equal(call.headers.host, new URL(f.globalBaseUrl).host);
+  }
+  const starts = f.logs().trim().split("\n").map(JSON.parse).filter(event => event.event === "started");
+  assert.equal(starts[0].source, "catalog");
+  if (policyMode) {
+    assert.equal(starts[1].source, "unassigned_title");
+    assert.equal(starts[1].threadId, CHILD);
+    for (const field of ["projectId", "ownerThreadId", "routeAlias"])
+      assert.equal(Object.hasOwn(starts[1], field), false);
+    assert.equal(Object.hasOwn(starts[1], "requestMetadata"), observationMode);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("health and rejected admission make no credential reads in routing mode", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("unexpected"), {
+    credentialRouting: credentialRouting, credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.equal((await request(f, {path: "/healthz", method: "GET", authenticated: false, raw: [], body: ""})).status, 200);
+  assert.equal((await request(f, {authenticated: false})).status, 401);
+  assert.equal((await request(f, {path: "/unsupported"})).status, 404);
+  assert.deepEqual(reads, []);
+  assert.equal(f.calls.length, 0);
+});
+test("legacy mode forwards its original credential without any credential reads", async t => {
+  const reads = [];
+  const f = await setup(t, async (req, res) => res.end("accepted"), {credentialReader: syntheticCredentialReader(reads)});
+  assert.equal((await request(f, {authorization: "bEaReR LEGACY_CREDENTIAL_SENTINEL"})).status, 200);
+  assert.deepEqual(reads, []);
+  assert.equal(f.calls[0].headers.authorization, "bEaReR LEGACY_CREDENTIAL_SENTINEL");
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("fresh global and project reads observe rotation and deletion without stale fallback", async t => {
+  const reads = [];
+  const values = new Map([
+    [globalReference, "GLOBAL_FIRST_SENTINEL"],
+    [projectAReference, "PROJECT_A_FIRST_SENTINEL"],
+    [projectBReference, "PROJECT_B_FIRST_SENTINEL"],
+  ]);
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: credentialRouting,
+    credentialReader: async reference => {
+      reads.push(reference);
+      if (!values.has(reference)) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+      return values.get(reference);
+    },
+  });
+  const first = {token: "GLOBAL_FIRST_SENTINEL"};
+  assert.equal((await request(f, first)).status, 200);
+  values.set(projectAReference, "PROJECT_A_ROTATED_SENTINEL");
+  assert.equal((await request(f, first)).status, 200);
+  values.delete(projectAReference);
+  const deleted = await request(f, first);
+  assert.equal(deleted.status, 503);
+  assert.equal(JSON.parse(deleted.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.equal((await request(f, {...first, raw: headers(T2)})).status, 200);
+  values.set(globalReference, "GLOBAL_ROTATED_SENTINEL");
+  const stale = await request(f, {...first, raw: headers(T2)});
+  assert.equal(stale.status, 401);
+  assert.equal(JSON.parse(stale.body).error.code, "AUTH_INVALID");
+  assert.equal((await request(f, {token: "GLOBAL_ROTATED_SENTINEL", raw: headers(T2)})).status, 200);
+  values.delete(globalReference);
+  const globalDeleted = await request(f, {token: "GLOBAL_ROTATED_SENTINEL", raw: headers(T2)});
+  assert.equal(globalDeleted.status, 503);
+  assert.equal(JSON.parse(globalDeleted.body).error.code, "CREDENTIAL_UNAVAILABLE");
+  assert.deepEqual(reads, [
+    globalReference, projectAReference, globalReference, projectAReference,
+    globalReference, projectAReference, globalReference, projectBReference,
+    globalReference, globalReference, projectBReference, globalReference,
+  ]);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+    "Bearer PROJECT_A_FIRST_SENTINEL", "Bearer PROJECT_A_ROTATED_SENTINEL",
+    "Bearer PROJECT_B_FIRST_SENTINEL", "Bearer PROJECT_B_FIRST_SENTINEL",
+  ]);
+  assert.equal(diagnosticEvents(f).filter(event => event.event === "started").length, 4);
+  assert.doesNotMatch(deleted.body + stale.body + globalDeleted.body + f.logs(), /SENTINEL/);
+});
+test("a reference shared by global and project roles is read independently for each role", async t => {
+  const reads = [];
+  const routing = urls => {
+    const routing = credentialRouting(urls);
+    routing.routeTargets["route-a"].credential = globalReference;
+    return routing;
+  };
+  const values = ["SHARED_CALLER_SENTINEL", "SHARED_PROJECT_SENTINEL", "ROTATED_CALLER_SENTINEL", "ROTATED_PROJECT_SENTINEL"];
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: routing,
+    credentialReader: async reference => { reads.push(reference); return values.shift(); },
+  });
+  assert.equal((await request(f, {token: "SHARED_CALLER_SENTINEL"})).status, 200);
+  assert.equal((await request(f, {token: "ROTATED_CALLER_SENTINEL"})).status, 200);
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference, globalReference]);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), [
+    "Bearer SHARED_PROJECT_SENTINEL", "Bearer ROTATED_PROJECT_SENTINEL",
+  ]);
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+test("overlapping requests never coalesce global or project credential lookups", async t => {
+  const bothGlobal = Promise.withResolvers(), bothProject = Promise.withResolvers();
+  let globals = 0, projects = 0;
+  t.after(() => { bothGlobal.resolve(); bothProject.resolve(); });
+  const f = await setup(t, async (req, res) => res.end("accepted"), {
+    credentialRouting: credentialRouting,
+    credentialReader: async reference => {
+      if (reference === globalReference) {
+        if (++globals === 2) bothGlobal.resolve();
+        await within(bothGlobal.promise, "global lookups were coalesced");
+        return "GLOBAL_CREDENTIAL_SENTINEL";
+      }
+      assert.equal(reference, projectAReference);
+      const ordinal = ++projects;
+      if (projects === 2) bothProject.resolve();
+      await within(bothProject.promise, "project lookups were coalesced");
+      return ordinal === 1 ? "FIRST_PROJECT_SENTINEL" : "SECOND_PROJECT_SENTINEL";
+    },
+  });
+  const results = await Promise.all([
+    request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"}),
+    request(f, {token: "GLOBAL_CREDENTIAL_SENTINEL"}),
+  ]);
+  assert.deepEqual(results.map(result => result.status), [200, 200]);
+  assert.equal(globals, 2);
+  assert.equal(projects, 2);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization).sort(), [
+    "Bearer FIRST_PROJECT_SENTINEL", "Bearer SECOND_PROJECT_SENTINEL",
+  ]);
+  assert.doesNotMatch(f.logs(), /SENTINEL/);
+});
+for (const moveAt of ["selected project lookup", "active stream"]) {
+test(`reassignment during ${moveAt} preserves the selected destination and credential snapshot`, async t => {
+  const selected = Promise.withResolvers(), releaseLookup = Promise.withResolvers();
+  const streamed = Promise.withResolvers(), releaseStream = Promise.withResolvers();
+  t.after(() => { releaseLookup.resolve(); releaseStream.resolve(); });
+  const reads = [], reader = syntheticCredentialReader(reads);
+  const f = await setup(t, async (req, res) => {
+    res.write("old-route-");
+    await releaseStream.promise;
+    res.end("stream");
+  }, {
+    projectHandler: async (req, res) => {
+      res.writeHead(400);
+      res.end("GATEWAY_CONTINUATION_REJECTION_SENTINEL");
+    },
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-a"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: async (reference, options) => {
+      const value = await reader(reference, options);
+      if (reference === projectAReference) {
+        selected.resolve();
+        await releaseLookup.promise;
+      }
+      return value;
+    },
+  });
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  const body = '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}';
+  const first = request(f, {path: "/v1/responses?held=a%2Fb", body, token: "GLOBAL_CREDENTIAL_SENTINEL", onChunk: () => streamed.resolve()});
+  await within(selected.promise, "the first request did not select its project credential");
+  if (moveAt === "active stream") {
+    releaseLookup.resolve();
+    await within(streamed.promise, "the first stream did not start");
+  }
+  f.state["thread-project-assignments"][T1].projectId = P2;
+  await f.saveState();
+  releaseLookup.resolve();
+  await within(streamed.promise, "the selected stream did not start");
+  const next = await request(f, {path: "/v1/responses?next=b%2Fc", body, token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(next.status, 400);
+  assert.equal(next.body, "GATEWAY_CONTINUATION_REJECTION_SENTINEL");
+  releaseStream.resolve();
+  assert.equal((await first).body, "old-route-stream");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 1);
+  assert.deepEqual(f.calls.map(call => call.headers.authorization), ["Bearer PROJECT_A_CREDENTIAL_SENTINEL"]);
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), ["Bearer PROJECT_B_CREDENTIAL_SENTINEL"]);
+  assert.equal(f.calls[0].url, "/api/v1/responses?held=a%2Fb");
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?next=b%2Fc");
+  for (const call of [...f.calls, ...f.projectCalls])
+    assert.equal(call.body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.deepEqual(starts.map(event => [event.projectId, event.routeAlias]), [[P1, "route-a"], [P2, "route-b"]]);
+  for (const start of starts) {
+    const complete = diagnosticEvents(f).find(event => event.event === "completed" && event.requestId === start.requestId);
+    assert.equal(complete.projectId, start.projectId);
+    assert.equal(complete.routeAlias, start.routeAlias);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
+});
+}
+test("routing streams overlap across origins with independent project controller and title outcomes", async t => {
+  const controllerThread = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const controllerProject = "33333333-3333-4333-8333-333333333333";
+  const otherTitle = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const ids = [T1, T2, controllerThread, CHILD, otherTitle], expectedActive = policyMode ? 5 : 3;
+  const statuses = [200, 201, 202, 203, 206];
+  const releases = new Map(ids.map(id => [id, Promise.withResolvers()]));
+  const firstChunks = new Map(ids.map(id => [id, Promise.withResolvers()]));
+  const allActive = Promise.withResolvers(), finished = new Set(), reads = [];
+  t.after(() => { for (const gate of releases.values()) gate.resolve(); });
+  let active = 0, max = 0;
+  const stream = async (req, res) => {
+    const id = req.headers["thread-id"], ordinal = ids.indexOf(id);
+    max = Math.max(max, ++active);
+    res.writeHead(statuses[ordinal], {"content-type": "text/event-stream"});
+    res.write(`stream-${ordinal}-`);
+    if (active === expectedActive) allActive.resolve();
+    await releases.get(id).promise;
+    res.end("done");
+    active--;
+  };
+  const f = await setup(t, stream, {
+    projectHandler: stream,
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-a"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  f.config.projectRoutes[controllerProject] = "controller";
+  f.state["local-projects"][controllerProject] = {id: controllerProject};
+  f.state["thread-project-assignments"][controllerThread] = {projectKind: "local", projectId: controllerProject};
+  await f.saveState();
+  const pending = ids.map((id, index) => request(f, {
+    path: `/v1/responses?stream=${index}`, body: `{"model":"unchanged","input":"STREAM_${index}_SENTINEL"}`,
+    raw: index < 3 ? headers(id) : titleHeaders(id), token: "GLOBAL_CREDENTIAL_SENTINEL",
+    onChunk: () => firstChunks.get(id).resolve(),
+  }).then(result => { finished.add(id); return result; }));
+  await within(allActive.promise, "streams did not overlap across origins");
+  await within(Promise.all(ids.slice(0, expectedActive).map(id => firstChunks.get(id).promise)), "stream chunks were buffered");
+  assert.equal(active, expectedActive);
+  assert.equal(max, expectedActive);
+  releases.get(T2).resolve();
+  assert.equal((await pending[1]).body, "stream-1-done");
+  for (const id of [T1, controllerThread, ...(policyMode ? [CHILD, otherTitle] : [])]) assert.equal(finished.has(id), false);
+  releases.get(controllerThread).resolve();
+  assert.equal((await pending[2]).body, "stream-2-done");
+  assert.equal(finished.has(T1), false);
+  if (policyMode) {
+    releases.get(CHILD).resolve();
+    assert.equal((await pending[3]).body, "stream-3-done");
+    assert.equal(finished.has(otherTitle), false);
+    assert.equal(finished.has(T1), false);
+  }
+  for (const gate of releases.values()) gate.resolve();
+  const results = await Promise.all(pending);
+  assert.deepEqual(results.map(result => result.status), policyMode ? [200, 201, 202, 203, 206] : [200, 201, 202, 503, 503]);
+  assert.deepEqual(results.slice(0, expectedActive).map(result => result.body), policyMode
+    ? ["stream-0-done", "stream-1-done", "stream-2-done", "stream-3-done", "stream-4-done"]
+    : ["stream-0-done", "stream-1-done", "stream-2-done"]);
+  const firstOrigin = f.calls.map(call => [call.headers["thread-id"], call.headers.authorization, call.url, call.body]).sort();
+  assert.deepEqual(firstOrigin, (policyMode ? [
+    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=0", '{"model":"unchanged","input":"STREAM_0_SENTINEL"}'],
+    [controllerThread, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=2", '{"model":"unchanged","input":"STREAM_2_SENTINEL"}'],
+    [CHILD, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=3", '{"model":"unchanged","input":"STREAM_3_SENTINEL"}'],
+    [otherTitle, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=4", '{"model":"unchanged","input":"STREAM_4_SENTINEL"}'],
+  ] : [
+    [T1, "Bearer PROJECT_A_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=0", '{"model":"unchanged","input":"STREAM_0_SENTINEL"}'],
+    [controllerThread, "Bearer GLOBAL_CREDENTIAL_SENTINEL", "/api/v1/responses?stream=2", '{"model":"unchanged","input":"STREAM_2_SENTINEL"}'],
+  ]).sort());
+  assert.deepEqual(f.projectCalls.map(call => [call.headers["thread-id"], call.headers.authorization, call.url, call.body]), [
+    [T2, "Bearer PROJECT_B_CREDENTIAL_SENTINEL", "/region/v1/responses?stream=1", '{"model":"unchanged","input":"STREAM_1_SENTINEL"}'],
+  ]);
+  for (const call of f.calls) assert.equal(call.headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.projectCalls[0].headers.host, new URL(f.projectBaseUrl).host);
+  assert.equal(reads.filter(reference => reference === globalReference).length, 6);
+  assert.equal(reads.filter(reference => reference === projectAReference).length, 1);
+  assert.equal(reads.filter(reference => reference === projectBReference).length, 1);
+  const starts = diagnosticEvents(f).filter(event => event.event === "started");
+  assert.equal(starts.length, expectedActive);
+  assert.equal(starts.find(event => event.threadId === controllerThread).routeAlias, "controller");
+  assert.equal(starts.filter(event => event.source === "unassigned_title").length, policyMode ? 2 : 0);
+  for (const event of starts) {
+    assert.equal(Object.hasOwn(event, "requestMetadata"), observationMode);
+    if (observationMode) assert.equal(event.requestMetadata.headers["thread-id"].id, event.threadId);
+    const complete = diagnosticEvents(f).find(completed => completed.event === "completed" && completed.requestId === event.requestId);
+    assert.equal(complete.threadId, event.threadId);
+    assert.equal(complete.projectId, event.projectId);
+    assert.equal(complete.routeAlias, event.routeAlias);
+    if (observationMode) assert.deepEqual(complete.requestMetadata, event.requestMetadata);
+    if (event.source === "unassigned_title") for (const field of ["projectId", "ownerThreadId", "routeAlias"])
+      assert.equal(Object.hasOwn(event, field), false);
+  }
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
+});
+for (const failure of ["401", "cross-origin 307", "connection failure", "TLS rejection", "broken stream"]) {
+test(`selected-origin ${failure} never forwards to another origin and leaves a separate target healthy`, async t => {
+  const reads = [], firstChunk = Promise.withResolvers(), tlsRejected = Promise.withResolvers();
+  t.after(() => firstChunk.resolve());
+  const f = await setup(t, async (req, res) => res.end("healthy-target"), {
+    projectHandler: async (req, res) => {
+      if (failure === "401") {
+        res.writeHead(401, {"www-authenticate": "Bearer GATEWAY_AUTH_FRAGMENT_SENTINEL"});
+        res.end("GATEWAY_ERROR_FRAGMENT_SENTINEL");
+      } else if (failure === "cross-origin 307") {
+        res.writeHead(307, {location: `${f.globalBaseUrl}/REDIRECT_DESTINATION_SENTINEL`});
+        res.end("GATEWAY_REDIRECT_FRAGMENT_SENTINEL");
+      } else if (failure === "broken stream") {
+        res.writeHead(200, {"content-type": "text/event-stream"});
+        res.write("GATEWAY_STREAM_FRAGMENT_SENTINEL");
+        await firstChunk.promise;
+        res.destroy(new Error("GATEWAY_STREAM_ERROR_SENTINEL"));
+      } else res.end("unexpected selected-origin success");
+    },
+    untrustedProject: failure === "TLS rejection",
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-b"].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+    credentialReader: syntheticCredentialReader(reads),
+  });
+  assert.notEqual(new URL(f.globalBaseUrl).origin, new URL(f.projectBaseUrl).origin);
+  if (failure === "connection failure") {
+    await new Promise(resolve => f.projectUpstream.close(resolve));
+    assert.equal(f.projectUpstream.listening, false);
+  }
+  if (failure === "TLS rejection") f.projectUpstream.once("tlsClientError", () => tlsRejected.resolve());
+  const body = '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}';
+  const chunks = [];
+  const selected = request(f, {
+    path: "/v1/responses?selected=a%2Fb", body, token: "GLOBAL_CREDENTIAL_SENTINEL",
+    onChunk: chunk => { chunks.push(chunk.toString()); firstChunk.resolve(); },
+  });
+  if (failure === "broken stream") {
+    await assert.rejects(within(selected, "broken selected stream did not close"), {code: "ECONNRESET"});
+    assert.equal(chunks.join(""), "GATEWAY_STREAM_FRAGMENT_SENTINEL");
+  } else {
+    const result = await within(selected, "selected-origin failure did not settle");
+    if (failure === "401") {
+      assert.equal(result.status, 401);
+      assert.equal(result.headers["www-authenticate"], "Bearer GATEWAY_AUTH_FRAGMENT_SENTINEL");
+      assert.equal(result.body, "GATEWAY_ERROR_FRAGMENT_SENTINEL");
+    } else if (failure === "cross-origin 307") {
+      assert.equal(result.status, 307);
+      assert.equal(result.headers.location, `${f.globalBaseUrl}/REDIRECT_DESTINATION_SENTINEL`);
+      assert.equal(result.body, "GATEWAY_REDIRECT_FRAGMENT_SENTINEL");
+    } else {
+      assert.equal(result.status, 502);
+      assert.equal(JSON.parse(result.body).error.code, "UPSTREAM_FAILED");
+      assert.doesNotMatch(result.body, /SENTINEL|https:|127\.0\.0\.1/);
+    }
+  }
+  if (failure === "TLS rejection") await within(tlsRejected.promise, "selected origin did not reject TLS");
+  assert.equal(f.calls.length, 0, "failed request reached the fallback or redirect origin");
+  const selectedCalls = failure === "connection failure" || failure === "TLS rejection" ? 0 : 1;
+  assert.equal(f.projectCalls.length, selectedCalls, "selected request was retried");
+  const healthy = await request(f, {path: "/v1/responses?healthy=c%2Fd", raw: headers(T2), body, token: "GLOBAL_CREDENTIAL_SENTINEL"});
+  assert.equal(healthy.status, 200);
+  assert.equal(healthy.body, "healthy-target");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, selectedCalls);
+  assert.equal(f.calls[0].url, "/api/v1/responses?healthy=c%2Fd");
+  assert.equal(f.calls[0].headers.authorization, "Bearer PROJECT_B_CREDENTIAL_SENTINEL");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.calls[0].body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses?selected=a%2Fb");
+    assert.equal(call.headers.authorization, "Bearer PROJECT_A_CREDENTIAL_SENTINEL");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+    assert.equal(call.body, '{"model":"unchanged","previous_response_id":"CONTINUATION_SENTINEL","input":"PROMPT_SENTINEL"}');
+  }
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, projectBReference]);
+  const completions = diagnosticEvents(f).filter(event => event.event === "completed");
+  assert.equal(completions.length, 2);
+  assert.equal(completions[0].projectId, P1);
+  assert.equal(completions[0].status, failure === "401" ? 401 : failure === "cross-origin 307" ? 307 : 502);
+  assert.equal(completions[0].errorCode, failure === "401" || failure === "cross-origin 307" ? undefined : "UPSTREAM_FAILED");
+  assert.equal(completions[1].projectId, P2);
+  assert.equal(completions[1].status, 200);
+  assert.doesNotMatch(f.logs(), /SENTINEL|https:|127\.0\.0\.1/);
+});
+}
 test("exact initial titles forward only when enabled without project ownership",async t => {
   const f=await setup(t, async (req,res) => {
     res.writeHead(201,{"content-type":"text/event-stream"});
@@ -205,7 +1070,7 @@ test("title cancellation releases upstream work and lookup cancellation makes ze
   await delay(50);assert.equal(f.calls.length,1);
   assert.equal(JSON.parse(f.logs().trim().split("\n").at(-1)).errorCode,"CANCELLED");
 });
-test("title redirects are not followed or retried",async t => {
+transportTest("title redirects are not followed or retried", async (t, setup, request, token) => {
   const f=await setup(t,async(req,res)=>{res.writeHead(307,{location:"https://example.invalid/ignored"});res.end("redirect");});
   assert.equal((await request(f,{raw:titleHeaders()})).status,307);
   assert.equal(f.calls.length,1);
@@ -262,7 +1127,7 @@ test("overlapping requests preserve identities, original body bytes and per-requ
   }
   assert.doesNotMatch(f.logs(), /SENTINEL|KEY_A|KEY_B/);
 });
-test("forwards streamed chunks before the response finishes", async (t) => {
+transportTest("forwards streamed chunks before the response finishes", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.writeHead(201, { "content-type": "text/event-stream" });
     res.write("data: first\n\n");
@@ -325,7 +1190,7 @@ test("blocked and unmapped model requests make zero upstream calls", async (t) =
   assert.equal(f.calls.length, 0);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("does not follow redirects or retry upstream responses", async (t) => {
+transportTest("does not follow redirects or retry upstream responses", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.writeHead(307, { location: "https://other.example.invalid" });
     res.end("redirect");
@@ -358,7 +1223,7 @@ test("unresolved requests retain only the validated chat identifier for diagnosi
   assert.equal(f.calls.length, 0);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("removes connection-nominated hop headers and sets the upstream host", async (t) => {
+transportTest("removes connection-nominated hop headers and sets the upstream host", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.setHeader("Connection", "x-private-hop");
     res.setHeader("x-private-hop", "not-forwarded");
@@ -377,14 +1242,14 @@ test("removes connection-nominated hop headers and sets the upstream host", asyn
   assert.match(f.calls[0].headers.host, /^127\.0\.0\.1:\d+$/);
   assert.equal(result.headers["x-private-hop"], undefined);
 });
-test("rejects untrusted TLS certificates without disabling verification", async (t) => {
+transportTest("rejects untrusted TLS certificates without disabling verification", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"), {
     untrusted: true,
   });
   assert.equal((await request(f)).status, 502);
   assert.equal(f.calls.length, 0);
 });
-test("upstream disconnect before headers is sanitized and is not retried", async (t) => {
+transportTest("upstream disconnect before headers is sanitized and is not retried", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) =>
     res.destroy(new Error("RESPONSE_SENTINEL")),
   );
@@ -393,7 +1258,7 @@ test("upstream disconnect before headers is sanitized and is not retried", async
   assert.equal(f.calls.length, 1);
   assert.doesNotMatch(result.body + f.logs(), /SENTINEL/);
 });
-test("a broken upstream stream closes the client instead of appending a fabricated response", async (t) => {
+transportTest("a broken upstream stream closes the client instead of appending a fabricated response", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => {
     res.write("partial");
     await delay(20);
@@ -403,12 +1268,12 @@ test("a broken upstream stream closes the client instead of appending a fabricat
   assert.equal(f.calls.length, 1);
   assert.doesNotMatch(f.logs(), /SENTINEL/);
 });
-test("upstream inactivity is bounded without retrying", async (t) => {
+transportTest("upstream inactivity is bounded without retrying", async (t, setup, request, token) => {
   const f = await setup(t, async () => {}, { timeoutMs: 70 });
   assert.equal((await request(f)).status, 502);
   assert.equal(f.calls.length, 1);
 });
-test("slow clients receive the complete streamed body under backpressure", async (t) => {
+transportTest("slow clients receive the complete streamed body under backpressure", async (t, setup, request, token) => {
   let blocked = false;
   const size = 64 * 1024;
   const f = await setup(t, async (req, res) => {
@@ -424,7 +1289,7 @@ test("slow clients receive the complete streamed body under backpressure", async
   assert.equal(result.body.length, size * 64);
   assert.ok(blocked);
 });
-test("client cancellation closes the upstream response and is not reported as an upstream failure", async (t) => {
+transportTest("client cancellation closes the upstream response and is not reported as an upstream failure", async (t, setup, request, token) => {
   let closed;
   const done = new Promise((r) => (closed = r));
   const f = await setup(t, async (req, res) => {
@@ -439,7 +1304,7 @@ test("client cancellation closes the upstream response and is not reported as an
         path: "/v1/responses",
         method: "POST",
         headers: {
-          authorization: "Bearer CREDENTIAL_SENTINEL",
+          authorization: `Bearer ${token}`,
           "thread-id": T1,
         },
       },
@@ -465,7 +1330,7 @@ test("client cancellation closes the upstream response and is not reported as an
   assert.equal(Object.hasOwn(completion, "requestMetadata"), observationMode);
   if (observationMode) assert.equal(completion.requestMetadata.headers["thread-id"].id, T1);
 });
-test("malformed HTTP input produces a fixed response without dumping the packet", async (t) => {
+transportTest("malformed HTTP input produces a fixed response without dumping the packet", async (t, setup, request, token) => {
   const f = await setup(t, async (req, res) => res.end("unexpected"));
   const text = await new Promise((resolve, reject) => {
     const socket = net.connect(f.proxyPort, "127.0.0.1");
