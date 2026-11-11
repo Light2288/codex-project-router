@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: automated verification passed; isolated native observations and final sequential review pending.
+Status: implementation and automated verification passed; native visibility observations partially complete; two human observations and final sequential review pending.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -70,19 +70,47 @@ Task 1's five projection regressions and the existing lifecycle/authorization
 suite are covered by the full native run. Its independent task review is recorded
 in the local plan workspace; final whole-increment review is still required.
 
-## Isolated native observation — pending
+## Isolated native observation — partial
 
-No manual blocked-Quit fixture or UI interaction has been performed for this
-report yet. Required observations remain menu Quit and Cmd-Q with Controls open,
-closed and minimized; exact direct-pending alert; Open Controls visibility;
-Keep Running/Escape visibility preservation; and repeated Quit producing one
-alert. Automated injected presentation tests do not establish native visibility.
+The parent launched a fresh relocated signed app in an owner-only temporary
+synthetic HOME and CFFIXED_USER_HOME with an empty project catalog, a Direct
+provider and a retained direct-confirmation journal. Seatbelt denied reads/writes
+of the real Codex/router private locations and checkout, and denied outbound
+network except loopback. A negative checkout-read control failed as required.
+The exact tracked native PID held the synthetic instance lock before UI use.
+No listener was started and the synthetic auth command was a nonexistent
+placeholder that was never invoked.
 
-The pending check must use the approved synthetic relocated-app/Seatbelt
-procedure, temporary `HOME` and `CFFIXED_USER_HOME`, a positively tracked native
-PID holding its synthetic instance lock, denied real private/check-out paths and
-non-loopback outbound access, and unchanged synthetic provider/config bytes with
-no child listener. Raw fixture paths/checkpoints stay outside Git.
+Agent-operated native observations established:
+
+- Application-menu Quit and Cmd-Q presented the native alert with the exact
+  direct-confirmation title, message and two actions; native screenshot text was
+  readable.
+- Repeated Cmd-Q while the alert was open left one alert. Keep Running dismissed
+  it without a queued alert; Open Controls dismissed it and revealed Controls.
+- Quit after a close or minimize action presented the same alert; Escape
+  dismissed it. These sequences do not independently prove the window stayed
+  closed/minimized, because the automation activates/restores windows while
+  reading their accessibility state.
+- A tracked-PID CoreGraphics probe observed zero on-screen native windows after
+  native minimize, then one after an accessibility read. This directly identifies
+  the observation tool's window-restoration effect, rather than attributing it
+  to the companion's Keep Running behavior.
+- A fixture verification command confirmed synthetic router configuration,
+  provider bytes and pending journal unchanged, and the selected port reusable.
+
+The first fixture omitted the auth-command metadata required by the existing
+provider parser and correctly displayed Unavailable. Comparison with the existing
+package fixture identified the omission. That tracked synthetic process was
+stopped and removed, and only the one-off fixture was corrected. Product code
+and real private state were untouched.
+
+A native interactive request asks the user to check that Keep Running preserves
+closed Controls and Escape preserves minimized Controls using the synthetic
+companion's menu-bar Quit. Those two observations and final tracked-process
+cleanup remain pending. Raw fixture paths/checkpoints stay outside Git. No
+human report has yet been inferred from elapsed time, and no whole-increment
+completion is claimed.
 
 ## Operational-state safeguards
 
@@ -94,7 +122,11 @@ activation, provider credential lookup, Codex restart or model prompt was used.
 The app tests inject native presentation/window/termination boundaries, so they
 neither show a modal dialog nor exit the test process.
 
-## Final sequential review — pending
+## Review dispositions and final gate — pending
+
+Independent task reviews approved Task 1 and Task 2 code and automated evidence
+with no findings. Task 2 correctly leaves native observations and the final gate
+for parent resolution.
 
 Specification review must pass before quality review of the whole increment from
 `c2887a5` through the final implementation and evidence. Both dispositions and any
