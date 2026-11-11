@@ -107,3 +107,74 @@ configuration copies, destinations, credential references or authentication
 commands. The nonblocking advisory instance lock is held until explicit release
 or store lifetime ends; its descriptor is closed on exec and kernel-released on
 process exit. Existing router activation locks are untouched.
+
+## Controller state and recovery
+
+`RouterController` is a main-actor observable coordinator over `CompanionBackend`
+and `PrivateStore`. Construct it with the normal Codex home for catalog browsing.
+It acquires the instance lock before loading or initializing state. A second
+instance fails visibly and does not inspect, start, mutate or overwrite state.
+Corrupt state is preserved and prevents fallback discovery. Without saved selection
+or pending context, only an existing `config.json` beside the `companion/` private
+store is discovered; a missing file leaves selection empty for setup and browsing.
+No launch, selection, refresh or runtime discovery starts or activates a router.
+
+The public presentation snapshot strips private revision metadata. Its disk state,
+matching readiness, `ownedRouter`, and `desktopConfirmation` are independent facts.
+The controller exposes `busy`, fixed safe `error` text, guarded control properties,
+`lastStopOutcome`, `needsManualListenerCleanup`, and `quitRequested`. The app should
+terminate only when `requestQuit()` returns with `quitRequested` true. Closing a
+window is not a Quit request and must leave the app/controller running.
+
+| Event | Journal/recovery outcome | Desktop confirmation |
+| --- | --- | --- |
+| Before activation helper | Save `activation_attempt` for the exact context | Routed pending |
+| Activation succeeds, including no change | Retain `routed_confirmation` | Routed pending |
+| Before rollback helper | Save `restoring` for the retained context | Direct pending |
+| Rollback succeeds, including no change after possible dependency | Retain `direct_confirmation` | Direct pending |
+| Helper fails or is interrupted | Re-inspect; preserve its prior intent and context | Remains pending |
+| Explicit routed-response confirmation | Fresh same-context router/record/readiness plus live owned child required | User-confirmed routed |
+| Explicit direct-response confirmation | Fresh same-context direct disk/record evidence; clear pending only after saving | User-confirmed direct |
+| Relaunch with pending recovery | Pending context wins over normal discovery; all old listeners are unowned | Unknown |
+| Relevant revision change, unexpected exit or readiness loss | Invalidate confirmation; keep conservative recovery | Pending; a later healthy poll cannot confirm |
+
+A no-change rollback in a proven direct session with no activation attempt/imported
+dependency preserves the start-only safe-stop exception after fresh reconciliation.
+Any uncertainty or possible dependency retains the confirmation requirement.
+Runtime replacement is allowed during recovery without changing the bound context
+or owned child. Configuration selection stays locked while an owned child or
+pending/imported recovery depends on it. Mapping-only edits invalidate confirmation
+but cannot retarget rollback; a changed home/provider/port blocks recovery until
+the recorded context is restored. Independently readable catalogs remain available
+even when provider/record compatibility fails.
+
+Mutating actions reject conflicting re-entry. Refresh calls coalesce; every async
+inspection carries both a context generation and request sequence. Older polls or
+action inspections cannot replace newer evidence or authorize a confirmation.
+`CompanionBackend.mutationRequiresReconciliation` is an explicit protocol
+requirement. `ProcessBackend` reports its writing-child or reconciliation gate;
+confirmation, stop and Quit cannot bypass it with apparently-direct disk evidence.
+Only its post-exit fresh reconciliation permits later controls. The controller
+never retries or terminates an uncertain helper.
+
+After activation/imported dependency, stop requires current direct settings and an
+explicit manual restart/working-direct-response confirmation. The exception is a
+child started during a proven direct session with no later possible dependency.
+Stop signals only the exact retained handle and awaits both exit and the backend's
+independent port result. Failed exit retains ownership and blocks Quit. Verified
+requested exit consumes the old readiness observation; an expected teardown poll
+does not reopen completed recovery. Occupied and unknown port results remain
+visible separately, and neither is reported as an empty port.
+
+On relaunch or after an occupied-port result, no PID or readiness response grants
+ownership. After direct confirmation the desktop recovery obligation can clear,
+but any remaining listener needs manual cleanup. For the recorded port, inspect
+`lsof -nP -iTCP:<recorded-port> -sTCP:LISTEN`, independently verify the executable
+and its origin, then stop that verified listener yourself. If its origin cannot
+be verified, retain it and investigate locally. The companion never adopts or
+signals it. Preserve activation evidence when recovery fails; do not force a URL
+replacement, remove activation locks automatically, or reset desktop settings.
+
+Controller tests use temporary private journals, synthetic Process handles and
+held inspection/helper/exit boundaries. They never read operational configuration,
+retrieve credentials, contact destinations or control the real Codex desktop.

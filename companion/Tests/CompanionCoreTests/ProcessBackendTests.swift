@@ -171,6 +171,7 @@ import Darwin
         // A snapshot captured while the mutation is running must not authorize the next write.
         let initial = try await backend.inspect(configPath: config, browseHome: root)
         let context = try XCTUnwrap(initial.context)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
         try setMode("heldMutation")
         defer { try? releaseFixture("release-mutation"); try? releaseFixture("release-snapshot") }
         let mutation = Task { try await backend.control(action: .activate, configPath: config, expectedContext: context) }
@@ -179,6 +180,7 @@ import Darwin
         mutation.cancel()
         do { _ = try await mutation.value; XCTFail("Cancelled mutation accepted") }
         catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertTrue(backend.mutationRequiresReconciliation)
         try setMode("delayedInspection")
         let stale = Task { try await backend.inspect(configPath: config, browseHome: root) }
         try await waitForFixture("snapshot-captured")
@@ -186,6 +188,7 @@ import Darwin
         try await waitForExit(mutationPID)
         try releaseFixture("release-snapshot")
         let snapshot = try await stale.value
+        XCTAssertTrue(backend.mutationRequiresReconciliation)
         XCTAssertEqual(snapshot.provider.state, "direct")
         XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/provider-state")), "router")
         try setMode("valid")
@@ -193,6 +196,7 @@ import Darwin
         catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
         let fresh = try await backend.inspect(configPath: config, browseHome: root)
         XCTAssertEqual(fresh.provider.state, "router")
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
         _ = try await backend.control(action: .rollback, configPath: config, expectedContext: context)
     }
     func testInterveningMutationInvalidatesReconciliationInspection() async throws {

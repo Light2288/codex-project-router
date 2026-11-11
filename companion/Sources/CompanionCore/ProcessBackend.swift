@@ -40,6 +40,7 @@ private final class RunningCommand {
 }
 
 @MainActor public final class ProcessBackend: CompanionBackend {
+    public var mutationRequiresReconciliation: Bool { mutationInFlight || needsReconciliation }
     public var onChildExit: ((UUID, Int32) -> Void)?
     private let resourcesURL: URL
     private var nodeExecutable: URL?

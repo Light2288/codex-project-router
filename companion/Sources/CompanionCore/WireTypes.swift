@@ -72,6 +72,7 @@ public struct CompanionJournal: Codable, Equatable {
 }
 @MainActor public protocol CompanionBackend: AnyObject {
     var onChildExit: ((UUID, Int32) -> Void)? { get set }
+    var mutationRequiresReconciliation: Bool { get }
     func inspect(configPath: URL?, browseHome: URL) async throws -> Inspection
     func validateNode(_ path: URL) async throws -> URL
     func setNodeExecutable(_ validatedPath: URL)
