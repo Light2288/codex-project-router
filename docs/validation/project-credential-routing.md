@@ -1,6 +1,6 @@
 # Project credential routing validation
 
-Date: 2026-11-11. Status: **renewed user-visible cases observed; exact recovery complete; transport limitations and final review pending**.
+Date: 2026-11-11. Status: **approved increment verified and reviewed; exact recovery complete; recorded live transport limitations remain**.
 
 The optional mode verifies each admitted caller against a fresh global Keychain credential, then selects the resolved route's explicit credential and full HTTPS API base URL together for model requests. Catalog requests and qualifying unassigned titles retain the verified caller authorization and global destination. Synthetic evidence establishes exact local credential/destination selection and transport behavior. Live observations do not independently establish gateway account or billing attribution.
 
@@ -92,8 +92,45 @@ The A/B forwarding overlap runs from `2026-11-11T01:48:42.050Z` to `2026-11-11T0
 
 Rollback exited 0 with `state: direct`, `changed: true` and `restartRequired: true`. The controller verified exact initial provider/router bytes and optional-property absence were restored while preserving unrelated settings. The user restarted and confirmed direct readiness and a working direct response. Only after that confirmation, the positively identified recorded proxy was stopped with SIGTERM. Independent `lsof` found no listener. Postrecovery status was `state: direct`, `proxyReady: false`, `recoveryRequired: false`. No restart, direct-response or listener-stop action remains pending. Private checkpoints and evidence remain outside Git; Keychain items remain unchanged.
 
-## Acceptance and remaining review
+## Acceptance and final review
 
-The renewed evidence records every required user-visible AC-09 action and exact recovery, with cancelled model transport outcomes and unproven complete stream delivery retained for acceptance review. It does not relabel the historical failed run or claim an unqualified transport pass. Live fork, saved-subagent and dedicated-compaction cases remain explicitly unrun; their required synthetic coverage is retained.
+The specification review accepted AC-09 with the recorded qualification: every required user-visible lifecycle action and exact recovery was observed. All four mapped model requests retain initiating 499/CANCELLED outcomes; complete HTTP stream delivery remains unproven. The quality review preserves that limitation and found no demonstrated defect. Neither verdict relabels the historical failure or cancelled transports as HTTP 200. Live fork, saved-subagent and dedicated-compaction cases remain explicitly unrun; required synthetic coverage is retained.
 
-Task 8 documentation review, fresh final `npm test`, `node --check src/cli.js`, `git diff --check` and the sole integrated sequential specification/quality whole-branch gate remain pending. AC-08 and overall increment completion cannot be claimed before those gates and their actionable dispositions. AC-09 acceptance remains subject to review of the qualified live evidence above. Push and merge remain unauthorized.
+Fresh final checks ran against `9c17de7` after Task 8 review:
+
+| Command | Exit | Decisive result |
+|---|---|---|
+| `npm test` | 0 | 643 tests, 643 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo; `duration_ms 45429.950834`; no warning/error/failure markers |
+| `node --check src/cli.js` | 0 | Empty output |
+| `git diff --check` | 0 | Empty output |
+
+The sole integrated whole-branch gate reviewed the complete `cd58067..9c17de7` diff and all 15 changed files. Specification review ran first on the managed light role; quality review opened only after its fresh PASS and exact package-identity verification, then ran on the managed full role. Both stages returned **PASS**, with **no actionable findings**. The controller independently rechecked the immutable package hash, expected/echoed identities, reviewed HEAD and clean tree. A specification-report hash transcription error was corrected by the same reviewer before quality opened; the package and substantive review were unchanged. No fix wave or duplicate whole-branch reviewer was needed.
+
+Review identity:
+
+```text
+GATE_RUN_ID: project-credential-routing-44e1cf8c-787d-4016-8deb-4bb1dbde61d5
+REVIEWED_STATE_ID: 9c17de7dd0c1f83bc5d00936a0eebfe7a003ad9b:8a49a3af-f727-4321-b9ee-ea8cb3901764
+PACKAGE_SHA256: 9cbc7fecf1e08d746dc7cdee213d19e3abff8c383b872a1d8bdbb58012b350e0
+```
+
+The package hash identifies the review artifact, not a credential. The final documentation-only disposition update passed `git diff --check`; executable code and tests remain those covered by the fresh checks and sequential gate.
+
+| Task | Reviewed result |
+|---|---|
+| 1 — configuration and errors | `520bb04`, specification/task-quality pass |
+| 2 — bounded credential reader | `fedac84`, specification/task-quality pass |
+| 3 — authentication and selection | `80e0e3b`, specification/task-quality pass |
+| 4 — credential lifecycle | `04fe73d`, specification/task-quality pass |
+| 5 — original controls/docs/live work | Automation/docs reviewed through Task 6; remaining renewed live/recovery evidence completed and reviewed through Task 8 |
+| 6 — explicit credential/destination pairs | `d20746e`, specification/task-quality pass after one reviewed two-origin coverage fix; review included prior unreviewed Task 5 material |
+| 7 — destination lifecycle | `23eb915`, specification/task-quality pass |
+| 8 — renewed live/recovery report | `9c17de7`, documentation specification/task-quality pass; qualified AC-09 acceptance settled by final specification review |
+
+Execution rulings retained from the ledger, in order:
+
+- Snapshot assertions begin after identity resolution selects a route, including pending project-key retrieval. A move during unresolved identity lookup may affect that request; treating an earlier boundary as fixed would require rework.
+- Use the existing checkout as explicitly requested, without a worktree. This provides no additional checkout isolation.
+- Reuse the verified initial approval/branch/artifact setup rather than repeat it in Task 1. Missing setup evidence would have required rework; its commit and authorization were verified.
+
+AC-01–09 are accepted within the approved scope and the documented live limits. The increment is complete on the local `feat/project-credential-routing` branch. Exact prior settings and direct operation are restored; the user confirmed a direct response after restart, and no validation listener remains. Keychain items are unchanged. No push, merge or subsequent increment was performed or authorized.
