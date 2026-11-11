@@ -214,9 +214,16 @@ selected absolute real Node 24 path under a minimal GUI-like `PATH`. Its private
 synthetic configuration exercises inspection, listener startup and
 activation/rollback without a gateway call, credential lookup or desktop restart.
 It also checks rejection of files inside a synthetic Git checkout and app bundle.
-Ordinary `npm test` explicitly skips only the relocation integration test when an
-app has not yet been built. Final package acceptance requires a fresh build and
-zero skipped package tests.
+An additional macOS Seatbelt check denies checkout reads (including symlink
+access), launches the relocated native executable, proves its visible window and
+synthetic private-store lock, and separately exercises bundled controls under the
+same confinement. It requires a logged-in GUI session, `sandbox-exec` and the Swift
+toolchain. `CFFIXED_USER_HOME` isolates Foundation's native store; the test verifies
+that isolation rather than assuming `HOME` is sufficient. It guards real private
+configuration locations and allows outbound network access only to loopback.
+Ordinary `npm test` explicitly skips the two artifact integration tests when an
+app has not yet been built. Final package acceptance requires a current build and
+zero skipped package tests; rebuild when executable resources change.
 
 The controls window opens at launch; the menu-bar item reopens it after closing.
 First launch discovers only an existing normal private router configuration, or

@@ -29,7 +29,15 @@ Fresh preactivation verification was run by the controller. Every command below 
 
 Package tests used a relocated path containing spaces, an explicitly selected real Node runtime, `PATH=/usr/bin:/bin`, and a working directory outside the checkout. They checked pinned resources, ESM metadata, arm64 architecture and signature, explicit Swift command argument arrays, synthetic serve/readiness/activation/byte-exact rollback, no matching listener afterward, and rejection of configurations inside Git or the app bundle. Automated tests made no real gateway or Keychain calls.
 
-The actual checkout was never renamed, deleted or made physically unavailable. Relocation and resource-independence tests provide the package evidence; physical source-denial acceptance remains **unrun**. These tests do not replace a real GUI observation or user restart/response confirmation.
+The final-review source-denial check adds a third package test: `native relocated app and bundled controls work with checkout reads denied by macOS`. It copies the signed app outside the checkout and launches its actual native executable under `/usr/bin/sandbox-exec`. The Seatbelt profile denies filesystem reads and writes for both the lexical and resolved checkout paths and guards the real `~/.codex` and `~/.codex-project-router` locations. The actual checkout remains intact. The synthetic child environment uses a private temporary `HOME`, `CFFIXED_USER_HOME`, and `PATH=/usr/bin:/bin`; outbound network access is denied except loopback.
+
+Negative controls under that same profile fail to read the existing checkout's `package.json`, including through a temporary symlink. A real Node source read through that symlink fails with `EPERM`; its source import fails with `ERR_MODULE_NOT_FOUND` because Node masks denied stat calls. The source fixture's existence is checked before confinement. These checks establish filesystem denial, rather than assuming relocation prevents source access.
+
+The native child displayed its own on-screen window, identified by its exact tracked PID through CoreGraphics, and `lsof` confirmed that PID held the **synthetic** companion `instance.lock`. This directly verifies the native app's synthetic store location rather than assuming Foundation obeys `HOME`. The test separately invokes the relocated bundled CLI and serve entry points under the same profile, with a real installed Node 24 path: synthetic catalog inspection, readiness, activation, byte-exact provider rollback and unchanged router configuration all pass. Both tracked long-lived children exit; their PIDs are absent and the synthetic port can be rebound. Short-lived commands are awaited and bounded by deadlines. No GUI control click or native-owned router is inferred from those separately invoked bundled controls, and no user process is adopted or signalled.
+
+The targeted command `node --test --test-name-pattern='native relocated' test/companion-package.test.js` passed with 1 test, 1 pass, 0 fail and 0 skipped. A deliberate temporary test-only change selecting the denied checkout CLI instead of bundled resources failed with exit 1 / `MODULE_NOT_FOUND`; restoring the bundled path returned the same command to exit 0. This closes the source-inaccessible launch/bundled-operation evidence gap. The full package command was rerun after the test change: **3 tests, 3 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo; exit 0**. No executable resources changed, so no rebuild was needed. `git diff --check` also exited 0.
+
+This is macOS Seatbelt filesystem-denial evidence with direct native-executable launch, not a separate user account, VM or LaunchServices broker-inheritance test. It requires a logged-in macOS GUI session, the existing Swift toolchain and `sandbox-exec`; it fails when its required evidence is unavailable. The existing human GUI observations below and explicit restart/response confirmations retain their separate attribution. The check uses only synthetic configuration/catalog/provider/activation state, performs no gateway/authentication-helper calls, and leaves the user's idle companion untouched.
 
 For local build and launch instructions, see the [companion documentation](../../companion/README.md). The built app opens through macOS with:
 
@@ -37,7 +45,7 @@ For local build and launch instructions, see the [companion documentation](../..
 open "dist/Codex Project Router.app"
 ```
 
-No executable artifact changed for this report, so Task 5 documentation work runs whitespace checks only and retains the fresh preactivation executable evidence above.
+No executable artifact changed for this final-review test/report fix. The fresh preactivation executable evidence above is retained alongside the focused source-denial package verification.
 
 ## Actual native GUI observations
 
@@ -106,7 +114,7 @@ The companion remains running idle. No required live restart, response confirmat
 
 | Criterion | Evidence and qualification |
 |---|---|
-| AC-01 | Native/runtime and package tests, signed relocated macOS launch and observed live bundled child. Physical source-denial case remains unrun |
+| AC-01 | Native/runtime and package tests, signed relocated macOS launch and observed live bundled child; focused Seatbelt test verifies actual native window/synthetic store plus separately invoked bundled controls while checkout reads are denied, including symlink negative controls |
 | AC-02 | Inspection/containment regressions, unchanged first-launch bytes/empty port, real invalid-file selection and return to Valid/Legacy/Direct; no automatic activation |
 | AC-03 | Catalog/mapping-state tests and user-confirmed correct visible project list/names. No assignment authoring or account-name inference |
 | AC-04 | Controller confirmation/reconciliation tests and observed distinct disk/readiness/ownership/pending-confirmation states. Restarts/responses remain explicit user reports |
@@ -118,7 +126,7 @@ The companion remains running idle. No required live restart, response confirmat
 | AC-10 | Fresh automated/native/build/package evidence, actual GUI observations and operational documentation. Sole integrated sequential specification/quality review is pending |
 | AC-11 | User-confirmed routed/direct restarts and working responses, exact owned-setting/router recovery, preserved unrelated changes, independently stopped listener. No current transport/stream/billing outcome captured |
 
-The final whole-branch gate has not run. Task-level review and this evidence report do not substitute for its sequential specification review followed by quality review. Missing/unrun acceptance evidence remains qualified regardless of a later review verdict.
+The final whole-branch gate remains incomplete. Its initial specification review identified the source-denial evidence gap addressed above; scoped re-review and the subsequent quality review remain pending. Task-level review and this evidence report do not substitute for that sequential gate. Missing/unrun acceptance evidence remains qualified regardless of a later review verdict.
 
 ## Unrun cases and limits of the current check
 
