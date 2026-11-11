@@ -67,7 +67,8 @@ suite. Tests use private temporary directories and controlled fixture processes;
 they do not select or modify actual router/provider configuration or Keychain.
 
 The `CompanionCore` library contains the wire types, `PrivateStore`, and the
-main-actor `ProcessBackend`. It currently has no executable or UI target.
+main-actor `ProcessBackend`. The `CodexProjectRouter` executable adds the native
+menu-bar item and controls window on macOS 14 or newer (Apple silicon).
 `ProcessBackend(resourcesURL:nodeExecutable:)` expects a resource directory with
 `src/companion-cli.js` and `src/cli.js`; packaging must include their production
 modules and dependencies. Paths containing spaces are passed as individual
@@ -123,7 +124,8 @@ The public presentation snapshot strips private revision metadata. Its disk stat
 matching readiness, `ownedRouter`, and `desktopConfirmation` are independent facts.
 The controller exposes `busy`, fixed safe `error` text, guarded control properties,
 `lastStopOutcome`, `needsManualListenerCleanup`, and `quitRequested`. The app should
-terminate only when `requestQuit()` returns with `quitRequested` true. Closing a
+terminate only when `requestQuit()` returns with `quitRequested` true and
+`canQuit` true. Closing a
 window is not a Quit request and must leave the app/controller running.
 
 | Event | Journal/recovery outcome | Desktop confirmation |
@@ -151,6 +153,9 @@ even when provider/record compatibility fails.
 Mutating actions reject conflicting re-entry. Refresh calls coalesce; every async
 inspection carries both a context generation and request sequence. Older polls or
 action inspections cannot replace newer evidence or authorize a confirmation.
+A shared inspection gate serializes action-time checks with background refresh;
+a waiting action performs its own fresh inspection after earlier work finishes.
+Refresh requests coalesce instead of adding an unbounded queue.
 `CompanionBackend.mutationRequiresReconciliation` is an explicit protocol
 requirement. `ProcessBackend` reports its writing-child or reconciliation gate;
 confirmation, stop and Quit cannot bypass it with apparently-direct disk evidence.
@@ -178,3 +183,79 @@ replacement, remove activation locks automatically, or reset desktop settings.
 Controller tests use temporary private journals, synthetic Process handles and
 held inspection/helper/exit boundaries. They never read operational configuration,
 retrieve credentials, contact destinations or control the real Codex desktop.
+
+## Build and run the native app
+
+Install the existing pinned production dependency with `npm ci` if needed, and
+use an installed Node 24 plus the Swift/macOS toolchain on Apple silicon:
+
+```sh
+npm run companion:test
+npm test
+npm run companion:build
+npm run companion:package-test
+open "dist/Codex Project Router.app"
+```
+
+`companion:build` runs `swift build --package-path companion -c release --product
+CodexProjectRouter` and `swift build --package-path companion -c release
+--show-bin-path`, then assembles and ad-hoc signs the ignored local app. This is a
+local build, without distribution notarization or an installer. Move the entire
+app wherever convenient, including a path with spaces. It loads its router only
+from `Contents/Resources/router`; no checkout location or selected Node path is
+embedded. The explicit resource allowlist contains the router ESM manifest and
+production source modules plus the installed pinned `smol-toml` manifest, `dist`
+and license. Node, tests, real configuration, Git data and private state are not
+bundled. Rebuild after changing router source or dependencies.
+
+`companion:package-test` requires the already-built app and fails if it is absent.
+It relocates a copy, checks metadata/arm64/signature/resources, and uses the
+selected absolute real Node 24 path under a minimal GUI-like `PATH`. Its private
+synthetic configuration exercises inspection, listener startup and
+activation/rollback without a gateway call, credential lookup or desktop restart.
+It also checks rejection of files inside a synthetic Git checkout and app bundle.
+Ordinary `npm test` explicitly skips only the relocation integration test when an
+app has not yet been built. Final package acceptance requires a fresh build and
+zero skipped package tests.
+
+The controls window opens at launch; the menu-bar item reopens it after closing.
+First launch discovers only an existing normal private router configuration, or
+allows selecting an existing file through a native panel. Configuration and Node
+selection, launch and refresh never start or activate the router. Browsing remains
+available without a configuration if the normal Codex catalog is readable. Select
+an installed Node 24 executable if automatic discovery fails; the GUI does not
+inherit an nvm shell setup. Neither runtime nor configuration is installed or
+created by the controls.
+
+The window shows exact selected local paths, routing mode, on-disk provider state,
+matching readiness, session ownership and manual desktop confirmation separately.
+Provider errors do not hide a readable project catalog. Search filters local names
+and aliases without changing assignments or mappings; stale mapping-only projects
+and missing route targets are visibly marked. An unavailable catalog is displayed
+as unavailable without presenting older rows as fresh. Inspection runs immediately,
+every two seconds with controls visible and every five seconds while hidden;
+manual refresh and action-time checks use the controller's coalescing and fresh
+context validation.
+
+Activation asks for provider-wide confirmation: every chat using that provider
+can be affected, and unmapped/unresolved model requests can block. Restart Codex
+and send a request yourself, then use the separately labeled routed or direct
+response confirmation button. Health does not establish desktop-loaded settings,
+gateway/key acceptance, billing attribution or stream completeness. After possible
+routed use, keep the app/listener running until direct restoration and a working
+direct response have been confirmed. Closing the window leaves them running.
+Quit (including keyboard/application termination) always requests guarded cleanup;
+it remains blocked by unresolved recovery or an owned child that cannot safely
+stop. An occupied or unknown port after owned-child exit remains distinct from
+matching readiness. External listeners are never adopted or signalled.
+
+Real native launch/menu/window appearance, first-launch behavior, selection panels,
+close/reopen, setup errors, catalog refresh, sizing and legibility require a manual
+macOS observation after the automated package checks. Automated fixture coverage
+does not claim those observations or live operational acceptance. Preserve actual
+provider/router settings during a UI-only package check.
+
+This increment has no assignment editing, project hiding, account/default-route
+management, Keychain management, startup automation, bundled Node, automatic Codex
+restart, automatic prompts, or improved gateway/billing attribution. Later
+increments require their own scope and approval.

@@ -30,6 +30,86 @@ import XCTest
         await controller.activate()
         return controller
     }
+    func testActionWaitsForRefreshAndUsesItsOwnFreshInspection() async {
+        // A pre-action poll cannot authorize an action or allow a second simultaneous backend inspection.
+        let controller = await started()
+        let oldReady = backend.snapshot
+        let baseline = backend.inspectedPaths.count
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let refresh = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        backend.snapshot.provider.proxyReady = false
+        var actionStarted = false
+        let activation = Task { actionStarted = true; await controller.activate() }
+        await waitUntil { actionStarted }
+        for _ in 0..<20 { await controller.refresh() }
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertEqual(backend.inspectedPaths.count, baseline + 1)
+        barrier.release(oldReady)
+        await refresh.value; await activation.value
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertLessThanOrEqual(backend.inspectedPaths.count, baseline + 3)
+        XCTAssertEqual(controller.inspection?.provider.proxyReady, false)
+        XCTAssertTrue(backend.controls.isEmpty)
+    }
+    func testActionCanActivateAfterWaitingForFreshPostRefreshEvidence() async {
+        // Serializing inspection must not reject an otherwise valid action merely because an older poll existed.
+        let controller = await started()
+        var oldNotReady = backend.snapshot; oldNotReady.provider.proxyReady = false
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let refresh = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        let activation = Task { await controller.activate() }
+        await waitUntil { controller.busy }
+        for _ in 0..<20 { await controller.refresh() }
+        barrier.release(oldNotReady)
+        await refresh.value; await activation.value
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertEqual(backend.controls.count, 1)
+        XCTAssertEqual(backend.controls.first?.1, context)
+        XCTAssertEqual(controller.inspection?.provider.state, "router")
+        XCTAssertEqual(controller.desktopConfirmation, .routedPending)
+    }
+    func testStartupInspectionCannotOverlapCoalescedRefresh() async {
+        // ProcessBackend.start performs inspections internally; polling must share its inspection slot too.
+        let controller = makeController(); await controller.refresh()
+        let barrier = Barrier<Inspection>(); backend.startInspectionBarrier = barrier
+        let start = Task { await controller.start() }
+        await waitUntil { barrier.waiting }
+        var refreshStarted = false
+        let refresh = Task { refreshStarted = true; await controller.refresh() }
+        await waitUntil { refreshStarted }
+        for _ in 0..<20 { await controller.refresh() }
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        barrier.release(backend.snapshot)
+        await start.value; await refresh.value
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertNotNil(controller.ownedRouter)
+    }
+    func testConfirmationPresentationGuardsFollowFreshContextAndReconciliation() async {
+        let controller = await activated()
+        XCTAssertTrue(controller.canSelectNode)
+        XCTAssertTrue(controller.canConfirmRoutedResponse)
+        XCTAssertFalse(controller.canConfirmDirectResponse)
+        backend.mutationRequiresReconciliation = true
+        await controller.refresh()
+        XCTAssertFalse(controller.canConfirmRoutedResponse)
+        backend.mutationRequiresReconciliation = false
+        await controller.restoreDirect()
+        XCTAssertFalse(controller.canConfirmRoutedResponse)
+        XCTAssertTrue(controller.canConfirmDirectResponse)
+        backend.snapshot.context?.codexHome = "/synthetic/changed"
+        await controller.refresh()
+        XCTAssertFalse(controller.canConfirmDirectResponse)
+        backend.snapshot.context = context
+        await controller.refresh()
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let confirmation = Task { await controller.confirmDirectResponse() }
+        await waitUntil { barrier.waiting }
+        XCTAssertFalse(controller.canConfirmDirectResponse)
+        XCTAssertFalse(controller.canSelectNode)
+        barrier.release(backend.snapshot); await confirmation.value
+    }
     func testNoChangeRollbackKeepsConfirmationPending() async throws {
         // Clearing obligation from rollback success/no-change would stop a still-required listener.
         let controller = await activated()
@@ -64,8 +144,9 @@ import XCTest
         let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
         let refresh = Task { await controller.refresh() }
         await waitUntil { barrier.waiting }
-        await controller.restoreDirect()
-        barrier.release(old); await refresh.value
+        let restore = Task { await controller.restoreDirect() }
+        await waitUntil { controller.busy }
+        barrier.release(old); await refresh.value; await restore.value
         XCTAssertEqual(controller.inspection?.provider.state, "direct")
         XCTAssertEqual(controller.desktopConfirmation, .directPending)
         XCTAssertEqual(controller.recoveryContext, context)
@@ -81,11 +162,12 @@ import XCTest
         let another = URL(fileURLWithPath: "/synthetic/another.json")
         var next = old; next.context?.configPath = another.path; next.configuration.path = another.path
         backend.snapshot = next
-        await controller.selectConfiguration(another)
-        barrier.release(old); await first.value
+        let selection = Task { await controller.selectConfiguration(another) }
+        await waitUntil { controller.busy }
+        barrier.release(old); await first.value; await selection.value
         XCTAssertEqual(controller.selectedConfiguration, another)
         XCTAssertEqual(controller.inspection?.context?.configPath, another.path)
-        XCTAssertEqual(backend.inspectedPaths.count, 3)
+        XCTAssertEqual(backend.inspectedPaths.count, 2)
         XCTAssertEqual(backend.inspectedPaths.last!, another)
     }
     func testRelaunchPrioritizesPendingProfile() async throws {
@@ -323,6 +405,7 @@ import XCTest
         let second = RouterController(backend: ControlledBackend(context: context), store: PrivateStore(directory: store.directory), browseHome: root)
         await second.refresh(); await second.activate()
         XCTAssertEqual(second.error, CompanionError.instanceRunning.rawValue)
+        XCTAssertFalse(second.canSelectNode)
         XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), original)
         let malformedRoot = root.appendingPathComponent("corrupt")
         let malformedStore = PrivateStore(directory: malformedRoot); _ = try malformedStore.load()
@@ -390,8 +473,9 @@ import XCTest
         let confirmation = Task { await controller.confirmDirectResponse() }
         await waitUntil { barrier.waiting }
         backend.snapshot.provider.state = "router"; backend.snapshot.provider.recordPhase = "active"; backend.snapshot.revision = "external-reactivation"
-        await controller.refresh()
-        barrier.release(oldDirect); await confirmation.value
+        let refresh = Task { await controller.refresh() }
+        await Task.yield()
+        barrier.release(oldDirect); await confirmation.value; await refresh.value
         XCTAssertEqual(controller.inspection?.provider.state, "router")
         XCTAssertEqual(controller.desktopConfirmation, .directPending)
         XCTAssertNotNil(try store.load().pending)
@@ -405,8 +489,9 @@ import XCTest
         let activation = Task { await controller.activate() }
         await waitUntil { barrier.waiting }
         backend.snapshot.provider.proxyReady = false
-        await controller.refresh()
-        barrier.release(oldReady); await activation.value
+        let refresh = Task { await controller.refresh() }
+        await Task.yield()
+        barrier.release(oldReady); await activation.value; await refresh.value
         XCTAssertEqual(backend.controls.count, 0)
         XCTAssertEqual(controller.inspection?.provider.proxyReady, false)
     }
@@ -622,8 +707,11 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     var nodeError: CompanionError?
     var onControl: ((ControlAction, ActivationContext) throws -> Void)?
     var inspectedPaths: [URL?] = []
+    var concurrentInspections = 0
+    var maximumConcurrentInspections = 0
     var controls: [(ControlAction, ActivationContext)] = []
     var startBecomesReady = true
+    var startInspectionBarrier: Barrier<Inspection>?
     var startCount = 0
     var stopCount = 0
     var validatedNodes: [URL] = []
@@ -635,6 +723,9 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "none"), catalog: .init(state: "ready", entries: []))
     }
     func inspect(configPath: URL?, browseHome: URL) async throws -> Inspection {
+        concurrentInspections += 1
+        maximumConcurrentInspections = max(maximumConcurrentInspections, concurrentInspections)
+        defer { concurrentInspections -= 1 }
         inspectedPaths.append(configPath)
         if let barrier = inspectBarrier { inspectBarrier = nil; return await barrier.wait() }
         if let inspectionError { throw inspectionError }
@@ -651,6 +742,10 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
         let child = OwnedRouter(process: SyntheticProcess(), context: snapshot.context!)
         self.child = child
         snapshot.provider.proxyReady = startBecomesReady
+        if let barrier = startInspectionBarrier {
+            startInspectionBarrier = nil; inspectBarrier = barrier
+            _ = try await inspect(configPath: configPath, browseHome: configPath.deletingLastPathComponent())
+        }
         return child
     }
     func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult {

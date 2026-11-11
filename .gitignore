@@ -5,3 +5,5 @@ coverage/
 *.log
 companion/.build/
 companion/.swiftpm/
+
+dist/

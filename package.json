@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "companion:test": "swift test --package-path companion"
+    "companion:test": "swift test --package-path companion",
+    "companion:build": "node scripts/build-companion.mjs",
+    "companion:package-test": "node --test test/companion-package.test.js"
   },
   "dependencies": {
     "smol-toml": "1.9.1"

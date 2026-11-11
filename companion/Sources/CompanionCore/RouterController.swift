@@ -28,6 +28,8 @@ import Observation
     private var revision: String?
     private var generation: UInt64 = 0
     private var inspectionSequence: UInt64 = 0
+    private var inspectionInFlight = false
+    private var inspectionWaiters: [CheckedContinuation<Void, Never>] = []
     private var refreshRunning = false
     private var refreshAgain = false
     private var stoppingID: UUID?
@@ -37,6 +39,7 @@ import Observation
     public var needsManualListenerCleanup: Bool {
         ownedRouter == nil && (lastStopOutcome?.portState == .occupied || inspection?.provider.proxyReady == true)
     }
+    public var canSelectNode: Bool { usable && !busy }
     public var canSelectConfiguration: Bool { usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation }
     public var canStart: Bool {
         usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && matchingContext != nil && inspection?.provider.proxyReady == false
@@ -48,6 +51,17 @@ import Observation
             !provider.recoveryRequired && !["prepared", "unavailable"].contains(provider.recordPhase)
     }
     public var canRestoreDirect: Bool { usable && !busy && !mutationRequiresReconciliation && matchingContext != nil }
+    public var canConfirmRoutedResponse: Bool {
+        guard usable, !busy, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
+              let context = matchingContext, let child = ownedRouter, child.process.isRunning,
+              child.context == context, let provider = inspection?.provider else { return false }
+        return provider.state == "router" && provider.proxyReady == true && provider.recordPhase == "active" && !provider.recoveryRequired
+    }
+    public var canConfirmDirectResponse: Bool {
+        guard usable, !busy, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
+              let context = matchingContext else { return false }
+        return cleanDirect(context)
+    }
     public var canStop: Bool { !busy && stopPermitted }
     public var canQuit: Bool { secondInstance || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation && journal.pending == nil) }
 
@@ -120,7 +134,16 @@ import Observation
         guard !backend.mutationRequiresReconciliation, let context = matchingContext, ownedRouter == nil, inspection?.provider.proxyReady == false else { reject(); return }
         do {
             let directSession = !hasDepended && !recoveryObligation && cleanDirect(context)
-            let child = try await backend.start(configPath: URL(fileURLWithPath: context.configPath))
+            let child: OwnedRouter
+            // Startup probes through the backend too, so keep background inspection out until it returns.
+            await acquireInspectionSlot()
+            do {
+                child = try await backend.start(configPath: URL(fileURLWithPath: context.configPath))
+                releaseInspectionSlot()
+            } catch {
+                releaseInspectionSlot()
+                throw error
+            }
             // A handle from a readiness timeout is still owned, but never implies readiness.
             ownedRouter = child
             directOnlyChild = directSession && child.context == context ? child.id : nil
@@ -222,9 +245,22 @@ import Observation
         var next = journal; next.selectedConfigurationPath = context.configPath; next.pending = .init(context: context, phase: phase)
         try persist(next)
     }
+    private func acquireInspectionSlot() async {
+        if inspectionInFlight {
+            await withCheckedContinuation { inspectionWaiters.append($0) }
+        } else { inspectionInFlight = true }
+    }
+    private func releaseInspectionSlot() {
+        if inspectionWaiters.isEmpty { inspectionInFlight = false }
+        else { inspectionWaiters.removeFirst().resume() }
+    }
     @discardableResult private func inspectNow() async -> Bool {
         inspectionSequence &+= 1
         let requestSequence = inspectionSequence
+        // Actions must inspect after prior work ends; a pre-action snapshot cannot authorize them.
+        // There is at most one action and one coalesced refresh caller waiting here.
+        await acquireInspectionSlot()
+        defer { releaseInspectionSlot() }
         let requestGeneration = generation
         defer { mutationRequiresReconciliation = backend.mutationRequiresReconciliation }
         do {
