@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import json, os, signal, socket, sys, time
+import json, os, select, signal, socket, sys, time
 if len(sys.argv) == 4 and sys.argv[1] == '--hold-port':
     while not os.path.exists(sys.argv[3]): time.sleep(.01)
     listener = socket.socket(); listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -17,6 +17,54 @@ with open(os.path.join(root, 'behavior.json')) as f: behavior = json.load(f)
 if os.environ.get('NODE_OPTIONS') or os.environ.get('NODE_PATH') or os.environ.get('COMPANION_SECRET'):
     sys.exit(19)
 with open(os.path.join(root, 'pid'), 'w') as f: f.write(str(os.getpid()))
+with open(os.path.join(root, 'invocations'), 'a') as f: f.write(' '.join(sys.argv[1:]) + '\n')
+if os.path.basename(sys.argv[1]) == 'managed-serve.js':
+    if len(sys.argv) != 6 or sys.argv[2] != '--config' or sys.argv[4] != '--session': sys.exit(21)
+    with open(sys.argv[3]) as f: cfg = json.load(f)
+    mode = behavior.get('mode', 'valid')
+    if mode == 'childExit': sys.exit(8)
+    listener = socket.socket(); listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(('127.0.0.1', cfg['port'])); listener.listen(5)
+    def stop(*_):
+        listener.close()
+        if mode == 'reusePort':
+            with open(os.path.join(root, 'released'), 'w') as f: f.write('released')
+            time.sleep(.25)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, stop)
+    current_mode = 'off'
+    def reply(frame):
+        try: os.write(1, (json.dumps(frame) + '\n').encode())
+        except OSError: pass
+    frame = dict(schemaVersion=1, type='ready', sessionId=sys.argv[5],
+                 context=dict(configPath=sys.argv[3], codexHome=cfg['home'], providerId='fixture', listenPort=cfg['port']), mode='off')
+    if mode == 'unsupportedReady': frame['schemaVersion'] = 2
+    if mode == 'wrongContextReady': frame['context']['providerId'] = 'wrong'
+    if mode not in ['noReady', 'longOutput']: reply(frame)
+    control_open = True; input_bytes = b''
+    while True:
+        if mode == 'longOutput':
+            try: os.write(1, b'SENTINEL_PRIVATE' * 8192)
+            except OSError: pass
+            try: os.write(2, b'SENTINEL_PRIVATE' * 8192)
+            except OSError: pass
+        ready, _, _ = select.select([listener] + ([0] if control_open else []), [], [], .05)
+        if listener in ready:
+            c, _ = listener.accept(); c.close()
+        if 0 in ready:
+            chunk = os.read(0, 4096)
+            if not chunk: control_open = False; continue
+            input_bytes += chunk
+            while b'\n' in input_bytes:
+                line, input_bytes = input_bytes.split(b'\n', 1)
+                command = json.loads(line)
+                with open(os.path.join(root, 'commands'), 'a') as f: f.write(json.dumps(command) + '\n')
+                if command['action'] == 'set_mode':
+                    current_mode = command['mode']
+                    with open(os.path.join(root, 'router-mode'), 'w') as f: f.write(current_mode)
+                    if mode == 'modeTimeout': continue
+                    if mode == 'controlLoss': os.close(1); continue
+                reply(dict(schemaVersion=1, type='mode', sessionId=sys.argv[5], requestId=command['requestId'], mode=current_mode))
 if len(sys.argv) > 2 and sys.argv[2] == 'serve':
     with open(sys.argv[4]) as f: cfg = json.load(f)
     if behavior.get('mode') == 'childExit': sys.exit(8)

@@ -1325,6 +1325,8 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
         snapshot.revision = action == .activate ? "routed-1" : "restored-1"
         return ControlResult(state: action == .activate ? "active" : "direct", changed: changed, restartRequired: changed)
     }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         stopCount += 1
         let outcome = if let barrier = stopBarrier { await barrier.wait() } else { stopOutcome }

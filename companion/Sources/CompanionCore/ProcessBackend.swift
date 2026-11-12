@@ -45,7 +45,7 @@ private final class RunningCommand {
     private let resourcesURL: URL
     private var nodeExecutable: URL?
     private let discoveryCandidates: [URL]?
-    private var owned: [UUID: (child: OwnedRouter, command: RunningCommand)] = [:]
+    private var owned: [UUID: (child: OwnedRouter, channel: RouterModeChannel, stderr: BoundedCapture)] = [:]
     private var mutationInFlight = false
     private var mutationProcess: RunningCommand?
     private var needsReconciliation = false
@@ -178,11 +178,7 @@ private final class RunningCommand {
     }
     private func launch(executable: URL, arguments: [String], input: Data? = nil) throws -> RunningCommand {
         let process = Process(); process.executableURL = executable; process.arguments = arguments
-        // An allowlist avoids forwarding tokens, dynamic-loader injection, or Node startup hooks.
-        let ordinary = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TZ"]
-        var environment = ProcessInfo.processInfo.environment.filter { ordinary.contains($0.key) }
-        environment["NODE_USE_SYSTEM_CA"] = "1"
-        process.environment = environment
+        process.environment = childEnvironment
         let stdout = Pipe(), stderr = Pipe(), stdin = Pipe()
         process.standardOutput = stdout; process.standardError = stderr; process.standardInput = stdin
         let command = RunningCommand(process: process)
@@ -201,6 +197,42 @@ private final class RunningCommand {
             command.inputFailed = true
         }
         return command
+    }
+    private var childEnvironment: [String: String] {
+        // An allowlist avoids forwarding tokens, dynamic-loader injection, or Node startup hooks.
+        let ordinary = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TZ"]
+        var environment = ProcessInfo.processInfo.environment.filter { ordinary.contains($0.key) }
+        environment["NODE_USE_SYSTEM_CA"] = "1"
+        return environment
+    }
+    private func launchManaged(executable: URL, script: URL, context: ActivationContext) throws -> OwnedRouter {
+        let process = Process(), id = UUID()
+        process.executableURL = executable
+        process.arguments = ["--use-system-ca", script.path, "--config", context.configPath, "--session", id.uuidString]
+        process.environment = childEnvironment
+        let stdout = Pipe(), stderr = Pipe(), stdin = Pipe()
+        process.standardOutput = stdout; process.standardError = stderr; process.standardInput = stdin
+        let capture = BoundedCapture(limit: 16 * 1024)
+        capture.attach(stderr.fileHandleForReading)
+        do { try process.run() }
+        catch {
+            stderr.fileHandleForReading.readabilityHandler = nil
+            try? stderr.fileHandleForReading.close(); try? stdout.fileHandleForReading.close()
+            try? stdin.fileHandleForWriting.close()
+            throw CompanionError.startupFailed
+        }
+        let child = OwnedRouter(process: process, context: context, id: id)
+        let channel = RouterModeChannel(input: stdin.fileHandleForWriting, output: stdout.fileHandleForReading, sessionID: id, context: context)
+        owned[id] = (child, channel, capture)
+        Task { [self, child, channel, capture] in
+            while child.process.isRunning { capture.discard(); await pause(0.02) }
+            channel.close()
+            while !capture.snapshot.eof { capture.discard(); await pause(0.02) }
+            capture.discard()
+            owned.removeValue(forKey: child.id)
+            onChildExit?(child.id, child.process.terminationStatus)
+        }
+        return child
     }
     private func wait(_ command: RunningCommand, mutating: Bool, deadline: Date? = nil) async throws -> Data {
         let deadline = deadline ?? Date().addingTimeInterval(5)
@@ -238,29 +270,36 @@ private final class RunningCommand {
     public func start(configPath: URL) async throws -> OwnedRouter {
         let before = try await inspect(configPath: configPath, browseHome: configPath.deletingLastPathComponent())
         guard let context = before.context, before.configuration.state == "valid", !owned.values.contains(where: { $0.child.context == context && $0.child.process.isRunning }) else { throw CompanionError.startupFailed }
-        let script = try resource("cli.js")
+        let script = try resource("managed-serve.js")
         let executable = try await runtime(deadline: Date().addingTimeInterval(5))
-        let command = try launch(executable: executable, arguments: ["--use-system-ca", script.path, "serve", "--config", configPath.path])
-        let child = OwnedRouter(process: command.process, context: context)
-        owned[child.id] = (child, command)
-        Task { [self, child, command] in
-            while command.process.isRunning || !command.drained {
-                command.discard()
-                await pause(0.02)
-            }
-            command.discard()
-            owned.removeValue(forKey: child.id)
-            onChildExit?(child.id, command.process.terminationStatus)
-        }
+        let child = try launchManaged(executable: executable, script: script, context: context)
+        guard let tracked = owned[child.id] else { throw CompanionError.startupFailed }
+        // Ownership is registered before awaiting either the pipe handshake or matching listener health.
+        _ = try? await tracked.channel.waitUntilReady()
         let deadline = Date().addingTimeInterval(5)
-        while command.process.isRunning, Date() < deadline {
+        while child.process.isRunning, Date() < deadline {
             if let inspection = try? await inspect(configPath: configPath, browseHome: URL(fileURLWithPath: context.codexHome), deadline: deadline),
                inspection.context == context, inspection.provider.proxyReady == true { return child }
             if Task.isCancelled { return child }
             await pause(0.1)
         }
-        guard command.process.isRunning else { throw CompanionError.startupFailed }
+        guard child.process.isRunning else { throw CompanionError.startupFailed }
         return child // A live child remains owned even when matching readiness is uncertain.
+    }
+    public func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode {
+        let mode = try await modeChannel(for: child).readMode()
+        _ = try modeChannel(for: child)
+        return mode
+    }
+    public func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode {
+        let applied = try await modeChannel(for: child).setMode(mode)
+        _ = try modeChannel(for: child)
+        return applied
+    }
+    private func modeChannel(for child: OwnedRouter) throws -> RouterModeChannel {
+        guard let tracked = owned[child.id], tracked.child === child, tracked.child.process === child.process,
+              tracked.child.context == child.context, child.process.isRunning else { throw CompanionError.unownedChild }
+        return tracked.channel
     }
     public func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         guard let tracked = owned[child.id], tracked.child === child, tracked.child.process === child.process,

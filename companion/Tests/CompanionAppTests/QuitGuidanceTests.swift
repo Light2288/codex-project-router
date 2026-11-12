@@ -248,6 +248,8 @@ private final class GuidanceSyntheticProcess: Process, @unchecked Sendable {
         counts["control", default: 0] += 1
         throw CompanionError.commandFailed
     }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         counts["stop", default: 0] += 1
         throw CompanionError.unownedChild

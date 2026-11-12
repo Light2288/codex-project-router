@@ -5,6 +5,7 @@ import Darwin
 @MainActor final class ProcessBackendTests: XCTestCase {
     private var root: URL!; private var resources: URL!; private var node: URL!; private var config: URL!
     private var backend: ProcessBackend!
+    private var startedChildren: [OwnedRouter] = []
     override func setUp() async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("companion process \(UUID())")
         resources = root.appendingPathComponent("bundled resources")
@@ -12,7 +13,7 @@ import Darwin
         node = root.appendingPathComponent("selected node")
         try FileManager.default.copyItem(at: Bundle.module.url(forResource: "node-fixture", withExtension: nil, subdirectory: "Fixtures")!, to: node)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: node.path)
-        for name in ["companion-cli.js", "cli.js"] { try Data().write(to: resources.appendingPathComponent("src/\(name)")) }
+        for name in ["companion-cli.js", "cli.js", "managed-serve.js"] { try Data().write(to: resources.appendingPathComponent("src/\(name)")) }
         try setMode("valid")
         config = root.appendingPathComponent("selected config.json")
         let port = try unusedPort()
@@ -20,6 +21,11 @@ import Darwin
         backend = ProcessBackend(resourcesURL: resources, nodeExecutable: node)
     }
     override func tearDown() async throws {
+        // Retain exact managed Process objects even if later helper commands replace the PID marker.
+        for child in startedChildren where child.process.isRunning {
+            kill(child.process.processIdentifier, SIGKILL)
+            while child.process.isRunning { try await Task.sleep(nanoseconds: 10_000_000) }
+        }
         // Kill only this test's retained fixture PID if an assertion interrupted lifecycle cleanup.
         if let data = try? String(contentsOf: resources.appendingPathComponent("src/pid")), let pid = Int32(data), kill(pid, 0) == 0 { kill(pid, SIGKILL) }
         try FileManager.default.removeItem(at: root)
@@ -90,7 +96,7 @@ import Darwin
     }
     func testOnlyTrackedLiveChildCanBeStopped() async throws {
         // Accepting a fabricated/recovered Process would turn stale process metadata into authority.
-        let child = try await backend.start(configPath: config)
+        let child = try await startFixture()
         XCTAssertTrue(child.process.isRunning)
         let forgery = OwnedRouter(process: child.process, context: child.context, id: child.id)
         do { _ = try await backend.stop(forgery); XCTFail("Forged ownership accepted") }
@@ -104,7 +110,7 @@ import Darwin
         // A full stdout/stderr pipe must not freeze the router; child exit must invalidate controller evidence.
         try setMode("longOutput")
         var exits: [(UUID, Int32)] = []; backend.onChildExit = { exits.append(($0, $1)) }
-        let child = try await backend.start(configPath: config)
+        let child = try await startFixture()
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertTrue(child.process.isRunning)
         _ = try await backend.stop(child)
@@ -143,19 +149,19 @@ import Darwin
     func testStartupUncertaintyRetainsChildAndDeadChildCannotBeAdopted() async throws {
         // Readiness timeout must retain the child without claiming its port is ready.
         try setMode("unready")
-        let child = try await backend.start(configPath: config)
+        let child = try await startFixture()
         XCTAssertTrue(child.process.isRunning)
         let inspection = try await backend.inspect(configPath: config, browseHome: root)
         XCTAssertEqual(inspection.provider.proxyReady, false)
         _ = try await backend.stop(child)
         try setMode("childExit")
-        do { _ = try await backend.start(configPath: config); XCTFail("Exited router accepted") }
+        do { _ = try await startFixture(); XCTFail("Exited router accepted") }
         catch { XCTAssertEqual(error as? CompanionError, .startupFailed) }
     }
     func testPortReuseIsReportedWithoutAdoptingTheListener() async throws {
         // Child termination and an empty port are separate facts; a replacement listener remains external.
         try setMode("reusePort")
-        let child = try await backend.start(configPath: config)
+        let child = try await startFixture()
         let replacement = Process(); replacement.executableURL = node
         replacement.arguments = ["--hold-port", String(child.context.listenPort), resources.appendingPathComponent("src/released").path]
         try replacement.run()
@@ -239,6 +245,95 @@ import Darwin
             let pid = try XCTUnwrap(Int32(String(contentsOfFile: candidate.path + ".version-started")))
             XCTAssertNotEqual(kill(pid, 0), 0, "Validation child survived its deadline")
         }
+    }
+    func testManagedReadyBindsExactChildAndContext() async throws {
+        // Historical health or a forged wrapper must not grant the managed capability.
+        setenv("NODE_OPTIONS", "SENTINEL_PRIVATE", 1); setenv("COMPANION_SECRET", "SENTINEL_PRIVATE", 1)
+        defer { unsetenv("NODE_OPTIONS"); unsetenv("COMPANION_SECRET") }
+        let child = try await startFixture()
+        let beforeModeCommands = try String(contentsOf: resources.appendingPathComponent("src/invocations"))
+        let initialMode = try await backend.readRoutingMode(child)
+        XCTAssertEqual(initialMode, .off)
+        let appliedMode = try await backend.setRoutingMode(.on, for: child)
+        XCTAssertEqual(appliedMode, .on)
+        let forgery = OwnedRouter(process: child.process, context: child.context, id: child.id)
+        do { _ = try await backend.readRoutingMode(forgery); XCTFail("Forged read accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        do { _ = try await backend.setRoutingMode(.off, for: forgery); XCTFail("Forged set accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        let invocations = try String(contentsOf: resources.appendingPathComponent("src/invocations"))
+        XCTAssertEqual(invocations, beforeModeCommands, "Mode commands launched a helper or credential/preflight process")
+        XCTAssertFalse(invocations.contains("activate")); XCTAssertFalse(invocations.contains("rollback"))
+        XCTAssertFalse(invocations.contains("preflight")); XCTAssertFalse(invocations.contains("auth"))
+        XCTAssertTrue(child.process.arguments?.contains(child.id.uuidString) == true)
+        XCTAssertTrue(child.process.arguments?.contains(config.resolvingSymlinksInPath().path) == true)
+        _ = try await backend.stop(child)
+    }
+    func testTimeoutRetainsChildAndDoesNotRetryMutation() async throws {
+        // Retrying or signalling after a mode deadline can duplicate a switch or stop active requests.
+        try setMode("modeTimeout")
+        let child = try await startFixture()
+        let start = Date()
+        do { _ = try await backend.setRoutingMode(.on, for: child); XCTFail("Timeout accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .routingModeUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5.75)
+        XCTAssertTrue(child.process.isRunning)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        do { _ = try await backend.setRoutingMode(.off, for: child); XCTFail("Unreconciled switch accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .routingModeUncertain) }
+        let mode = try await backend.readRoutingMode(child)
+        XCTAssertEqual(mode, .on)
+        let commands = try String(contentsOf: resources.appendingPathComponent("src/commands")).split(separator: "\n")
+        XCTAssertEqual(commands.filter { $0.contains("set_mode") }.count, 1)
+        _ = try await backend.stop(child)
+    }
+    func testControlLossDoesNotSignalOrResetChild() async throws {
+        // Closing stdout must preserve ownership and the running listener for direct recovery.
+        try setMode("controlLoss")
+        let child = try await startFixture()
+        do { _ = try await backend.setRoutingMode(.on, for: child); XCTFail("Lost ack accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .routingModeUncertain) }
+        XCTAssertTrue(child.process.isRunning)
+        XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/router-mode")), "on")
+        do { _ = try await backend.readRoutingMode(child); XCTFail("Lost channel reconciled") }
+        catch { XCTAssertEqual(error as? CompanionError, .routingModeUnavailable) }
+        let inspection = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertEqual(inspection.provider.proxyReady, true)
+        do { _ = try await backend.readRoutingMode(child); XCTFail("Health probe restored capability") }
+        catch { XCTAssertEqual(error as? CompanionError, .routingModeUnavailable) }
+        XCTAssertTrue(child.process.isRunning)
+        _ = try await backend.stop(child)
+    }
+    func testUnsupportedReadyNeverGrantsModeAuthority() async throws {
+        // A live listener and plausible readiness cannot replace the exact managed handshake.
+        for mode in ["unsupportedReady", "wrongContextReady", "noReady", "longOutput"] {
+            try setMode(mode)
+            let child = try await startFixture()
+            XCTAssertTrue(child.process.isRunning)
+            do { _ = try await backend.readRoutingMode(child); XCTFail("Unsupported Ready accepted: \(mode)") }
+            catch { XCTAssertEqual(error as? CompanionError, .routingModeUnavailable) }
+            _ = try await backend.stop(child)
+        }
+    }
+    func testChildExitClosesChannelAndReplacementCannotReuseIt() async throws {
+        // Mode authority must expire with the actual Process, even if a replacement binds the same port.
+        let child = try await startFixture()
+        let initial = try await backend.readRoutingMode(child)
+        XCTAssertEqual(initial, .off)
+        _ = try await backend.stop(child)
+        let replacement = try await startFixture()
+        XCTAssertNotEqual(replacement.id, child.id)
+        do { _ = try await backend.setRoutingMode(.on, for: child); XCTFail("Exited child authorized mode") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        let replacementMode = try await backend.readRoutingMode(replacement)
+        XCTAssertEqual(replacementMode, .off)
+        _ = try await backend.stop(replacement)
+    }
+    private func startFixture() async throws -> OwnedRouter {
+        let child = try await backend.start(configPath: config)
+        startedChildren.append(child)
+        return child
     }
     private func releaseFixture(_ name: String) throws { try Data().write(to: resources.appendingPathComponent("src/\(name)")) }
     private func waitForFixture(_ name: String) async throws {

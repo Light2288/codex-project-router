@@ -549,6 +549,8 @@ private final class QuitSyntheticProcess: Process, @unchecked Sendable {
         controls.append(action)
         throw CompanionError.commandFailed
     }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         stopCount += 1
         if let barrier = stopBarrier { stopBarrier = nil; return await barrier.wait() }

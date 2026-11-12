@@ -217,6 +217,8 @@ import CompanionCore
         return child
     }
     func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult { controlCount += 1; throw CompanionError.commandFailed }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome { stopCount += 1; throw CompanionError.unownedChild }
 }
 private final class DisplaySyntheticProcess: Process, @unchecked Sendable {
