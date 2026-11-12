@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: initial alert and revised idle-Quit implementation passed automated verification and isolated native idle exit/relaunch checks. Independent task reviews passed; final sequential review is pending. Prior denied-alert visibility qualifications remain below.
+Status: initial alert and revised idle-Quit implementation passed automated verification and isolated native idle exit/relaunch checks. Independent task reviews passed; final sequential review is pending. Human observation now confirms closed-window preservation for denied-Quit Keep Running and Escape; details and observation limits are recorded below.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -111,8 +111,9 @@ remaining temporary fixture was cleaned. A new signed isolated fixture was
 launched with the same protections and positive synthetic instance-lock proof.
 The user explicitly reported: **Alert closes; window stays minimized** after
 minimizing Controls, choosing menu-bar Quit and pressing Escape. This establishes
-the human-observed Escape/minimized result. Closed-window preservation has not
-been separately confirmed by an explicit user report and remains qualified.
+the human-observed Escape/minimized result. At that stage, closed-window
+preservation had not been separately confirmed by an explicit user report. The final observation below
+now supplies that evidence.
 The repeated fixture's router/provider/journal verification passed unchanged,
 its port was empty, and its exact tracked process exited during cleanup; its
 temporary directory was removed.
@@ -211,9 +212,46 @@ signal, repeated those checks, and removed only the tracked temporary fixture.
 No actual private operational configuration, credential or Keychain access,
 Codex restart or model request was used.
 
-Prior denied-alert observations remain separate and qualified; idle success
-does not establish desktop-loaded settings, alter owned-listener safeguards or
-resolve why an earlier confirmation reopened.
+Idle success does not establish desktop-loaded settings, alter owned-listener
+safeguards or resolve why an earlier confirmation reopened. The separate
+denied-alert closed-window observation follows.
+
+### Final native closed-window cancellation evidence
+
+Final specification review identified the missing AC-04 evidence: Keep Running
+and Escape after denied Quit must preserve closed Controls. A fresh copy of the
+same signed release app ran under the isolated synthetic HOME/CFFIXED_USER_HOME
+and Seatbelt procedure above. The exact tracked native process held the synthetic
+instance lock. Initial native CUA state showed open, readable Controls with Valid
+configuration, Direct settings, no owned router and Not confirmed. No listener,
+routing, confirmation or authentication action was invoked.
+
+After initialization, the fixture saved the original journal bytes and replaced
+only its synthetic journal with invalid literal bytes. This makes the fresh idle
+Quit permission fail without starting a listener or changing real settings.
+Router configuration and provider bytes remained unchanged, and the synthetic
+port was empty.
+
+The automation could not provide a reliable nonactivating observation: with
+Controls visibly open as a positive control, both CUA app/state inventories
+omitted the fixture and returned no window lists. Inventory absence therefore
+was not used as proof. The user instead performed and observed the final case:
+closed Controls, chose Quit from the companion menu icon, clicked Keep Running,
+then chose Quit again and pressed Escape. The user explicitly reported:
+**“Both left the window closed.”** No target-app accessibility read or other
+automated UI inspection occurred after the user closed Controls. This is
+attributed human evidence for both native cancellation paths, alongside the
+earlier human-observed minimized Escape result.
+
+After that report, the harness verified that the exact tracked process still
+held its synthetic lock, the deliberately invalid journal bytes had not changed,
+router/provider bytes were unchanged and the port remained empty. Cleanup
+restored the original pending journal bytes before signalling only the tracked
+synthetic process. It observed that process exit, repeated the original-byte and
+empty-port checks, and removed only the temporary fixture. No product source
+changed after the fresh build; no full suite was rerun for this evidence-only
+update. Raw fixture details and the full corrective-wave report remain in the
+ignored plan workspace. The independent final review dispositions remain pending.
 
 ## Operational-state safeguards
 
@@ -227,7 +265,7 @@ neither show a modal dialog nor exit the test process.
 
 ## Review dispositions and final gate — pending
 
-Independent task reviews approved Tasks 1–5 code and automated evidence with no findings. Parent-owned native idle verification is recorded above; the prior denied-alert qualifications remain. The sole final specification/quality gate remains pending.
+Independent task reviews approved Tasks 1–5 code and automated evidence with no findings. Parent-owned native idle verification and the final attributed human closed-window cancellation evidence are recorded above. The sole final specification/quality gate remains pending.
 
 Specification review must pass before quality review of the whole increment from
 `c2887a5` through the final implementation and evidence. Both dispositions and any
