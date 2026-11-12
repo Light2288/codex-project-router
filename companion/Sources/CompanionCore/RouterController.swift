@@ -4,6 +4,7 @@ import Observation
 @MainActor @Observable public final class RouterController {
     public enum DesktopConfirmation: Equatable { case unknown, routedPending, directPending, confirmedRouted, confirmedDirect }
     public enum QuitBlockReason: Equatable { case operationInProgress, directConfirmationPending, directRecoveryRequired, contextUnavailable }
+    public enum ProjectRoutingStatus: Equatable { case known(ProjectRoutingMode), uncertain, unavailable, notRunning }
     // Comparison metadata is stripped from this presentation snapshot.
     public private(set) var inspection: Inspection?
     public private(set) var selectedConfiguration: URL?
@@ -15,6 +16,8 @@ import Observation
     public private(set) var lastStopOutcome: StopOutcome?
     public private(set) var quitRequested = false
     public private(set) var mutationRequiresReconciliation = false
+    public private(set) var projectRoutingStatus: ProjectRoutingStatus = .notRunning
+    public private(set) var routingModeError: String?
 
     @ObservationIgnored private let backend: any CompanionBackend
     @ObservationIgnored private let store: PrivateStore
@@ -55,6 +58,11 @@ import Observation
             !provider.recoveryRequired && !["prepared", "unavailable"].contains(provider.recordPhase)
     }
     public var canRestoreDirect: Bool { usable && !busy && !mutationRequiresReconciliation && matchingContext != nil }
+    public var canSetProjectRouting: Bool {
+        guard usable, !busy, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
+              case .known = projectRoutingStatus else { return false }
+        return routingModeChild != nil
+    }
     public var canConfirmRoutedResponse: Bool {
         guard usable, !busy, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
               let context = matchingContext, let child = ownedRouter, child.process.isRunning,
@@ -139,6 +147,7 @@ import Observation
             var next = journal; next.selectedConfigurationPath = canonical.path
             try persist(next)
             selectedConfiguration = canonical; inspection = nil; revision = nil
+            projectRoutingStatus = .notRunning; routingModeError = nil
             dependencyContext = nil; hasDepended = false; desktopConfirmation = .unknown
             await inspectNow()
         } catch { self.error = safe(error) }
@@ -175,9 +184,10 @@ import Observation
             }
             // A handle from a readiness timeout is still owned, but never implies readiness.
             ownedRouter = child
+            discardRoutingMode()
             directOnlyChild = directSession && child.context == context ? child.id : nil
             if !child.process.isRunning { childExited(child.id) }
-            await inspectNow()
+            await inspectNow(queryRoutingMode: true)
         } catch { self.error = safe(error) }
     }
 
@@ -228,6 +238,26 @@ import Observation
 
     public func confirmRoutedResponse() async { await confirm(direct: false) }
     public func confirmDirectResponse() async { await confirm(direct: true) }
+    public func setProjectRouting(_ mode: ProjectRoutingMode) async {
+        // Uncertainty requires a separate fresh query, never an automatic mutation retry.
+        guard canSetProjectRouting, begin() else { return }
+        defer { finish() }
+        await acquireInspectionSlot()
+        defer { releaseInspectionSlot() }
+        guard await inspectInSlot(queryRoutingMode: false),
+              !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
+              case .known = projectRoutingStatus, let child = routingModeChild else { return }
+        let requestGeneration = generation, requestSequence = inspectionSequence
+        do {
+            let applied = try await backend.setRoutingMode(mode, for: child)
+            guard modeEvidenceIsCurrent(child, generation: requestGeneration, sequence: requestSequence) else { return }
+            guard applied == mode else { throw CompanionError.routingModeUnavailable }
+            projectRoutingStatus = .known(applied); routingModeError = nil
+        } catch {
+            guard modeEvidenceIsCurrent(child, generation: requestGeneration, sequence: requestSequence) else { return }
+            routingModeFailed(error)
+        }
+    }
 
     public func stop() async {
         guard begin() else { return }
@@ -278,6 +308,38 @@ import Observation
         if let child = ownedRouter, context != child.context { return nil }
         return context
     }
+    private var routingModeChild: OwnedRouter? {
+        guard let child = ownedRouter, child.process.isRunning, matchingContext == child.context,
+              inspection?.provider.proxyReady == true, revision != nil else { return nil }
+        return child
+    }
+    private func modeEvidenceIsCurrent(_ child: OwnedRouter, generation: UInt64, sequence: UInt64) -> Bool {
+        self.generation == generation && inspectionSequence == sequence && routingModeChild === child
+    }
+    private func discardRoutingMode() {
+        if ownedRouter == nil && !needsManualListenerCleanup {
+            projectRoutingStatus = .notRunning; routingModeError = nil
+        } else {
+            projectRoutingStatus = .unavailable; routingModeError = CompanionError.routingModeUnavailable.rawValue
+        }
+    }
+    private func routingModeFailed(_ failure: Error) {
+        let uncertain = (failure as? CompanionError) == .routingModeUncertain
+        projectRoutingStatus = uncertain ? .uncertain : .unavailable
+        routingModeError = uncertain ? CompanionError.routingModeUncertain.rawValue : CompanionError.routingModeUnavailable.rawValue
+    }
+    private func reconcileRoutingMode(generation: UInt64, sequence: UInt64, query: Bool) async {
+        guard let child = routingModeChild else { discardRoutingMode(); return }
+        guard query, !backend.mutationRequiresReconciliation else { return }
+        do {
+            let mode = try await backend.readRoutingMode(child)
+            guard modeEvidenceIsCurrent(child, generation: generation, sequence: sequence) else { return }
+            projectRoutingStatus = .known(mode); routingModeError = nil
+        } catch {
+            guard modeEvidenceIsCurrent(child, generation: generation, sequence: sequence) else { return }
+            routingModeFailed(error)
+        }
+    }
     private func cleanDirect(_ context: ActivationContext) -> Bool {
         matchingContext == context && inspection?.provider.state == "direct" && inspection?.provider.recoveryRequired == false &&
             ["none", "restored"].contains(inspection?.provider.recordPhase ?? "unavailable") && revision != nil
@@ -315,11 +377,14 @@ import Observation
         if inspectionWaiters.isEmpty { inspectionInFlight = false }
         else { inspectionWaiters.removeFirst().resume() }
     }
-    @discardableResult private func inspectNow() async -> Bool {
+    @discardableResult private func inspectNow(queryRoutingMode: Bool = false) async -> Bool {
         // Actions must inspect after prior work ends; a pre-action snapshot cannot authorize them.
         // Awaited guidance refreshes share the action/poll queue instead of returning through refresh coalescing.
         await acquireInspectionSlot()
         defer { releaseInspectionSlot() }
+        return await inspectInSlot(queryRoutingMode: queryRoutingMode)
+    }
+    private func inspectInSlot(queryRoutingMode: Bool) async -> Bool {
         // Only a started inspection can produce newer evidence. A queued timer cannot supersede an action.
         inspectionSequence &+= 1
         let requestSequence = inspectionSequence
@@ -329,6 +394,9 @@ import Observation
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
             reconcile(value)
+            // Mode reads share the disk slot, but recovery actions retain their own evidence authority.
+            await reconcileRoutingMode(generation: requestGeneration, sequence: requestSequence, query: !busy || queryRoutingMode)
+            guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
             return true
         } catch {
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
@@ -345,6 +413,7 @@ import Observation
                 catalog: .init(state: "unavailable", entries: []))
         }
         invalidateConfirmation()
+        discardRoutingMode()
         error = safe(failure)
     }
     private func reconcile(_ value: Inspection) {
@@ -384,6 +453,7 @@ import Observation
         guard let child = ownedRouter, child.id == id else { return }
         idleQuitAuthorized = false
         generation &+= 1; ownedRouter = nil; directOnlyChild = nil
+        projectRoutingStatus = .notRunning; routingModeError = nil
         if stoppingID == id { return }
         inspection?.provider.proxyReady = nil
         invalidateConfirmation()
@@ -434,6 +504,8 @@ import Observation
                 // The requested teardown consumed this readiness observation. The port result
                 // remains independent; neither occupied nor unknown means matching readiness.
                 inspection?.provider.proxyReady = nil
+                projectRoutingStatus = outcome.portState == .occupied ? .unavailable : .notRunning
+                routingModeError = outcome.portState == .occupied ? CompanionError.routingModeUnavailable.rawValue : nil
             }
             if !outcome.childExited || ownedRouter != nil { error = "The owned router has not been confirmed stopped." }
             else if outcome.portState == .occupied { error = "The owned router exited, but another listener remains. Manual cleanup is required." }
