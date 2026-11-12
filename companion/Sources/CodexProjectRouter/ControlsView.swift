@@ -42,6 +42,22 @@ import CompanionCore
         case .confirmedDirect: return "User confirmed direct response"
         }
     }
+    var recoveryGuidance: String? {
+        guard controller.recoveryContext != nil, controller.desktopConfirmation != .confirmedDirect else { return nil }
+        if controller.canConfirmDirectResponse {
+            return controller.ownedRouter == nil
+                ? "The direct response check is still pending. You can close this idle app after Quit verifies the saved recovery information."
+                : "Direct settings are saved. Confirm a working direct response before Stop or Quit."
+        }
+        return "Recovery context retained. Restore direct, manually restart Codex, and confirm a working direct response before Quit."
+    }
+    var quitGuidance: String {
+        if controller.recoveryContext != nil, controller.desktopConfirmation != .confirmedDirect,
+           controller.ownedRouter == nil, controller.canConfirmDirectResponse {
+            return "Closing this idle app does not confirm that Codex has reloaded its settings."
+        }
+        return "After possible routed use, restore direct and confirm a direct response before Stop or Quit. Closing this window keeps the app and owned router running."
+    }
     var catalog: String {
         controller.inspection?.catalog.state == "ready" ? "Current local project catalog" : "Catalog unavailable. Refresh to retry."
     }
@@ -105,11 +121,11 @@ import CompanionCore
                             Text("After provider changes, restart Codex yourself and send a model request. Only confirm after a working response. Readiness does not prove desktop-loaded settings, gateway acceptance, billing, or complete streaming.").fixedSize(horizontal: false, vertical: true)
                             Button("I restarted Codex and received a routed response") { Task { await controller.confirmRoutedResponse() } }.disabled(!controller.canConfirmRoutedResponse)
                             Button("I restarted Codex and received a direct response") { Task { await controller.confirmDirectResponse() } }.disabled(!controller.canConfirmDirectResponse)
-                            Text("After possible routed use, restore direct and confirm a direct response before Stop or Quit. Closing this window keeps the app and owned router running.").font(.caption).foregroundStyle(.secondary)
+                            Text(display.quitGuidance).font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if controller.recoveryContext != nil && controller.desktopConfirmation != .confirmedDirect {
-                        Text("Recovery context retained. Restore direct, manually restart Codex, and confirm a working direct response before Quit.").foregroundStyle(.orange)
+                    if let guidance = display.recoveryGuidance {
+                        Text(guidance).foregroundStyle(.orange)
                     }
                     if controller.needsManualListenerCleanup {
                         Text("An external listener requires manual inspection and cleanup. This app cannot adopt or stop it. See the companion recovery instructions.").foregroundStyle(.orange)

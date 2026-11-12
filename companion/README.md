@@ -169,8 +169,9 @@ confirmation, stop and Quit cannot bypass it with apparently-direct disk evidenc
 Only its post-exit fresh reconciliation permits later controls. The controller
 never retries or terminates an uncertain helper.
 
-After activation/imported dependency, stop requires current direct settings and an
-explicit manual restart/working-direct-response confirmation. The exception is a
+After activation/imported dependency, stopping an owned listener requires current
+direct settings and an explicit manual restart/working-direct-response
+confirmation. The exception is a
 child started during a proven direct session with no later possible dependency.
 Stop signals only the exact retained handle and awaits both exit and the backend's
 independent port result. Failed exit retains ownership and blocks Quit. Verified
@@ -256,24 +257,38 @@ can be affected, and unmapped/unresolved model requests can block. Restart Codex
 and send a request yourself, then use the separately labeled routed or direct
 response confirmation button. Health does not establish desktop-loaded settings,
 gateway/key acceptance, billing attribution or stream completeness. After possible
-routed use, keep the app/listener running until direct restoration and a working
-direct response have been confirmed. Closing the window leaves them running.
-Quit (including keyboard/application termination) always requests guarded cleanup;
-it remains blocked by unresolved recovery or an owned child that cannot safely
-stop. A denied Quit presents the native **Cannot quit yet** alert with fixed
+routed use, keep an owned listener running until direct restoration and a working
+direct response have been confirmed. Closing the window leaves the app and any
+owned listener running. Quit (including keyboard/application termination) always
+requests a fresh guarded check. An idle app with no owned listener may exit
+without a Codex restart or model prompt when that check verifies matching Direct
+settings, clean recovery evidence and a valid, matching durable pending journal.
+This exit preserves the pending journal and does not confirm that Codex has
+reloaded its settings or produced a working direct response. On relaunch the
+retained check remains pending/unknown, and no router starts automatically.
+Uncertain operations, unavailable or changed context, and missing, unsafe,
+unreadable or inconsistent saved recovery information deny this added permission.
+Owned-listener shutdown retains the existing restart/working-response safeguards.
+Controls distinguish the pending check from conditional idle exit permission;
+only Quit verifies the saved evidence for that exit.
+
+A denied Quit presents the native **Cannot quit yet** alert with fixed
 guidance for the current blocker. Pending direct confirmation reads:
 “Direct-response confirmation is pending. Open Controls to complete the check.”
 **Open Controls** (Return) reveals the existing controls window, including when
 closed or minimized. **Keep Running** (Escape/cancel) dismisses the alert without
 changing window visibility. Complete any required direct restoration and manual
-Codex restart/working-response confirmation in Controls before requesting Quit
-again. Neither alert action confirms recovery or performs a routing operation;
-opening Controls retains its ordinary refresh behavior. Repeated Quit requests
+Codex restart/working-response confirmation in Controls when required by the
+guarded state before requesting Quit again. Neither alert action confirms recovery
+or performs a routing operation; opening Controls retains its ordinary refresh
+behavior. Repeated Quit requests
 during cleanup or the alert do not queue another attempt or dialog. Dismissal
 never retries Quit, even if the state became safe while the alert was visible.
 Successful guarded Quit, including the existing safe initialization-failure and
 second-instance exceptions, exits without showing this alert. These messages do
 not diagnose or fix why a prior confirmation might reopen.
+The accepted **Show steps to quit** preference and broader alert wording/button
+or step-navigation changes remain deferred to a later approved increment.
 
 An occupied or unknown port after owned-child exit remains distinct from
 matching readiness. External listeners are never adopted or signalled.

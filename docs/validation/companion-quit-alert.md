@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: implementation and automated verification passed; native visibility observations partially complete; Escape/minimized check confirmed by the user; usability revision proposed and final sequential review pending.
+Status: initial alert and revised idle-Quit implementation passed automated verification. Prior native visibility observations remain qualified below; revised native idle exit/relaunch and final sequential review are pending parent-owned work.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -20,9 +20,10 @@ guard covers the entire attempt, modal response and action. Successful authorize
 Quit, including initialization-failure and second-instance safe exceptions,
 terminates without a blocked-Quit alert.
 
-No changes were made to backend/wire behavior, `canQuit`, controller Quit/stop
-permissions, recovery/confirmation rules, journal schema, Controls refresh, or
-prior validation reports. This increment does not diagnose confirmation reopening.
+In the initial Task 1/2 alert implementation, no changes were made to backend/wire
+behavior, `canQuit`, controller Quit/stop permissions, recovery/confirmation rules,
+journal schema, Controls refresh, or prior validation reports. This increment
+does not diagnose confirmation reopening.
 
 ## Automated evidence
 
@@ -120,11 +121,71 @@ The user also reported three usability problems: the alert does not clearly
 explain how to become able to quit; Open Controls does not explain the next
 action; and that label is confusing when Controls is already open. These are
 feedback on the approved copy/flow, not a claimed failure of Escape or the
-safety rules. A targeted revision is being proposed through the existing
-scope/specification/plan gates. No revised wording/navigation has been
-implemented or approved, and the final integrated review has not been opened.
+safety rules. A targeted revision was then proposed through the existing
+scope/specification/plan gates. At that observation stage, revised
+wording/navigation had not been implemented or approved, and the final integrated
+review had not been opened.
 Raw fixture paths/checkpoints stay outside Git. No whole-increment completion
 is claimed.
+
+## Approved idle-Quit revision — automated evidence
+
+Revision 2 of the specification and its separately approved revised plan authorize
+Tasks 3–5. The behavioral correction allows a fresh Quit check to authorize exit
+for an idle app with verified matching Direct settings and valid durable pending
+recovery information. Successful idle exit preserves that pending journal; it
+does not record desktop confirmation. Owned-listener shutdown and all remaining
+guarded alerts retain their existing safeguards and exact native copy/actions.
+The accepted **Show steps to quit** preference and general alert/button/navigation
+refinement remain deferred.
+
+Task 5 adds conditional Controls guidance using existing controller evidence.
+Clean Direct with retained pending recovery and no owned child explains that
+Quit must verify saved recovery information before idle exit. It separately
+states that closing the idle app does not confirm Codex has reloaded settings.
+An owned child retains the working-direct-response requirement before Stop or
+Quit; uncertain/other retained recovery keeps the existing recovery guidance.
+Absent or confirmed recovery omits the orange warning. Presentation neither
+reads the private store nor grants exit authority.
+
+The focused presentation command first exited 1 for the missing
+`ControlsPresentation.recoveryGuidance` API before production edits, then exited
+0 with 8 tests passing after implementation. The four existing setup, catalog,
+window-close and polling tests are unchanged. New tests cover idle and owned
+pending guidance, live backend uncertainty, and absent/confirmed recovery. Idle
+presentation leaves journal bytes and modification time, recovery context,
+unknown confirmation, Quit state and backend operation/inspection counts unchanged.
+The owned fixture uses a synthetic process handle without launching a listener.
+
+Task 5 ran the following fresh acceptance commands sequentially from the repository
+root, once after the presentation change. Complete output and exits were inspected;
+full logs remain in the ignored plan workspace under `task-5-*.log`.
+
+| Command | Exit | Observed result |
+| --- | --- | --- |
+| `swift test --package-path companion --filter ControlsPresentationTests` before production edits | 1 | Expected RED: missing `ControlsPresentation.recoveryGuidance` API |
+| `swift test --package-path companion --filter ControlsPresentationTests` after implementation | 0 | 8 tests passed, 0 failures |
+| `npm run companion:test` | 0 | 102 native tests passed: 86 core and 16 app tests; 0 failures |
+| `npm test` | 0 | 664 tests passed, 0 failures, 0 skips |
+| `npm run companion:build` | 0 | Fresh release app built and ad-hoc signed |
+| `npm run companion:package-test` | 0 | 3 tests passed against the fresh app, 0 failures, 0 skips |
+| `node --check src/cli.js` | 0 | Syntax check passed |
+| `git diff --check` | 0 | No whitespace errors |
+
+Self-review then made the new fixture's cleanup failures explicit test failures;
+the affected presentation suite reran with exit 0, 8 tests and no failures
+(`task-5-presentation-cleanup.log`). Product source and the signed app were unchanged.
+
+Passing logs contained no warnings or failures. The package run re-established
+relocated signing/resources, synthetic inspection/lifecycle and source-denial
+confinement. It observed a native window and synthetic instance lock, byte-exact
+rollback, tracked child exits and a reusable synthetic port. This package coverage
+does not establish menu/Cmd-Q interaction or idle exit/relaunch.
+
+Native idle exit/relaunch and retained-state proof remain pending parent
+orchestration. The prior denied-alert observations above are preserved separately
+and are not inferred from idle success. Task review and the sole sequential final
+whole-increment review also remain pending parent orchestration.
 
 ## Operational-state safeguards
 
