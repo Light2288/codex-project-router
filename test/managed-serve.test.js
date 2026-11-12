@@ -334,6 +334,33 @@ function child(args, nodeArgs = []) {
   });
 }
 
+// Losing the companion's diagnostic pipe must not crash the owned listener or reset mode.
+test("broken stderr preserves managed mode and HTTP listener", async t => {
+  const f = await prepare(t);
+  const proc = child(["--config", await realpath(f.configPath), "--session", sessionId]);
+  t.after(() => proc.kill());
+  const exit = once(proc, "exit");
+  const replies = lines(proc.stdout);
+  assert.equal((await replies.next()).mode, "off");
+  proc.stdin.write(frame("set_mode", requestIds[0], "on"));
+  assert.equal((await replies.next()).mode, "on");
+  const diagnosticClose = once(proc.stderr, "close");
+  proc.stderr.destroy();
+  await diagnosticClose;
+  for (let index = 0; index < 2; index++) {
+    const response = await fetch(`http://127.0.0.1:${f.config.listenPort}/healthz`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).service, "codex-project-router");
+    proc.stdin.write(frame("get_mode", requestIds[index + 1]));
+    assert.deepEqual(await replies.next(), {
+      schemaVersion: 1, type: "mode", sessionId, requestId: requestIds[index + 1], mode: "on",
+    });
+  }
+  assert.equal(proc.exitCode, null);
+  proc.kill("SIGTERM");
+  assert.deepEqual(await exit, [0, null]);
+});
+
 // Loading the real entry and changing modes must never invoke credentials, auth helpers, or upstreams.
 test("managed startup performs no credential or upstream lookup", async t => {
   const f = await prepare(t);

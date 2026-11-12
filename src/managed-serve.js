@@ -123,6 +123,23 @@ export async function startManagedRouter({
   if (input.readableLength > 0 || input.readableEnded || input.destroyed)
     closeControl();
 
+  let diagnosticsAvailable = !diagnostics.destroyed && !diagnostics.writableEnded;
+  const disableDiagnostics = () => { diagnosticsAvailable = false; };
+  diagnostics.on("error", disableDiagnostics);
+  diagnostics.on("close", disableDiagnostics);
+  const managedDiagnostics = {
+    write(record) {
+      if (!diagnosticsAvailable) return false;
+      try {
+        return diagnostics.write(record);
+      } catch {
+        // Diagnostic delivery is optional; a lost sink must not stop forwarding.
+        disableDiagnostics();
+        return false;
+      }
+    },
+  };
+
   let server;
   try {
     if (
@@ -134,7 +151,7 @@ export async function startManagedRouter({
     catch { throw new RouterError("CONFIG_UNAVAILABLE"); }
     if (actualPath !== configPath) throw new RouterError("CONFIG_INVALID");
     const config = await loadRouterConfig(actualPath);
-    server = createProxy(config, { diagnostics, getProjectRoutingMode: () => mode });
+    server = createProxy(config, { diagnostics: managedDiagnostics, getProjectRoutingMode: () => mode });
     await new Promise((resolveListen, reject) => {
       const onError = () => reject(new RouterError("PROXY_NOT_READY"));
       server.once("error", onError);
