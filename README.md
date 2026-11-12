@@ -1,6 +1,6 @@
 # Codex Project Router
 
-Experimental local proxy for automatic project identification in Codex desktop. With optional credential routing enabled, mapped Responses and compaction requests use the project's explicitly configured HTTPS destination and Keychain credential. Without it, admitted requests retain the caller's existing credential.
+Experimental local proxy for automatic project identification in Codex desktop. With optional credential routing enabled, Responses and compaction requests can use a project's explicitly configured HTTPS destination and Keychain credential. The native companion starts project routing Off; On applies saved overrides, while identified projects without an override inherit the existing global provider account. Without credential routing, admitted requests retain the caller's existing credential.
 
 The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](docs/validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. They remain blocked by default. The optional narrow title policy below allows qualifying initial-title requests without project attribution; see its [validation report](docs/validation/unassigned-title-request-policy.md) for current evidence.
 
@@ -14,7 +14,7 @@ The router relies on observed internal request headers and local desktop state. 
 npm ci
 ```
 
-There is no build step, global installation, background service, or automatic configuration editing.
+The standalone Node CLI needs no build step or global installation. The optional native app has the local build step below. Neither starts a background service automatically.
 
 ## Private configuration
 
@@ -30,7 +30,7 @@ Keep actual endpoints, project mappings, Keychain references, configuration back
 
 Omit `credentialRouting` to retain legacy behavior and its readiness fingerprint with zero Keychain calls. Its presence enables routing under the existing `schemaVersion: 1`; `false`, `null`, incomplete objects and unknown fields are invalid. Use the separate [synthetic enabled example](examples/router.credentials.example.json); the [legacy example](examples/router.example.json) remains available.
 
-The enabled object contains exactly `globalCredential` and `routeTargets`. `globalCredential` is a Keychain reference. `routeTargets` maps each alias to an object containing exactly `upstreamBaseUrl` and `credential`. Each `credential` reference contains exactly `keychainPath`, `service` and `account`: nonempty strings of at most 1,024 characters without control characters. Use an absolute keychain path; `~` and environment expressions are not expanded. `projectRoutes` maps each project ID to an alias. Include complete targets for A, B and the controller before validation. Several projects or aliases may deliberately share a destination, item or whole target. Unused valid entries and an empty target map are allowed; an absent alias blocks its model requests. A supplied incomplete target invalidates configuration.
+The enabled object contains exactly `globalCredential` and `routeTargets`. `globalCredential` is a Keychain reference. `routeTargets` maps each alias to an object containing exactly `upstreamBaseUrl` and `credential`. Each `credential` reference contains exactly `keychainPath`, `service` and `account`: nonempty strings of at most 1,024 characters without control characters. Use an absolute keychain path; `~` and environment expressions are not expanded. `projectRoutes` maps each project ID to an alias. Include complete targets for A, B and the controller before validation. Several projects or aliases may deliberately share a destination, item or whole target. Unused valid entries and an empty target map are allowed. In managed On mode, an identified project with no saved alias inherits the global pair; a saved alias without a complete target blocks when selected. Standalone `serve` keeps its existing mapped-project requirement. A supplied malformed or incomplete target invalidates configuration in every mode, including Off.
 
 Bind every credential to the gateway instance that issued and accepts it. Each destination must be an absolute HTTPS URL without user information, query or fragment. Preserve its full API prefix: a target ending `/region/v1` receives `/region/v1/responses` or `/region/v1/responses/compact`, with the original query. The top-level `upstreamBaseUrl` remains the global destination for catalog and qualifying unassigned-title requests. The controller is an ordinary mapped project: explicitly configure its target to use the global destination and global item if that is the intended pair. There is no controller bypass or automatic instance discovery.
 
@@ -44,15 +44,15 @@ To migrate the earlier unmerged `routeCredentials` format, restore direct operat
 4. Verify each selected item's service/account and its containing keychain locally. Copy only those references into private router configuration, using the full absolute keychain path, for example the synthetic `/Users/example/Library/Keychains/login.keychain-db`. Avoid ambiguous duplicate items. The router reads only the exact referenced generic password; it does not provision, edit, delete or explicitly unlock items. Keychain access policy may require user interaction; a denied or locked item can make lookup fail.
 5. Restart the foreground proxy after changing mappings, destinations or references, check `status`, then use the activation procedure below. Matching readiness confirms configuration/listener agreement; it does not preflight Keychain access, destination connectivity or gateway acceptance.
 
-For each admitted non-health request, the router retrieves the global item and verifies the incoming bearer token before metadata observation, identity resolution or project-key retrieval. The scheme is case-insensitive; the token is exact and case-sensitive. Mapped model requests then retrieve their target credential and forward to that target's destination with replaced `Authorization` and its matching `Host`. Deliberate controller reuse of the global item still performs separate verification and target reads. Catalog requests and qualifying unassigned titles use the global destination, retain the exact verified caller authorization and retrieve no project key. Mapped title-marked requests retain ordinary target priority. The title and observation options are independent and remain off unless explicitly enabled.
+When credential routing is configured, each admitted non-health request retrieves the global item and verifies the incoming bearer token before metadata observation, identity resolution or project-key retrieval. The scheme is case-insensitive; the token is exact and case-sensitive. When project overrides apply, mapped model requests then retrieve their target credential and forward to that target's destination with replaced `Authorization` and its matching `Host`. Deliberate controller reuse of the global item still performs separate verification and target reads. Catalog requests and qualifying unassigned titles use the global destination, retain the exact verified caller authorization and retrieve no project key. When overrides apply, mapped title-marked requests retain ordinary target priority. The title and observation options are independent and remain off unless explicitly enabled.
 
 | Failure | Result |
 |---|---|
 | Incoming token differs from the retrieved global token | `AUTH_INVALID` (401) |
-| Resolved alias has no complete target | `CREDENTIAL_UNMAPPED` (422) |
+| Selected saved override has no complete target | `CREDENTIAL_UNMAPPED` (422) |
 | Required item is absent, inaccessible, times out, or returns invalid output | `CREDENTIAL_UNAVAILABLE` (503) |
 
-Global-item failure blocks authenticated requests. Project-item failure affects requests needing that key; unrelated healthy projects can continue. Failures never select another credential or destination, fall back to the global pair, retry the model request, or follow redirects. An active request fixes its resolved project, alias, destination and credential before forwarding. Project reassignment affects subsequent lookups; configuration changes require a proxy restart. Cross-credential or cross-instance continuation failures from the gateway remain failures; the router does not rewrite models, payloads or continuation IDs to repair them. Use fresh validation chats when switching gateway instances.
+Global-item failure blocks authenticated requests. Project-item failure affects requests needing that key; unrelated healthy projects can continue. Failures never select another credential or destination, fall back to the global pair, retry the model request, or follow redirects. A managed request captures On/Off at HTTP receipt, before its first asynchronous lookup, then fixes its resolved project, destination and credential before forwarding. Switching mode affects later requests; active streams keep their original selection and are never retried or migrated. Project reassignment affects subsequent lookups; configuration changes require a proxy restart. Cross-credential or cross-instance continuation failures from the gateway remain failures; the router does not rewrite models, payloads or continuation IDs to repair them. Use fresh validation chats when switching gateway instances.
 
 Each Keychain lookup runs fixed `/usr/bin/security find-generic-password` without a shell, using explicit account, service and keychain path. It has a five-second timeout and separate 16 KiB stdout/stderr limits. The child is terminated and reaped on timeout, overflow or cancellation. A token must contain 1–8,192 visible ASCII bytes after removing at most one final LF; spaces, other whitespace, control characters and non-ASCII bytes are rejected. Failed process outcomes reject even plausible output. Subprocess output is never included in router diagnostics or errors.
 
@@ -182,9 +182,9 @@ Record each case as an observed pass, observed failure, or not run. Credential-r
 
 ## Native menu-bar companion (macOS)
 
-The local Apple silicon app keeps router start, provider activation, direct recovery
-and manual desktop-response confirmation in one controls window. It requires macOS
-14 or newer and an installed Node 24; configuration stays private in place. The app
+The local Apple silicon app puts project-routing On/Off and searchable project
+overrides first, with setup, provider activation and recovery in disclosures. It
+requires macOS 14 or newer and an installed Node 24; configuration stays private in place. The app
 never starts routing on launch or selection. Closing controls leaves the app and
 owned listener running; Quit uses guarded direct recovery.
 
@@ -195,11 +195,35 @@ npm run companion:package-test
 open "dist/Codex Project Router.app"
 ```
 
+Choose **Start router (routing Off)** explicitly. Initial integration changes the
+selected provider to the stable loopback URL once: activate, restart Codex yourself,
+receive a working response and confirm it independently in the app. Once integrated,
+use **Turn project routing On** / **Turn project routing Off** for everyday changes
+without restarting Codex or rewriting its provider URL. Off keeps saved overrides and sends admitted requests
+through the running listener using the existing global provider account. Here the
+global pair is top-level `upstreamBaseUrl` plus the existing incoming authorization;
+with `credentialRouting`, that authorization must match a fresh global-item read.
+Off makes no project-item lookup, even for an unavailable saved override. Legacy
+configurations retain the caller credential; aliases cannot select separate accounts.
+Identity and admission failures still block; inheritance does not resolve ambiguity.
+
 The app can move independently of this checkout and uses only its bundled router
-resources plus an installed absolute Node path. See [companion setup, lifecycle,
-packaging and recovery](companion/README.md) for runtime selection, provider-wide
-activation effects, separate readiness/ownership/confirmation facts, external
-listener cleanup, manual GUI checks and deferred work.
+resources plus an installed absolute Node path. A failed or uncertain mode change
+shows Uncertain or Unavailable until a fresh read can reconcile it; controls do
+not retry a mutation.
+Matching readiness, process ownership, routing mode and desktop-response
+confirmation are separate facts. Mode changes do not satisfy restart/response
+obligations from provider changes. **Restore direct** is a separate recovery flow:
+restore the bound provider settings, restart Codex, verify and confirm a direct
+response, then stop the owned listener when permitted. Off still needs the listener.
+An external listener is never adopted or stopped. No last-used On state, automatic
+startup, fallback, automatic restart or account/assignment editing is provided.
+
+See [companion setup, lifecycle, packaging and recovery](companion/README.md) for
+custom activation contexts and recovery details. The [managed-routing validation
+record](docs/validation/companion-routing-on-off.md) distinguishes fresh automated
+evidence from pending native/live acceptance and final review. Historical validation
+reports retain their original scope and limitations.
 
 ## Development checks
 
@@ -211,4 +235,4 @@ git diff --check
 
 Tests use temporary synthetic desktop state and local HTTPS upstreams with distinct global/project origins and API prefixes. The committed TLS key/certificate are public, test-only fixtures for localhost. Production uses normal upstream certificate verification. Tests never contact ICA or retrieve real credentials.
 
-Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md), the title policy's [specification](docs/superpowers/specs/2026-11-10-unassigned-title-request-policy.md) and [implementation plan](docs/superpowers/plans/2026-11-10-unassigned-title-request-policy.md), and credential routing's [specification](docs/superpowers/specs/2026-11-11-project-credential-routing.md) and [implementation plan](docs/superpowers/plans/2026-11-11-project-credential-routing.md).
+Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md), the title policy's [specification](docs/superpowers/specs/2026-11-10-unassigned-title-request-policy.md) and [implementation plan](docs/superpowers/plans/2026-11-10-unassigned-title-request-policy.md), credential routing's [specification](docs/superpowers/specs/2026-11-11-project-credential-routing.md) and [implementation plan](docs/superpowers/plans/2026-11-11-project-credential-routing.md), and managed routing's [specification](docs/superpowers/specs/2026-11-12-companion-routing-on-off.md) and [implementation plan](docs/superpowers/plans/2026-11-12-companion-routing-on-off.md).
