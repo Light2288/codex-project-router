@@ -111,4 +111,4 @@ Synthetic tests must prove permission, no confirmation/provider/journal mutation
 
 **Execution endpoint:** Deliver and verify the defined idle direct Quit behavior with durable pending-state retention, existing listener/alert safeguards, necessary conditional guidance and documentation, fresh checks/native evidence and the whole-increment sequential final review; report results and limitations, then stop before general alert refinement or integration.
 
-**Current stage:** Stage 4 — revision 2 specification and separately presented revised implementation plan explicitly approved on 2026-11-12. Implement Tasks 3–5 using the preserved Subagent-driven method.
+**Current stage:** Stage 4 complete — revision 2 was implemented after separate specification and revised-plan approvals on 2026-11-12. Fresh verification, isolated native checks and final sequential specification/quality review passed. See `docs/validation/companion-quit-alert.md`. Stop before general alert refinement or integration; keep the existing branch and checkout.

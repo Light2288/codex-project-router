@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: initial alert and revised idle-Quit implementation passed automated verification and isolated native idle exit/relaunch checks. Independent task reviews passed; final sequential review is pending. Human observation now confirms closed-window preservation for denied-Quit Keep Running and Escape; details and observation limits are recorded below.
+Status: completed. Automated checks, isolated native idle exit/relaunch, attributed human closed-window cancellation and final sequential specification/quality reviews passed. Original evidence and its historical qualifications are preserved below.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -25,11 +25,12 @@ behavior, `canQuit`, controller Quit/stop permissions, recovery/confirmation rul
 journal schema, Controls refresh, or prior validation reports. This increment
 does not diagnose confirmation reopening.
 
-## Automated evidence
+## Original alert automated evidence
 
-Task 2 commands ran from the repository root. Every command's full output and
-exit status are retained in the ignored plan workspace
-`.superpowers/sdd/2026-11-11-companion-quit-alert/task-2-*.log`.
+Task 2 commands ran from the repository root. Full outputs and exit statuses were
+inspected and held in the ignored task workspace during execution. Sanitized
+results and final dispositions are preserved here; temporary workflow files are
+removed after the clean final gate.
 
 | Command | Exit | Observed result |
 | --- | --- | --- |
@@ -47,8 +48,7 @@ Fresh package checks verified relocated metadata/resources/signature, synthetic
 inspection/lifecycle, source-denial confinement, a visible native window and its
 synthetic instance lock. The package test also observed byte-exact rollback,
 tracked-child exits and a reusable synthetic port. It explicitly does not infer
-GUI control actions; the blocked-Quit interaction observations below remain
-pending. No warnings or failures appeared in the passing verification logs.
+GUI control actions; those observations are recorded separately below. No warnings or failures appeared in the passing verification logs.
 
 The seven new tests exercise the real controller with temporary private journals
 and a synthetic backend, constructing `NSAlert` without presenting modal UI:
@@ -68,8 +68,8 @@ and a synthetic backend, constructing `NSAlert` without presenting modal UI:
   callback returns `terminateNow` only after the existing fresh authorization.
 
 Task 1's five projection regressions and the existing lifecycle/authorization
-suite are covered by the full native run. Its independent task review is recorded
-in the local plan workspace; final whole-increment review is still required.
+suite are covered by the full native run. Its independent task review passed;
+final whole-increment dispositions are recorded below.
 
 ## Isolated native observation — partial
 
@@ -126,8 +126,8 @@ safety rules. A targeted revision was then proposed through the existing
 scope/specification/plan gates. At that observation stage, revised
 wording/navigation had not been implemented or approved, and the final integrated
 review had not been opened.
-Raw fixture paths/checkpoints stay outside Git. No whole-increment completion
-is claimed.
+Raw fixture paths/checkpoints stayed outside Git. At that stage no whole-increment
+completion was claimed; the final outcome is recorded below.
 
 ## Approved idle-Quit revision — automated evidence
 
@@ -160,7 +160,8 @@ The owned fixture uses a synthetic process handle without launching a listener.
 
 Task 5 ran the following fresh acceptance commands sequentially from the repository
 root, once after the presentation change. Complete output and exits were inspected;
-full logs remain in the ignored plan workspace under `task-5-*.log`.
+raw logs were held in the ignored plan workspace during execution. Sanitized
+results are retained here after temporary-workspace cleanup.
 
 | Command | Exit | Observed result |
 | --- | --- | --- |
@@ -250,23 +251,49 @@ restored the original pending journal bytes before signalling only the tracked
 synthetic process. It observed that process exit, repeated the original-byte and
 empty-port checks, and removed only the temporary fixture. No product source
 changed after the fresh build; no full suite was rerun for this evidence-only
-update. Raw fixture details and the full corrective-wave report remain in the
-ignored plan workspace. The independent final review dispositions remain pending.
+update. Raw fixture details stayed in the ignored workspace during execution;
+independent final review dispositions follow.
 
 ## Operational-state safeguards
 
 Unit tests use temporary owner-only stores, sentinel context/error values and
 synthetic `Process` handles. Existing native/Node/package fixtures use their own
 controlled temporary state and processes. No real private router/provider
-configuration or Keychain was selected or changed by Task 2; no real routing
+configuration or Keychain was selected or changed by this increment; no real routing
 activation, provider credential lookup, Codex restart or model prompt was used.
 The app tests inject native presentation/window/termination boundaries, so they
 neither show a modal dialog nor exit the test process.
 
-## Review dispositions and final gate — pending
+## Review dispositions and final gate — passed
 
-Independent task reviews approved Tasks 1–5 code and automated evidence with no findings. Parent-owned native idle verification and the final attributed human closed-window cancellation evidence are recorded above. The sole final specification/quality gate remains pending.
+Independent task reviews approved Tasks 1–5 code and automated evidence with no
+findings. Parent-owned native idle verification and the final attributed human
+closed-window cancellation evidence are recorded above.
 
-Specification review must pass before quality review of the whole increment from
-`c2887a5` through the final implementation and evidence. Both dispositions and any
-follow-up checks remain pending. No whole-increment completion is claimed here.
+The sole integrated sequential gate reviewed the full increment from prerequisite
+`c2887a5` through `cc2efff`, including the original alert and revised idle Quit.
+Initial specification review reported one missing AC-04 native observation. The
+single evidence-only corrective wave obtained the user's closed-window result,
+verified fixture cleanup and changed only this validation report. Scoped
+specification follow-up passed, with the finding addressed and no new issues.
+Quality review then passed with no findings on the same frozen package; current,
+expected and echoed review identities and the package hash matched.
+
+The delivered source is unchanged from the fresh signed build. Final closeout
+changes only artifact lifecycle/checklist metadata and this sanitized report.
+The existing branch and checkout are preserved; no push or merge is performed.
+General alert wording/navigation remains deferred. Real provider operation and
+Codex-loaded settings were not revalidated by these isolated tests.
+
+## Recorded workflow rulings
+
+1. The coordinator owned manual native verification, evidence consolidation and
+   final review after worker implementation. Missing manual coverage would have
+   blocked completion; the final observations above now resolve it.
+2. Fixed native-copy tests and real controller/delegate boundary assertions were
+   treated as product behavior checks. Wrong fixtures could miss integration
+   defects; isolated native observations supplemented those assertions.
+3. Prior clean task reviews and the user's minimized-Escape observation were
+   retained without replaying completed tasks. Earlier closed-window limits
+   stayed explicit to avoid overstating evidence; the final human check now
+   supplies the previously missing observation.
