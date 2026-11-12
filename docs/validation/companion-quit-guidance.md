@@ -2,9 +2,11 @@
 
 Date: 2026-11-12
 
-Status: native and automated acceptance completed. Tasks 1 and 2 have independent
-task approval. Task 3 review and the final sequential specification/quality gate
-remain pending; this record does not yet claim completion of the increment.
+Status: automated and native acceptance evidence is recorded, including the
+independent human closed/minimized primary-reveal follow-up below. Tasks 1 and 2
+have independent task approval. Task 3 re-review and the final sequential
+specification/quality gate remain pending; this record does not yet claim
+completion of the increment.
 
 Scope: the approved `companion-quit-guidance` increment, based on
 `f1e00832a000510043a02e6abce442a4d8ee473d`. The approved specification and separate
@@ -139,6 +141,27 @@ visibility between those calls. Red close followed by ordinary Cmd-O reopen
 removed guidance and outline, without replaying navigation. Existing disclosure
 expansion remained ordinary view state.
 
+Task 3 review identified that those initial automated sequences did not establish
+genuinely closed/minimized starting states. The parent obtained independent human
+observation in a second owner-only confined fixture of the unchanged signed build.
+Fresh signed relocation, negative checkout-read and positive synthetic native
+instance-lock controls passed. After initialization, only that fixture's synthetic
+journal was made invalid. No target-app inspection occurred during the handoff.
+The user minimized Controls and chose menu-bar Quit → **Show steps to quit**, then
+closed Controls with the red button and repeated the same path. Asked whether
+both brought the window forward with expanded, highlighted recovery guidance, the
+user reported **“Both revealed the highlighted recovery step.”** This establishes
+primary reveal/deminimize/navigation from the actual minimized and closed starting
+states, resolving the missing visibility evidence. It does not strengthen the
+earlier automated sequences beyond their original qualification. No routing or
+response-confirmation button was used.
+
+After this follow-up, the harness verified unchanged original synthetic
+router/provider bytes and the deliberately invalid journal. It restored only the
+original synthetic journal, verified exact tracked native-process exit and an
+empty selected port, and removed only the follow-up fixture. Its process and
+cleanup checks passed; no product code, real private state or signed build changed.
+
 For cancellation visibility, no target-app inspection occurred during the human
 handoff. The user performed menu-bar Quit → Keep Running and repeat Quit → Escape
 with the window minimized and reported **“Both left it minimized.”** The user then
@@ -187,7 +210,9 @@ build, so automated acceptance was not repeated for this evidence-only update.
 Accessibility evidence covers exposed AX text/buttons, explicit guidance focus,
 Tab movement and Return invoking no default operation. A full VoiceOver audit is
 not claimed. Hidden/minimized cancellation relies on the attributed human result;
-primary reveal evidence retains the automation-activation qualification above.
+the initial automated primary-reveal sequences retain their activation
+qualification. The separate attributed human follow-up above resolves the
+closed/minimized primary starting-state evidence gap.
 No real operational configuration, Keychain, gateway/model call or Codex restart
 was used. These tests establish neither desktop-loaded settings nor live billing
 or complete stream delivery. Predecessor history and its qualifications remain
@@ -195,8 +220,9 @@ unchanged.
 
 ## Review and completion
 
-Native evidence and privacy/process cleanup are complete. Independent Task 3
-review and the sole integrated final specification review followed by quality
-review remain pending for the follow-up range starting at
+Native evidence and privacy/process cleanup are complete, including the independent
+closed/minimized primary-reveal follow-up. Task 3 scoped re-review and the sole
+integrated final specification review followed by quality review remain pending
+for the follow-up range starting at
 `f1e00832a000510043a02e6abce442a4d8ee473d`. No final review disposition is claimed;
 lifecycle/checklists stay open until those reviews have actual dispositions.
