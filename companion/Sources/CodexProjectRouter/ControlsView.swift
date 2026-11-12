@@ -73,9 +73,17 @@ import CompanionCore
 
 @MainActor struct ControlsView: View {
     let controller: RouterController
+    let navigation: QuitGuidanceNavigation
     @State private var search = ""
     @State private var showActivationNotice = false
+    @State private var recoveryExpanded = false
+    @State private var lastNavigatedRequestID: UUID?
+    @FocusState private var focusedGuidance: QuitGuidance.Destination?
+    @AccessibilityFocusState private var accessibilityGuidance: QuitGuidance.Destination?
     private var display: ControlsPresentation { ControlsPresentation(controller: controller) }
+    private var guidance: QuitGuidance? {
+        navigation.requestID == nil ? nil : QuitGuidance.current(for: controller)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -85,89 +93,117 @@ import CompanionCore
                 if controller.busy { ProgressView().controlSize(.small) }
                 Button("Refresh") { Task { await controller.refresh() } }
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    GroupBox("Setup") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(display.configuration).font(.headline)
-                            pathRow("Configuration", controller.selectedConfiguration?.path ?? "No configuration selected")
-                            Button("Select existing configuration…") { selectFile(node: false) }.disabled(!controller.canSelectConfiguration)
-                            pathRow("Node runtime", controller.selectedNode?.path ?? "Automatic installed Node 24 discovery")
-                            Button("Select Node 24 executable…") { selectFile(node: true) }.disabled(!controller.canSelectNode)
-                            Text("Configuration stays in place outside Git and the app. Selection never starts or activates the router.").font(.caption).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    GroupBox("Independent operational facts") {
-                        Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
-                            fact("Mode", controller.inspection?.configuration.mode == "credential" ? "Credential routing" : controller.inspection?.configuration.mode == "legacy" ? "Legacy routing" : "Unknown")
-                            fact("On disk", display.disk)
-                            fact("Matching readiness", display.readiness)
-                            fact("Process ownership", display.ownership)
-                            fact("Desktop confirmation", display.confirmation)
-                            if let outcome = controller.lastStopOutcome {
-                                fact("Last owned child stop", outcome.childExited ? "Child exited" : "Exit not confirmed")
-                                fact("Port after stop", outcome.portState == .empty ? "Empty" : outcome.portState == .occupied ? "Occupied — manual cleanup required" : "Unknown — inspect locally")
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        GroupBox("Setup") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(display.configuration).font(.headline)
+                                pathRow("Configuration", controller.selectedConfiguration?.path ?? "No configuration selected")
+                                Button("Select existing configuration…") { selectFile(node: false) }.disabled(!controller.canSelectConfiguration)
+                                pathRow("Node runtime", controller.selectedNode?.path ?? "Automatic installed Node 24 discovery")
+                                Button("Select Node 24 executable…") { selectFile(node: true) }.disabled(!controller.canSelectNode)
+                                Text("Configuration stays in place outside Git and the app. Selection never starts or activates the router.").font(.caption).foregroundStyle(.secondary)
+                                guidanceText(for: .setup)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .overlay { guidanceOutline(for: .setup) }
+                        .id(QuitGuidance.Destination.setup)
+                        GroupBox("Independent operational facts") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+                                    fact("Mode", controller.inspection?.configuration.mode == "credential" ? "Credential routing" : controller.inspection?.configuration.mode == "legacy" ? "Legacy routing" : "Unknown")
+                                    fact("On disk", display.disk)
+                                    fact("Matching readiness", display.readiness)
+                                    fact("Process ownership", display.ownership)
+                                    fact("Desktop confirmation", display.confirmation)
+                                    if let outcome = controller.lastStopOutcome {
+                                        fact("Last owned child stop", outcome.childExited ? "Child exited" : "Exit not confirmed")
+                                        fact("Port after stop", outcome.portState == .empty ? "Empty" : outcome.portState == .occupied ? "Occupied — manual cleanup required" : "Unknown — inspect locally")
+                                    }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                guidanceText(for: .status)
                             }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    HStack {
-                        Button("Start router") { Task { await controller.start() } }.disabled(!controller.canStart)
-                        Button("Activate for provider…") { showActivationNotice = true }.disabled(!controller.canActivate)
-                        Button("Restore direct") { Task { await controller.restoreDirect() } }.disabled(!controller.canRestoreDirect)
-                        Button("Stop owned router") { Task { await controller.stop() } }.disabled(!controller.canStop)
-                    }
-                    GroupBox("Manual desktop restart and response checks") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("After provider changes, restart Codex yourself and send a model request. Only confirm after a working response. Readiness does not prove desktop-loaded settings, gateway acceptance, billing, or complete streaming.").fixedSize(horizontal: false, vertical: true)
-                            Button("I restarted Codex and received a routed response") { Task { await controller.confirmRoutedResponse() } }.disabled(!controller.canConfirmRoutedResponse)
-                            Button("I restarted Codex and received a direct response") { Task { await controller.confirmDirectResponse() } }.disabled(!controller.canConfirmDirectResponse)
-                            Text(display.quitGuidance).font(.caption).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if let guidance = display.recoveryGuidance {
-                        Text(guidance).foregroundStyle(.orange)
-                    }
-                    if controller.needsManualListenerCleanup {
-                        Text("An external listener requires manual inspection and cleanup. This app cannot adopt or stop it. See the companion recovery instructions.").foregroundStyle(.orange)
-                    }
-                    if controller.mutationRequiresReconciliation {
-                        Text("A provider operation must finish and be reconciled before further controls. Keep the app open and refresh.").foregroundStyle(.orange)
-                    }
-                    if let context = controller.recoveryContext ?? controller.inspection?.context {
-                        DisclosureGroup("Manual recovery and external listener cleanup") {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text("If Restore direct cannot run safely, inspect the selected configuration's private activation.json and its named TOML backup locally. Restore only the original base_url for the recorded provider; preserve authentication, models, and unrelated edits. Keep recovery evidence and verify any lock's helper has stopped before manual removal.")
-                                pathRow("Recorded provider", context.providerId)
-                                pathRow("Recorded provider settings", URL(fileURLWithPath: context.codexHome).appendingPathComponent("config.toml").path)
-                                Text("Restart Codex manually and verify a direct response before confirming recovery. For an external listener, inspect the recorded port and independently verify its executable and origin before stopping it yourself. Retain an unverified listener for investigation.")
-                                Text("lsof -nP -iTCP:\(context.listenPort) -sTCP:LISTEN").font(.caption.monospaced()).textSelection(.enabled)
-                            }.font(.caption).padding(.top, 6)
+                        }
+                        .overlay { guidanceOutline(for: .status) }
+                        .id(QuitGuidance.Destination.status)
+                        HStack {
+                            Button("Start router") { Task { await controller.start() } }.disabled(!controller.canStart)
+                            Button("Activate for provider…") { showActivationNotice = true }.disabled(!controller.canActivate)
+                            Button("Restore direct") { Task { await controller.restoreDirect() } }.disabled(!controller.canRestoreDirect)
+                                .overlay { guidanceOutline(for: .restoreDirect) }
+                                .id(QuitGuidance.Destination.restoreDirect)
+                            Button("Stop owned router") { Task { await controller.stop() } }.disabled(!controller.canStop)
+                                .overlay { guidanceOutline(for: .stopRouter) }
+                                .id(QuitGuidance.Destination.stopRouter)
+                        }
+                        guidanceText(for: .restoreDirect)
+                        guidanceText(for: .stopRouter)
+                        GroupBox("Manual desktop restart and response checks") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("After provider changes, restart Codex yourself and send a model request. Only confirm after a working response. Readiness does not prove desktop-loaded settings, gateway acceptance, billing, or complete streaming.").fixedSize(horizontal: false, vertical: true)
+                                Button("I restarted Codex and received a routed response") { Task { await controller.confirmRoutedResponse() } }.disabled(!controller.canConfirmRoutedResponse)
+                                guidanceText(for: .directResponse)
+                                Button("I restarted Codex and received a direct response") { Task { await controller.confirmDirectResponse() } }.disabled(!controller.canConfirmDirectResponse)
+                                    .overlay { guidanceOutline(for: .directResponse) }
+                                Text(display.quitGuidance).font(.caption).foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(QuitGuidance.Destination.directResponse)
+                        if let guidance = display.recoveryGuidance {
+                            Text(guidance).foregroundStyle(.orange)
+                        }
+                        if controller.needsManualListenerCleanup {
+                            Text("An external listener requires manual inspection and cleanup. This app cannot adopt or stop it. See the companion recovery instructions.").foregroundStyle(.orange)
+                        }
+                        if controller.mutationRequiresReconciliation {
+                            Text("A provider operation must finish and be reconciled before further controls. Keep the app open and refresh.").foregroundStyle(.orange)
+                        }
+                        if let context = controller.recoveryContext ?? controller.inspection?.context {
+                            VStack(alignment: .leading, spacing: 8) {
+                                DisclosureGroup("Manual recovery and external listener cleanup", isExpanded: $recoveryExpanded) {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        Text("If Restore direct cannot run safely, inspect the selected configuration's private activation.json and its named TOML backup locally. Restore only the original base_url for the recorded provider; preserve authentication, models, and unrelated edits. Keep recovery evidence and verify any lock's helper has stopped before manual removal.")
+                                        pathRow("Recorded provider", context.providerId)
+                                        pathRow("Recorded provider settings", URL(fileURLWithPath: context.codexHome).appendingPathComponent("config.toml").path)
+                                        Text("Restart Codex manually and verify a direct response before confirming recovery. For an external listener, inspect the recorded port and independently verify its executable and origin before stopping it yourself. Retain an unverified listener for investigation.")
+                                        Text("lsof -nP -iTCP:\(context.listenPort) -sTCP:LISTEN").font(.caption.monospaced()).textSelection(.enabled)
+                                    }.font(.caption).padding(.top, 6)
+                                }
+                                guidanceText(for: .manualRecovery)
+                            }
+                            .overlay { guidanceOutline(for: .manualRecovery) }
+                            .id(QuitGuidance.Destination.manualRecovery)
+                        }
+                        if let error = controller.error {
+                            Text(error).foregroundStyle(.red).textSelection(.enabled)
+                            Text("Refresh to recheck current evidence. For setup errors select an existing private configuration or installed Node 24. Preserve recovery files when recovery is blocked.").font(.caption)
+                        }
+                        Divider()
+                        Text("Projects and route aliases").font(.headline)
+                        TextField("Search names or route aliases", text: $search).textFieldStyle(.roundedBorder)
+                        Text(display.catalog).font(.caption).foregroundStyle(.secondary)
+                        ForEach(display.projects(matching: search), id: \.id) { project in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(project.name.isEmpty ? "Unresolved project" : project.name).fontWeight(.medium)
+                                    Spacer()
+                                    Text(project.routeAlias ?? "Unmapped").foregroundStyle(.secondary)
+                                }
+                                Text(project.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                                if project.routeState == "target_missing" { Text("Route target missing").font(.caption).foregroundStyle(.orange) }
+                                if project.routeState == "catalog_missing" { Text("Stale mapping — project absent from current catalog").font(.caption).foregroundStyle(.orange) }
+                            }.padding(.vertical, 4)
+                            Divider()
+                        }
+                        if display.projects(matching: search).isEmpty && controller.inspection?.catalog.state == "ready" {
+                            Text(search.isEmpty ? "No local projects in this catalog." : "No matching projects.").foregroundStyle(.secondary)
                         }
                     }
-                    if let error = controller.error {
-                        Text(error).foregroundStyle(.red).textSelection(.enabled)
-                        Text("Refresh to recheck current evidence. For setup errors select an existing private configuration or installed Node 24. Preserve recovery files when recovery is blocked.").font(.caption)
-                    }
-                    Divider()
-                    Text("Projects and route aliases").font(.headline)
-                    TextField("Search names or route aliases", text: $search).textFieldStyle(.roundedBorder)
-                    Text(display.catalog).font(.caption).foregroundStyle(.secondary)
-                    ForEach(display.projects(matching: search), id: \.id) { project in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack {
-                                Text(project.name.isEmpty ? "Unresolved project" : project.name).fontWeight(.medium)
-                                Spacer()
-                                Text(project.routeAlias ?? "Unmapped").foregroundStyle(.secondary)
-                            }
-                            Text(project.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                            if project.routeState == "target_missing" { Text("Route target missing").font(.caption).foregroundStyle(.orange) }
-                            if project.routeState == "catalog_missing" { Text("Stale mapping — project absent from current catalog").font(.caption).foregroundStyle(.orange) }
-                        }.padding(.vertical, 4)
-                        Divider()
-                    }
-                    if display.projects(matching: search).isEmpty && controller.inspection?.catalog.state == "ready" {
-                        Text(search.isEmpty ? "No local projects in this catalog." : "No matching projects.").foregroundStyle(.secondary)
-                    }
+                }
+                .task(id: navigation.requestID) { await navigateGuidance(using: proxy) }
+                .onChange(of: guidance?.destination) { _, destination in
+                    if destination == .manualRecovery { recoveryExpanded = true }
                 }
             }
         }
@@ -178,6 +214,39 @@ import CompanionCore
         } message: {
             Text("This changes the provider-wide setting. Unmapped or unresolved model requests can block. Restart Codex manually afterward and confirm a working routed response. Keep the router running until direct recovery is confirmed.")
         }
+    }
+    @ViewBuilder private func guidanceText(for destination: QuitGuidance.Destination) -> some View {
+        if let guidance, guidance.destination == destination {
+            Text(guidance.text)
+                .font(.callout.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(6)
+                .focusable()
+                .focused($focusedGuidance, equals: destination)
+                .accessibilityFocused($accessibilityGuidance, equals: destination)
+        }
+    }
+    @ViewBuilder private func guidanceOutline(for destination: QuitGuidance.Destination) -> some View {
+        if guidance?.destination == destination {
+            RoundedRectangle(cornerRadius: 6).stroke(Color.primary, lineWidth: 2)
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+    private func navigateGuidance(using proxy: ScrollViewProxy) async {
+        guard let request = navigation.requestID, request != lastNavigatedRequestID else { return }
+        lastNavigatedRequestID = request
+        if guidance?.destination == .manualRecovery { recoveryExpanded = true }
+        // Let the inline guidance and disclosure participate in layout before locating the current target.
+        await Task.yield()
+        guard !Task.isCancelled, navigation.requestID == request else { return }
+        if guidance?.destination == .manualRecovery {
+            recoveryExpanded = true
+            await Task.yield()
+        }
+        guard !Task.isCancelled, navigation.requestID == request, let destination = guidance?.destination else { return }
+        proxy.scrollTo(destination, anchor: .center)
+        focusedGuidance = destination
+        accessibilityGuidance = destination
     }
     private func pathRow(_ label: String, _ path: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {

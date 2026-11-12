@@ -115,12 +115,13 @@ import CompanionCore
         XCTAssertNotNil(controller.ownedRouter)
         for (response, expectedOpenCount) in [(NSApplication.ModalResponse.alertFirstButtonReturn, 1),
                                              (.alertSecondButtonReturn, 0), (.abort, 0), (.cancel, 0)] {
+            let navigation = QuitGuidanceNavigation()
             var showControlsCount = 0, terminateCount = 0, presentCount = 0
             var journalAfterDeniedAttempt: Result<CompanionJournal, Error>?
             var confirmationAfterDeniedAttempt: RouterController.DesktopConfirmation?
             var recoveryAfterDeniedAttempt: ActivationContext?
             var controlsAfterDeniedAttempt = -1, inspectionsAfterDeniedAttempt = -1, stopsAfterDeniedAttempt = -1
-            let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { alert in
+            let delegate = RouterAppDelegate(controller: controller, navigation: navigation, presentQuitAlert: { alert in
                 presentCount += 1
                 XCTAssertEqual(alert.informativeText, "Codex may still need the router. Check the direct connection before quitting.")
                 journalAfterDeniedAttempt = Result { try self.store.load() }
@@ -131,17 +132,191 @@ import CompanionCore
                 stopsAfterDeniedAttempt = self.backend.stopCount
                 return response
             }, showControls: { showControlsCount += 1 }, terminate: { terminateCount += 1 })
+            defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
             let quit = try XCTUnwrap(delegate.requestQuit())
             await quit.value
             XCTAssertEqual(presentCount, 1)
             XCTAssertEqual(showControlsCount, expectedOpenCount)
+            XCTAssertEqual(navigation.requestID != nil, expectedOpenCount == 1)
             XCTAssertEqual(terminateCount, 0)
             XCTAssertEqual(try store.load(), try XCTUnwrap(journalAfterDeniedAttempt).get())
             XCTAssertEqual(controller.desktopConfirmation, confirmationAfterDeniedAttempt)
             XCTAssertEqual(controller.recoveryContext, recoveryAfterDeniedAttempt)
             XCTAssertEqual(backend.controls.count, controlsAfterDeniedAttempt)
-            XCTAssertEqual(backend.inspectCount, inspectionsAfterDeniedAttempt)
+            XCTAssertEqual(backend.inspectCount, inspectionsAfterDeniedAttempt + expectedOpenCount)
             XCTAssertEqual(backend.stopCount, stopsAfterDeniedAttempt)
+            XCTAssertFalse(controller.quitRequested)
+        }
+    }
+
+    func testPrimaryGuidanceUsesStateAfterHeldAlert() async throws {
+        // Replaying the alert's uncertainty instead of refreshing would miss idle Direct and safe Stop.
+        for ownsRouter in [false, true] {
+            let fixtureStore = PrivateStore(directory: root.appendingPathComponent(UUID().uuidString))
+            try fixtureStore.save(CompanionJournal(selectedConfigurationPath: context.configPath,
+                pending: ownsRouter ? nil : .init(context: context, phase: .directConfirmation)))
+            let fixtureBackend = QuitBackend(context: context)
+            let controller = RouterController(backend: fixtureBackend, store: fixtureStore, browseHome: root)
+            await controller.refresh()
+            if ownsRouter { await controller.start() }
+            fixtureBackend.mutationRequiresReconciliation = true
+            let navigation = QuitGuidanceNavigation(), alert = QuitBarrier<NSApplication.ModalResponse>()
+            let inspectionsAfterSetup = fixtureBackend.inspectCount
+            var showCount = 0, terminateCount = 0
+            let delegate = RouterAppDelegate(controller: controller, navigation: navigation, presentQuitAlert: { presented in
+                XCTAssertEqual(presented.informativeText, "A router operation is running or needs checking. Review its status before quitting.")
+                return await alert.wait()
+            }, showControls: { showCount += 1 }, terminate: { terminateCount += 1 })
+            defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+            let quit = try XCTUnwrap(delegate.requestQuit())
+            try await waitUntil { alert.waiting }
+            let inspectionsAfterDeniedAttempt = fixtureBackend.inspectCount
+            let journalAfterDeniedAttempt = try Data(contentsOf: fixtureStore.directory.appendingPathComponent("state.json"))
+            let confirmationAfterDeniedAttempt = controller.desktopConfirmation
+            XCTAssertEqual(inspectionsAfterDeniedAttempt, inspectionsAfterSetup + 1)
+            XCTAssertNil(navigation.requestID)
+            fixtureBackend.mutationRequiresReconciliation = false
+            alert.release(.alertFirstButtonReturn)
+            await quit.value
+            XCTAssertNotNil(navigation.requestID)
+            let expectedCurrentDestination: QuitGuidance.Destination = ownsRouter ? .stopRouter : .status
+            XCTAssertEqual(QuitGuidance.current(for: controller).destination, expectedCurrentDestination)
+            XCTAssertEqual(fixtureBackend.inspectCount, inspectionsAfterDeniedAttempt + 1)
+            XCTAssertEqual(try Data(contentsOf: fixtureStore.directory.appendingPathComponent("state.json")), journalAfterDeniedAttempt)
+            XCTAssertEqual(controller.desktopConfirmation, confirmationAfterDeniedAttempt)
+            XCTAssertTrue(fixtureBackend.controls.isEmpty)
+            XCTAssertEqual(fixtureBackend.stopCount, 0)
+            XCTAssertEqual(showCount, 1)
+            XCTAssertEqual(terminateCount, 0)
+            XCTAssertFalse(controller.quitRequested)
+        }
+    }
+
+    func testPrimaryGuidanceInspectionFailureUsesRecoveryFallback() async throws {
+        // Publishing the old direct-response target after a failed refresh would direct users to a disabled action.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let navigation = QuitGuidanceNavigation()
+        let baseline = backend.inspectCount
+        var journalAfterDeniedAttempt: Result<Data, Error>?
+        var terminateCount = 0
+        let delegate = RouterAppDelegate(controller: controller, navigation: navigation, presentQuitAlert: { _ in
+            journalAfterDeniedAttempt = Result { try Data(contentsOf: self.store.directory.appendingPathComponent("state.json")) }
+            self.backend.inspectionError = CompanionError.commandFailed
+            return .alertFirstButtonReturn
+        }, showControls: {}, terminate: { terminateCount += 1 })
+        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        await delegate.requestQuit()?.value
+        XCTAssertNotNil(navigation.requestID)
+        XCTAssertEqual(QuitGuidance.current(for: controller).destination, .manualRecovery)
+        XCTAssertFalse(controller.canConfirmDirectResponse)
+        XCTAssertEqual(backend.inspectCount, baseline + 2)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), try XCTUnwrap(journalAfterDeniedAttempt).get())
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertEqual(terminateCount, 0)
+        XCTAssertFalse(controller.quitRequested)
+    }
+
+    func testWindowCloseCancelsPendingGuidance() async throws {
+        // A late primary refresh must not resurrect navigation after close, and must retain the Quit guard.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let navigation = QuitGuidanceNavigation(), refresh = QuitBarrier<Inspection>()
+        let baseline = backend.inspectCount
+        var showCount = 0, terminateCount = 0
+        var journalAfterDeniedAttempt: Result<Data, Error>?
+        let delegate = RouterAppDelegate(controller: controller, navigation: navigation, presentQuitAlert: { _ in
+            journalAfterDeniedAttempt = Result { try Data(contentsOf: self.store.directory.appendingPathComponent("state.json")) }
+            self.backend.inspectBarrier = refresh
+            return .alertFirstButtonReturn
+        }, showControls: { showCount += 1 }, terminate: { terminateCount += 1 })
+        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        let quit = try XCTUnwrap(delegate.requestQuit())
+        try await waitUntil { refresh.waiting }
+        XCTAssertNil(navigation.requestID)
+        XCTAssertEqual(showCount, 1)
+        XCTAssertNil(delegate.requestQuit())
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateCancel)
+        delegate.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+        refresh.release(backend.snapshot)
+        await quit.value
+        XCTAssertNil(navigation.requestID)
+        XCTAssertEqual(backend.inspectCount, baseline + 2)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), try XCTUnwrap(journalAfterDeniedAttempt).get())
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertEqual(terminateCount, 0)
+        XCTAssertFalse(controller.quitRequested)
+    }
+
+    func testRepeatedGuidanceRequestsHaveDistinctIdentity() async throws {
+        // Reusing a destination as identity would prevent a later explicit request from navigating again.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let navigation = QuitGuidanceNavigation()
+        let baseline = backend.inspectCount
+        let journal = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+        var showCount = 0, terminateCount = 0
+        let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
+            presentQuitAlert: { _ in .alertFirstButtonReturn }, showControls: { showCount += 1 },
+            terminate: { terminateCount += 1 })
+        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        await delegate.requestQuit()?.value
+        let firstRequestID = try XCTUnwrap(navigation.requestID)
+        await controller.refresh()
+        XCTAssertEqual(navigation.requestID, firstRequestID)
+        await delegate.requestQuit()?.value
+        let secondRequestID = try XCTUnwrap(navigation.requestID)
+        XCTAssertNotEqual(firstRequestID, secondRequestID)
+        await controller.refresh()
+        XCTAssertEqual(navigation.requestID, secondRequestID)
+        XCTAssertEqual(backend.inspectCount, baseline + 6)
+        XCTAssertEqual(showCount, 2)
+        XCTAssertEqual(terminateCount, 0)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), journal)
+        XCTAssertEqual(controller.desktopConfirmation, .unknown)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+
+    func testWindowCloseClearsDisplayedGuidance() async throws {
+        // Keeping a displayed token after close would restore obsolete emphasis on an ordinary reopen.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let navigation = QuitGuidanceNavigation()
+        let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
+            presentQuitAlert: { _ in .alertFirstButtonReturn }, showControls: {}, terminate: { XCTFail("Guidance must not exit") })
+        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        await delegate.requestQuit()?.value
+        XCTAssertNotNil(navigation.requestID)
+        delegate.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+        XCTAssertNil(navigation.requestID)
+        await controller.refresh()
+        XCTAssertNil(navigation.requestID)
+        XCTAssertFalse(controller.quitRequested)
+    }
+
+    func testCancellationPreservesExistingGuidance() async throws {
+        // Clearing or replacing navigation on dismissal would change the existing window without a primary request.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let navigation = QuitGuidanceNavigation()
+        let existing = navigation.beginRequest(); navigation.present(existing)
+        for response in [NSApplication.ModalResponse.alertSecondButtonReturn, .abort, .cancel] {
+            let baseline = backend.inspectCount
+            let journal = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+            let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
+                presentQuitAlert: { _ in response }, showControls: { XCTFail("Dismissal must preserve window visibility") },
+                terminate: { XCTFail("Dismissal must not exit") })
+            defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+            await delegate.requestQuit()?.value
+            XCTAssertEqual(navigation.requestID, existing)
+            XCTAssertEqual(backend.inspectCount, baseline + 1)
+            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), journal)
+            XCTAssertEqual(controller.desktopConfirmation, .unknown)
+            XCTAssertTrue(backend.controls.isEmpty)
+            XCTAssertEqual(backend.stopCount, 0)
             XCTAssertFalse(controller.quitRequested)
         }
     }

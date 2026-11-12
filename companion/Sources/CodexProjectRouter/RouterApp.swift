@@ -16,6 +16,7 @@ import CompanionCore
 
 @MainActor final class RouterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let controller: RouterController
+    let navigation: QuitGuidanceNavigation
     private var controlsWindow: NSWindow?
     private var polling: Timer?
     private var quitInProgress = false
@@ -33,6 +34,7 @@ import CompanionCore
         self.init(controller: controller)
     }
     init(controller: RouterController,
+         navigation: QuitGuidanceNavigation? = nil,
          presentQuitAlert: @escaping @MainActor (NSAlert) async -> NSApplication.ModalResponse = {
              NSApp.activate(ignoringOtherApps: true)
              return $0.runModal()
@@ -40,6 +42,7 @@ import CompanionCore
          showControls: (@MainActor () -> Void)? = nil,
          terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
         self.controller = controller
+        self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
         self.showControls = showControls
         self.terminate = terminate
@@ -60,7 +63,10 @@ import CompanionCore
         RunLoop.main.add(timer, forMode: .common)
         polling = timer
     }
-    func windowWillClose(_ notification: Notification) { scheduleRefresh(windowVisible: false) }
+    func windowWillClose(_ notification: Notification) {
+        navigation.clear()
+        scheduleRefresh(windowVisible: false)
+    }
     func windowDidMiniaturize(_ notification: Notification) { scheduleRefresh(windowVisible: false) }
     func windowDidDeminiaturize(_ notification: Notification) {
         scheduleRefresh(windowVisible: true)
@@ -68,10 +74,14 @@ import CompanionCore
     }
 
     func openControls() {
+        showControlsWindow()
+        Task { await controller.refresh() }
+    }
+    private func showControlsWindow() {
         if controlsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Codex Project Router"
-            window.contentView = NSHostingView(rootView: ControlsView(controller: controller))
+            window.contentView = NSHostingView(rootView: ControlsView(controller: controller, navigation: navigation))
             window.minSize = NSSize(width: 760, height: 680)
             window.isReleasedWhenClosed = false
             window.delegate = self
@@ -82,7 +92,6 @@ import CompanionCore
         controlsWindow?.makeKeyAndOrderFront(nil)
         scheduleRefresh(windowVisible: true)
         NSApp.activate(ignoringOtherApps: true)
-        Task { await controller.refresh() }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { openControls(); return true }
@@ -105,8 +114,11 @@ import CompanionCore
                 let reason = controller.quitBlockReason ?? .contextUnavailable
                 let response = await presentQuitAlert(QuitAlert.make(reason: reason, ownsRouter: controller.ownedRouter != nil))
                 if response == .alertFirstButtonReturn {
+                    let token = navigation.beginRequest()
                     if let showControls { showControls() }
-                    else { openControls() }
+                    else { showControlsWindow() }
+                    await controller.refreshAndWait()
+                    navigation.present(token)
                 }
             }
         }

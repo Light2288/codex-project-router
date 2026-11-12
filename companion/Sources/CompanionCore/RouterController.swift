@@ -125,6 +125,11 @@ import Observation
         refreshRunning = false
     }
 
+    public func refreshAndWait() async {
+        guard usable else { return }
+        await inspectNow()
+    }
+
     public func selectConfiguration(_ path: URL) async {
         guard canSelectConfiguration, begin() else { reject(); return }
         defer { finish() }
@@ -312,7 +317,7 @@ import Observation
     }
     @discardableResult private func inspectNow() async -> Bool {
         // Actions must inspect after prior work ends; a pre-action snapshot cannot authorize them.
-        // There is at most one action and one coalesced refresh caller waiting here.
+        // Awaited guidance refreshes share the action/poll queue instead of returning through refresh coalescing.
         await acquireInspectionSlot()
         defer { releaseInspectionSlot() }
         // Only a started inspection can produce newer evidence. A queued timer cannot supersede an action.

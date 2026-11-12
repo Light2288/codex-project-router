@@ -1,4 +1,26 @@
 import CompanionCore
+import Foundation
+import Observation
+
+@MainActor @Observable final class QuitGuidanceNavigation {
+    private(set) var requestID: UUID?
+    private var pendingID: UUID?
+
+    func beginRequest() -> UUID {
+        let token = UUID()
+        pendingID = token
+        return token
+    }
+    func present(_ token: UUID) {
+        guard pendingID == token else { return }
+        pendingID = nil
+        requestID = token
+    }
+    func clear() {
+        pendingID = nil
+        requestID = nil
+    }
+}
 
 @MainActor struct QuitGuidance: Equatable {
     enum Destination: Hashable { case status, restoreDirect, directResponse, manualRecovery, stopRouter, setup }

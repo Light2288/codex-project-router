@@ -153,6 +153,49 @@ import CompanionCore
         XCTAssertEqual(ControlsPresentation.refreshInterval(windowVisible: true), 2)
         XCTAssertEqual(ControlsPresentation.refreshInterval(windowVisible: false), 5)
     }
+    func testCancelledPendingNavigationCannotBePresentedLater() {
+        // A refresh completing after window close must not republish the invalidated request.
+        let navigation = QuitGuidanceNavigation()
+        let pending = navigation.beginRequest()
+        XCTAssertNil(navigation.requestID)
+        navigation.clear()
+        navigation.present(pending)
+        XCTAssertNil(navigation.requestID)
+    }
+    func testOnlyLatestPendingNavigationCanBePresented() {
+        // Publishing a superseded token would let delayed work replace a newer explicit request.
+        let navigation = QuitGuidanceNavigation()
+        let first = navigation.beginRequest()
+        let second = navigation.beginRequest()
+        XCTAssertNotEqual(first, second)
+        navigation.present(first)
+        XCTAssertNil(navigation.requestID)
+        navigation.present(second)
+        XCTAssertEqual(navigation.requestID, second)
+        navigation.clear()
+        navigation.present(second)
+        XCTAssertNil(navigation.requestID)
+    }
+    func testPublishedGuidanceTracksEvidenceWithoutReplacingRequest() async throws {
+        // Caching the published projection would retain direct-response instructions after context disappears.
+        try await withPendingDirectController { controller, backend, store in
+            await controller.start()
+            let navigation = QuitGuidanceNavigation()
+            let request = navigation.beginRequest(); navigation.present(request)
+            XCTAssertEqual(QuitGuidance.current(for: controller).destination, .directResponse)
+            let journal = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+            let inspections = backend.inspectCount
+            backend.snapshot.context = nil
+            await controller.refresh()
+            XCTAssertEqual(QuitGuidance.current(for: controller).destination, .manualRecovery)
+            XCTAssertEqual(navigation.requestID, request)
+            XCTAssertEqual(backend.inspectCount, inspections + 1)
+            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), journal)
+            XCTAssertFalse(controller.quitRequested)
+            XCTAssertEqual(backend.controlCount, 0)
+            XCTAssertEqual(backend.stopCount, 0)
+        }
+    }
 }
 
 @MainActor private final class DisplayBackend: CompanionBackend {

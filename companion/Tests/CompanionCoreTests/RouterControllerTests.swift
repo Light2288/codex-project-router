@@ -30,6 +30,69 @@ import XCTest
         await controller.activate()
         return controller
     }
+    func testRefreshAndWaitWaitsForExistingInspection() async {
+        // Returning through refreshRunning or bypassing its inspection slot would finish early or overlap reads.
+        let controller = makeController(); await controller.refresh()
+        let baseline = backend.inspectedPaths.count
+        let backgroundBarrier = Barrier<Inspection>(), guidanceBarrier = Barrier<Inspection>()
+        backend.inspectBarrier = backgroundBarrier
+        let background = Task { await controller.refresh() }
+        await waitUntil { backgroundBarrier.waiting }
+        backend.inspectBarrier = guidanceBarrier
+        var started = false, completed = false
+        let guidance = Task {
+            started = true
+            await controller.refreshAndWait()
+            completed = true
+        }
+        await waitUntil { started }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(completed)
+        XCTAssertEqual(backend.inspectedPaths.count, baseline + 1)
+        backgroundBarrier.release(backend.snapshot)
+        await waitUntil { guidanceBarrier.waiting }
+        XCTAssertFalse(completed)
+        XCTAssertEqual(backend.inspectedPaths.count, baseline + 2)
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        guidanceBarrier.release(backend.snapshot)
+        await background.value; await guidance.value
+        XCTAssertTrue(completed)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+    func testRefreshAndWaitAppliesInspectionFailure() async {
+        // Ignoring the normal inspection failure path would leave stale operational guidance available.
+        let controller = makeController(); await controller.refresh()
+        let baseline = backend.inspectedPaths.count
+        backend.inspectionError = .commandFailed
+        await controller.refreshAndWait()
+        XCTAssertEqual(backend.inspectedPaths.count, baseline + 1)
+        XCTAssertEqual(controller.inspection?.configuration.state, "unavailable")
+        XCTAssertEqual(controller.inspection?.provider.state, "unavailable")
+        XCTAssertEqual(controller.error, CompanionError.commandFailed.rawValue)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+    func testRefreshAndWaitDiscardsInspectionFromStaleGeneration() async {
+        // Applying a pre-exit result would replace newer child-exit evidence with stale router facts.
+        let controller = await started()
+        let baseline = backend.inspectedPaths.count
+        var stale = backend.snapshot
+        stale.provider.state = "router"; stale.provider.recordPhase = "active"
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let refresh = Task { await controller.refreshAndWait() }
+        await waitUntil { barrier.waiting }
+        backend.exitChild()
+        barrier.release(stale)
+        await refresh.value
+        XCTAssertNil(controller.ownedRouter)
+        XCTAssertEqual(controller.inspection?.provider.state, "direct")
+        XCTAssertNil(controller.inspection?.provider.proxyReady)
+        XCTAssertEqual(backend.inspectedPaths.count, baseline + 1)
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
     func testQuitBlockReasonDirectPendingIsReadOnly() async throws {
         // Reading alert guidance must neither accept confirmation nor reconcile or mutate evidence.
         try store.save(CompanionJournal(selectedConfigurationPath: context.configPath,
