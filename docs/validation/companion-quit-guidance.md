@@ -2,10 +2,9 @@
 
 Date: 2026-11-12
 
-Status: automated and native acceptance evidence is recorded, including the
-independent human closed/minimized primary-reveal follow-up below. Tasks 1 and 2
-have independent task approval. Task 3 re-review and the final sequential
-specification/quality gate remain pending; this record does not yet claim
+Status: native and automated acceptance completed. All three tasks have independent
+approval, including the evidence-only Task 3 follow-up. The final sequential
+specification/quality gate remains pending; this record does not yet claim
 completion of the increment.
 
 Scope: the approved `companion-quit-guidance` increment, based on
@@ -220,9 +219,15 @@ unchanged.
 
 ## Review and completion
 
-Native evidence and privacy/process cleanup are complete, including the independent
-closed/minimized primary-reveal follow-up. Task 3 scoped re-review and the sole
-integrated final specification review followed by quality review remain pending
-for the follow-up range starting at
+Independent Tasks 1 and 2 specification/quality task reviews passed with no
+findings. The initial Task 3 review identified one Important evidence gap: the
+automated primary-reveal sequences did not independently establish hidden/minimized
+starting states, so the native-completion claim was premature. One evidence-only
+correction obtained the attributed user result above and retained the original
+automation qualification. Scoped re-review marked the finding addressed with no
+new breakage; the Task 3 deliverable is approved.
+
+The sole integrated final specification review followed by quality review remains
+pending for the follow-up range starting at
 `f1e00832a000510043a02e6abce442a4d8ee473d`. No final review disposition is claimed;
 lifecycle/checklists stay open until those reviews have actual dispositions.
