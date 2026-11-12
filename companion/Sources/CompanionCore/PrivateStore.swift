@@ -14,6 +14,11 @@ public final class PrivateStore {
         try writeJournal(journal, directoryFD: fd)
         return journal
     }
+    func readExisting() throws -> CompanionJournal {
+        let fd = try openDirectory(createIfMissing: false); defer { close(fd) }
+        guard let journal = try readJournal(fd) else { throw CompanionError.privateState }
+        return journal
+    }
     public func save(_ journal: CompanionJournal) throws {
         guard valid(journal) else { throw CompanionError.privateState }
         let fd = try openDirectory(); defer { close(fd) }
@@ -37,9 +42,9 @@ public final class PrivateStore {
     public func releaseInstanceLock() {
         if lockFD >= 0 { close(lockFD); lockFD = -1 }
     }
-    private func openDirectory() throws -> Int32 {
+    private func openDirectory(createIfMissing: Bool = true) throws -> Int32 {
         guard directory.isFileURL, directory.path.hasPrefix("/") else { throw CompanionError.privateState }
-        if mkdir(directory.path, 0o700) != 0, errno != EEXIST {
+        if createIfMissing, mkdir(directory.path, 0o700) != 0, errno != EEXIST {
             guard errno == ENOENT else { throw CompanionError.privateState }
             do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
             catch { throw CompanionError.privateState }

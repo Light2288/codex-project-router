@@ -9,6 +9,103 @@ final class PrivateStoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
+    func testReadExistingReturnsPendingJournalWithoutWriting() throws {
+        // Creating a fresh journal or rewriting this snapshot would lose durable pending evidence.
+        let directory = root.appendingPathComponent("private")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let state = directory.appendingPathComponent("state.json")
+        let originalBytes = Data(#"{ "schemaVersion": 1, "selectedConfigurationPath": "/synthetic/router.json", "nodeExecutablePath": "/synthetic/node", "pending": { "context": { "configPath": "/synthetic/router.json", "codexHome": "/synthetic/codex", "providerId": "synthetic_provider", "listenPort": 43123 }, "phase": "direct_confirmation" } }"#.utf8)
+        try originalBytes.write(to: state)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: state.path)
+        let originalEntries = try entries(directory)
+        let expectedPendingJournal = CompanionJournal(
+            selectedConfigurationPath: "/synthetic/router.json", nodeExecutablePath: "/synthetic/node",
+            pending: .init(context: .init(configPath: "/synthetic/router.json", codexHome: "/synthetic/codex", providerId: "synthetic_provider", listenPort: 43123), phase: .directConfirmation))
+        let store = PrivateStore(directory: directory)
+
+        XCTAssertEqual(try store.readExisting(), expectedPendingJournal)
+        XCTAssertEqual(try Data(contentsOf: state), originalBytes)
+        XCTAssertEqual(try entries(directory), originalEntries)
+    }
+    func testReadExistingNeverCreatesOrRepairsEvidence() throws {
+        // Reusing the creating load path would manufacture authority for absent evidence.
+        let missingPath = root.appendingPathComponent("missing/private")
+        let store = PrivateStore(directory: missingPath)
+        let originalRootEntries = try entries(root)
+        XCTAssertThrowsError(try store.readExisting()) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingPath.path))
+        XCTAssertEqual(try entries(root), originalRootEntries)
+
+        try FileManager.default.createDirectory(at: missingPath, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let originalEntries = try entries(missingPath)
+        XCTAssertThrowsError(try store.readExisting()) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingPath.appendingPathComponent("state.json").path))
+        XCTAssertEqual(try entries(missingPath), originalEntries)
+    }
+    func testReadExistingRejectsUnsafeEvidence() throws {
+        // Bypassing safe bounded reads or replacing invalid input would authorize unsafe evidence.
+        for fixture in ["corrupt", "symlinked", "multiply-linked", "non-private", "oversized"] {
+            let directory = root.appendingPathComponent(fixture)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let state = directory.appendingPathComponent("state.json")
+            var originalBytes = Data(#"{"schemaVersion":1}"#.utf8)
+            if fixture == "corrupt" { originalBytes = Data("{broken SENTINEL_PRIVATE".utf8) }
+            if fixture == "oversized" { originalBytes.append(Data(repeating: 0x20, count: 64 * 1024)) }
+            let target = directory.appendingPathComponent("target")
+            if fixture == "symlinked" {
+                try originalBytes.write(to: target)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+                try FileManager.default.createSymbolicLink(at: state, withDestinationURL: target)
+            } else {
+                try originalBytes.write(to: state)
+                try FileManager.default.setAttributes([.posixPermissions: fixture == "non-private" ? 0o644 : 0o600], ofItemAtPath: state.path)
+                if fixture == "multiply-linked" { XCTAssertEqual(link(state.path, target.path), 0) }
+            }
+            let originalEntries = try entries(directory)
+            let originalMode = try mode(state)
+            var originalInfo = stat()
+            XCTAssertEqual(lstat(state.path, &originalInfo), 0)
+
+            XCTAssertThrowsError(try PrivateStore(directory: directory).readExisting(), fixture) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+            XCTAssertEqual(try Data(contentsOf: state), originalBytes, fixture)
+            XCTAssertEqual(try entries(directory), originalEntries, fixture)
+            XCTAssertEqual(try mode(state), originalMode, fixture)
+            var currentInfo = stat()
+            XCTAssertEqual(lstat(state.path, &currentInfo), 0)
+            XCTAssertEqual(currentInfo.st_ino, originalInfo.st_ino, fixture)
+            XCTAssertEqual(currentInfo.st_nlink, originalInfo.st_nlink, fixture)
+            if fixture == "symlinked" {
+                XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: state.path), target.path)
+                XCTAssertEqual(try Data(contentsOf: target), originalBytes)
+            }
+        }
+    }
+    func testReadExistingRejectsUnsafeDirectoriesWithoutRepair() throws {
+        // Following a directory symlink or repairing its permissions would trust an unsafe store.
+        let directory = root.appendingPathComponent("private")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let state = directory.appendingPathComponent("state.json")
+        let originalBytes = Data(#"{"schemaVersion":1}"#.utf8)
+        try originalBytes.write(to: state)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: state.path)
+        let linkedDirectory = root.appendingPathComponent("linked-dir")
+        try FileManager.default.createSymbolicLink(at: linkedDirectory, withDestinationURL: directory)
+        let originalRootEntries = try entries(root)
+        let originalEntries = try entries(directory)
+
+        XCTAssertThrowsError(try PrivateStore(directory: linkedDirectory).readExisting()) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: linkedDirectory.path), directory.path)
+        XCTAssertEqual(try Data(contentsOf: state), originalBytes)
+        XCTAssertEqual(try entries(directory), originalEntries)
+        XCTAssertEqual(try entries(root), originalRootEntries)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        XCTAssertThrowsError(try PrivateStore(directory: directory).readExisting()) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+        XCTAssertEqual(try mode(directory), 0o755)
+        XCTAssertEqual(try Data(contentsOf: state), originalBytes)
+        XCTAssertEqual(try entries(directory), originalEntries)
+        XCTAssertEqual(try entries(root), originalRootEntries)
+    }
     func testJournalRejectsCorruptionAndUnsafeFiles() throws {
         // Removing safe-file validation would allow corrupt/symlinked or foreign state to become authority.
         let directory = root.appendingPathComponent("private")
@@ -89,5 +186,6 @@ final class PrivateStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.load()); XCTAssertThrowsError(try store.save(CompanionJournal()))
         XCTAssertEqual(try Data(contentsOf: state), unknown)
     }
+    private func entries(_ directory: URL) throws -> [String] { try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() }
     private func mode(_ url: URL) throws -> Int { (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue }
 }
