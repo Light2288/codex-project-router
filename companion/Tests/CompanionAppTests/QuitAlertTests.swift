@@ -33,7 +33,6 @@ import CompanionCore
 
     func testFixedAlertCopyAndCancelBinding() async throws {
         // Wrong reason selection or raw backend/context interpolation must not reach native alert content.
-        let controller = try await makeController(pending: true)
         let cases: [(RouterController.QuitBlockReason, String)] = [
             (.directConfirmationPending, "Direct-response confirmation is pending. Open Controls to complete the check."),
             (.operationInProgress, "A router operation is still running or needs reconciliation. Open Controls to review its status."),
@@ -41,6 +40,13 @@ import CompanionCore
             (.contextUnavailable, "Quit could not be completed safely. Open Controls to review the current status and recovery guidance.")
         ]
         for (reason, message) in cases {
+            let fixtureStore = PrivateStore(directory: root.appendingPathComponent(UUID().uuidString))
+            try fixtureStore.save(CompanionJournal(selectedConfigurationPath: context.configPath,
+                pending: .init(context: context, phase: .directConfirmation)))
+            let backend = QuitBackend(context: context)
+            let controller = RouterController(backend: backend, store: fixtureStore, browseHome: root)
+            await controller.refresh(); await controller.start()
+            XCTAssertNotNil(controller.ownedRouter)
             backend.mutationRequiresReconciliation = reason == .operationInProgress
             if reason == .directRecoveryRequired {
                 backend.snapshot.provider = .init(state: "router", recoveryRequired: true, proxyReady: false, recordPhase: "active")
@@ -64,6 +70,8 @@ import CompanionCore
     func testOpenControlsAndKeepRunningActions() async throws {
         // Only the first response may reveal Controls; dismissal must not retry or mutate recovery.
         let controller = try await makeController(pending: true)
+        await controller.start()
+        XCTAssertNotNil(controller.ownedRouter)
         for (response, expectedOpenCount) in [(NSApplication.ModalResponse.alertFirstButtonReturn, 1),
                                              (.alertSecondButtonReturn, 0), (.abort, 0), (.cancel, 0)] {
             var showControlsCount = 0, terminateCount = 0, presentCount = 0
@@ -100,6 +108,8 @@ import CompanionCore
     func testQuitClaimsSynchronouslyAndIgnoresRepeatedRequests() async throws {
         // Moving the guard into the Task would admit a second request before either Task runs.
         let controller = try await makeController(pending: true)
+        await controller.start()
+        XCTAssertNotNil(controller.ownedRouter)
         var presentCount = 0, terminateCount = 0
         let baselineInspections = backend.inspectCount
         let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { _ in
@@ -158,16 +168,21 @@ import CompanionCore
     func testStateChangeDuringAlertDoesNotRetryOrTerminate() async throws {
         // A newly safe state must require another explicit Quit after this alert is dismissed.
         let controller = try await makeController(pending: true)
+        backend.mutationRequiresReconciliation = true
+        let bytesBefore = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
         let alert = QuitBarrier<NSApplication.ModalResponse>()
         var presentCount = 0, terminateCount = 0, showControlsCount = 0
         let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { _ in
-            presentCount += 1; return await alert.wait()
+            presentCount += 1
+            return presentCount == 1 ? await alert.wait() : .alertSecondButtonReturn
         }, showControls: { showControlsCount += 1 }, terminate: { terminateCount += 1 })
         let quit = try XCTUnwrap(delegate.requestQuit())
         try await waitUntil { alert.waiting }
-        await controller.confirmDirectResponse()
-        XCTAssertTrue(controller.canQuit)
-        let inspectionsAfterConfirmation = backend.inspectCount
+        backend.mutationRequiresReconciliation = false
+        await controller.refresh()
+        XCTAssertTrue(controller.canConfirmDirectResponse)
+        XCTAssertFalse(controller.canQuit)
+        let inspectionsAfterRefresh = backend.inspectCount
         XCTAssertNil(delegate.requestQuit())
         alert.release(.alertSecondButtonReturn)
         await quit.value
@@ -175,10 +190,39 @@ import CompanionCore
         XCTAssertEqual(terminateCount, 0)
         XCTAssertEqual(showControlsCount, 0)
         XCTAssertFalse(controller.quitRequested)
-        XCTAssertEqual(backend.inspectCount, inspectionsAfterConfirmation)
+        XCTAssertEqual(backend.inspectCount, inspectionsAfterRefresh)
         XCTAssertEqual(backend.stopCount, 0)
         XCTAssertTrue(backend.controls.isEmpty)
-        XCTAssertNil(try store.load().pending)
+        XCTAssertNotNil(try store.load().pending)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), bytesBefore)
+        await delegate.requestQuit()?.value
+        XCTAssertTrue(controller.quitRequested)
+        XCTAssertEqual(terminateCount, 1)
+        XCTAssertEqual(presentCount, 1)
+        XCTAssertEqual(backend.inspectCount, inspectionsAfterRefresh + 1)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), bytesBefore)
+    }
+
+    func testIdlePendingQuitTerminatesWithoutAlert() async throws {
+        // The real delegate must terminate after fresh idle permission without consuming recovery or presenting an alert.
+        let controller = try await makeController(pending: true)
+        let state = store.directory.appendingPathComponent("state.json")
+        let bytesBefore = try Data(contentsOf: state)
+        let baselineInspections = backend.inspectCount
+        var terminateCount = 0, presentCount = 0
+        let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { _ in
+            presentCount += 1; return .alertSecondButtonReturn
+        }, showControls: { XCTFail("Idle Quit must not open Controls") }, terminate: { terminateCount += 1 })
+        await delegate.requestQuit()?.value
+        XCTAssertEqual(terminateCount, 1)
+        XCTAssertEqual(presentCount, 0)
+        XCTAssertTrue(controller.quitRequested)
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertNotEqual(controller.desktopConfirmation, .confirmedDirect)
+        XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+        XCTAssertEqual(backend.inspectCount, baselineInspections + 1)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertTrue(backend.controls.isEmpty)
     }
 
     func testSuccessfulAndSafeExceptionQuitsSkipAlert() async throws {

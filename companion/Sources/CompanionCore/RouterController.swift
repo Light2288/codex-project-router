@@ -24,6 +24,8 @@ import Observation
     private var secondInstance = false
     private var initializationFailed = false
     private var recoveryObligation = false
+    private var idleQuitAuthorized = false
+    private var idleQuitJournalUnavailable = false
     private var dependencyContext: ActivationContext?
     private var hasDepended = false
     private var directOnlyChild: UUID?
@@ -65,12 +67,16 @@ import Observation
         return cleanDirect(context)
     }
     public var canStop: Bool { !busy && stopPermitted }
-    public var canQuit: Bool { secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation && journal.pending == nil) }
+    public var canQuit: Bool {
+        secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil &&
+            ((!recoveryObligation && journal.pending == nil) || (idleQuitAuthorized && hasIdleDirectQuitContext)))
+    }
     public var quitBlockReason: QuitBlockReason? {
         // Presentation follows existing authority without refreshing or changing recovery evidence.
         if secondInstance || initializationFailed { return nil }
         if busy || mutationRequiresReconciliation || backend.mutationRequiresReconciliation { return .operationInProgress }
         if canQuit { return nil }
+        if idleQuitJournalUnavailable { return .contextUnavailable }
         guard usable, let context = matchingContext, let provider = inspection?.provider, revision != nil,
               ["direct", "router"].contains(provider.state),
               ["none", "prepared", "active", "restored"].contains(provider.recordPhase) else { return .contextUnavailable }
@@ -227,10 +233,37 @@ import Observation
         guard !secondInstance && !initializationFailed else { quitRequested = true; return }
         guard begin() else { return }
         defer { finish() }
-        if ownedRouter != nil { await stopOwnedChild() }
-        else { await inspectNow() }
-        guard !backend.mutationRequiresReconciliation, ownedRouter == nil, !recoveryObligation, journal.pending == nil else { reject(); return }
+        let inspected: Bool
+        if ownedRouter != nil { await stopOwnedChild(); inspected = false }
+        else { inspected = await inspectNow() }
+        guard !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation, ownedRouter == nil else { reject(); return }
+        let normalPermission = !recoveryObligation && journal.pending == nil
+        guard normalPermission || (inspected && authorizeIdleDirectQuit()) else { reject(); return }
         quitRequested = true
+    }
+
+    private var hasIdleDirectQuitContext: Bool {
+        guard usable, ownedRouter == nil, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation,
+              recoveryObligation, let pending = journal.pending, let context = matchingContext,
+              pending.context == context, dependencyContext == context, journal.selectedConfigurationPath == context.configPath,
+              let revision, !revision.isEmpty else { return false }
+        return cleanDirect(context)
+    }
+    private func authorizeIdleDirectQuit() -> Bool {
+        // A memory-only obligation cannot be discarded, even when fresh provider evidence is direct.
+        if recoveryObligation && journal.pending == nil {
+            idleQuitJournalUnavailable = true; self.error = CompanionError.privateState.rawValue
+            return false
+        }
+        guard hasIdleDirectQuitContext else { return false }
+        do {
+            guard try store.readExisting() == journal else { throw CompanionError.privateState }
+            idleQuitAuthorized = true
+            return true
+        } catch {
+            idleQuitJournalUnavailable = true; self.error = CompanionError.privateState.rawValue
+            return false
+        }
     }
 
     private var matchingContext: ActivationContext? {
@@ -251,14 +284,19 @@ import Observation
     private func begin() -> Bool {
         guard usable, !busy else { if !busy { reject() }; return false }
         busy = true; error = nil; generation &+= 1; quitRequested = false
+        idleQuitAuthorized = false; idleQuitJournalUnavailable = false
         return true
     }
     private func finish() { generation &+= 1; busy = false }
     private func reject() { if error == nil { error = "The action is unavailable until the current context is reconciled." } }
     private func safe(_ error: Error) -> String { (error as? CompanionError)?.rawValue ?? CompanionError.commandFailed.rawValue }
-    private func persist(_ value: CompanionJournal) throws { try store.save(value); journal = value }
+    private func persist(_ value: CompanionJournal) throws {
+        if value != journal { idleQuitAuthorized = false }
+        try store.save(value); journal = value
+    }
     private func setPending(_ context: ActivationContext, _ phase: CompanionJournal.Phase) throws {
         // Memory retains conservative authority even if persistence fails after a provider write.
+        idleQuitAuthorized = false
         dependencyContext = context; recoveryObligation = true
         var next = journal; next.selectedConfigurationPath = context.configPath; next.pending = .init(context: context, phase: phase)
         try persist(next)
@@ -294,6 +332,7 @@ import Observation
         }
     }
     private func inspectionFailed(_ failure: Error) {
+        idleQuitAuthorized = false
         revision = nil
         if let value = inspection {
             inspection = Inspection(configuration: .init(state: "unavailable"), context: value.context,
@@ -304,6 +343,10 @@ import Observation
         error = safe(failure)
     }
     private func reconcile(_ value: Inspection) {
+        if revision != value.revision || inspection?.configuration != value.configuration ||
+            inspection?.context != value.context || inspection?.provider != value.provider {
+            idleQuitAuthorized = false
+        }
         let changed = revision != nil && revision != value.revision
         let readinessLost = inspection?.provider.proxyReady == true && value.provider.proxyReady != true
         if stoppingID != nil, readinessLost { deferredReadinessLoss = true }
@@ -334,6 +377,7 @@ import Observation
     }
     private func childExited(_ id: UUID) {
         guard let child = ownedRouter, child.id == id else { return }
+        idleQuitAuthorized = false
         generation &+= 1; ownedRouter = nil; directOnlyChild = nil
         if stoppingID == id { return }
         inspection?.provider.proxyReady = nil

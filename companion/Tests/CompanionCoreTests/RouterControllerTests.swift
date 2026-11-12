@@ -55,8 +55,237 @@ import XCTest
         XCTAssertEqual(controller.recoveryContext, recoveryBefore)
         XCTAssertEqual(controller.quitRequested, quitBefore)
         await controller.requestQuit()
-        XCTAssertFalse(controller.canQuit); XCTAssertFalse(controller.quitRequested)
+        XCTAssertTrue(controller.canQuit); XCTAssertTrue(controller.quitRequested)
+        XCTAssertNil(controller.quitBlockReason)
     }
+    private func idlePendingFixture(phase: CompanionJournal.Phase = .directConfirmation) throws -> (RouterController, ControlledBackend, PrivateStore) {
+        let fixtureStore = PrivateStore(directory: root.appendingPathComponent(UUID().uuidString))
+        try fixtureStore.save(CompanionJournal(selectedConfigurationPath: context.configPath,
+            pending: .init(context: context, phase: phase)))
+        let fixtureBackend = ControlledBackend(context: context)
+        return (RouterController(backend: fixtureBackend, store: fixtureStore, browseHome: root), fixtureBackend, fixtureStore)
+    }
+
+    func testIdleQuitPreservesPendingRecovery() async throws {
+        // Removing the idle exception, consuming confirmation, or signalling an external listener breaks this contract.
+        for phase in [CompanionJournal.Phase.activationAttempt, .routedConfirmation, .restoring, .directConfirmation] {
+            for record in ["none", "restored"] {
+                let (controller, backend, store) = try idlePendingFixture(phase: phase)
+                backend.snapshot.provider.recordPhase = record
+                backend.snapshot.provider.proxyReady = true // External readiness never establishes ownership.
+                await controller.refresh()
+                let state = store.directory.appendingPathComponent("state.json")
+                let bytesBefore = try Data(contentsOf: state)
+                XCTAssertFalse(controller.canQuit)
+                await withQueuedPolling(controller, backend: backend) { await controller.requestQuit() }
+                XCTAssertTrue(controller.quitRequested, "\(phase)/\(record)")
+                XCTAssertTrue(controller.canQuit)
+                XCTAssertNil(controller.quitBlockReason)
+                XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+                XCTAssertNotEqual(controller.desktopConfirmation, .confirmedDirect)
+                XCTAssertNil(controller.ownedRouter)
+                XCTAssertTrue(backend.controls.isEmpty)
+                XCTAssertEqual(backend.stopCount, 0)
+                XCTAssertEqual(backend.startCount, 0)
+                let inspections = backend.inspectedPaths.count
+                await controller.requestQuit()
+                XCTAssertTrue(controller.quitRequested)
+                XCTAssertEqual(backend.inspectedPaths.count, inspections + 1)
+                XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+            }
+        }
+    }
+
+    func testIdleQuitRequiresFreshMatchingEvidence() async throws {
+        // Trusting cached Direct or an earlier authorization would permit exit after these action-time changes.
+        let changes: [(String, (inout Inspection) -> Void)] = [
+            ("routed", { $0.provider.state = "router"; $0.provider.recordPhase = "active" }),
+            ("prepared", { $0.provider.recordPhase = "prepared" }),
+            ("conflict", { $0.provider.state = "conflict" }),
+            ("unavailable", { $0.provider.state = "unavailable" }),
+            ("recovery", { $0.provider.recoveryRequired = true }),
+            ("configuration", { $0.configuration.state = "unavailable" }),
+            ("path", { $0.configuration.path = "/synthetic/other.json" }),
+            ("config context", { $0.context?.configPath = "/synthetic/other.json" }),
+            ("home", { $0.context?.codexHome = "/synthetic/other-home" }),
+            ("provider", { $0.context?.providerId = "other" }),
+            ("port", { $0.context?.listenPort = 43130 }),
+            ("revision", { $0.revision = nil }),
+            ("empty revision", { $0.revision = "" })
+        ]
+        for (name, change) in changes {
+            let (controller, backend, store) = try idlePendingFixture()
+            await controller.refresh()
+            await controller.requestQuit()
+            XCTAssertTrue(controller.quitRequested, name)
+            let bytesBefore = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+            change(&backend.snapshot)
+            await controller.requestQuit()
+            XCTAssertFalse(controller.quitRequested, name)
+            XCTAssertFalse(controller.canQuit, name)
+            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), bytesBefore, name)
+            XCTAssertTrue(backend.controls.isEmpty, name)
+            XCTAssertEqual(backend.stopCount, 0, name)
+        }
+        let (controller, backend, store) = try idlePendingFixture()
+        await controller.requestQuit()
+        XCTAssertTrue(controller.quitRequested)
+        let before = try store.readExisting()
+        backend.inspectionError = .commandFailed
+        await controller.requestQuit()
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
+        XCTAssertEqual(try store.readExisting(), before)
+    }
+
+    func testIdleQuitRejectsChangedDurableJournal() async throws {
+        // Recreating missing state or comparing only the pending context would lose or overwrite recovery evidence.
+        for change in ["delete", "corrupt", "phase", "node", "pending", "context"] {
+            let (controller, backend, store) = try idlePendingFixture()
+            await controller.refresh()
+            await controller.requestQuit()
+            XCTAssertTrue(controller.quitRequested)
+            let state = store.directory.appendingPathComponent("state.json")
+            var changed = try store.readExisting()
+            switch change {
+            case "delete": try FileManager.default.removeItem(at: state)
+            case "corrupt": try Data("SYNTHETIC_PRIVATE_SENTINEL".utf8).write(to: state)
+            case "phase": changed.pending?.phase = .restoring; try store.save(changed)
+            case "node": changed.nodeExecutablePath = "/synthetic/other-node"; try store.save(changed)
+            case "pending": changed.pending = nil; try store.save(changed)
+            default: changed.pending?.context.codexHome = "/synthetic/other-home"; try store.save(changed)
+            }
+            let bytesBefore = try? Data(contentsOf: state)
+            await controller.requestQuit()
+            XCTAssertFalse(controller.quitRequested, change)
+            XCTAssertFalse(controller.canQuit, change)
+            XCTAssertEqual(controller.quitBlockReason, .contextUnavailable, change)
+            XCTAssertEqual(controller.error, CompanionError.privateState.rawValue, change)
+            XCTAssertEqual(try? Data(contentsOf: state), bytesBefore, change)
+            XCTAssertTrue(backend.controls.isEmpty)
+            XCTAssertEqual(backend.stopCount, 0)
+        }
+    }
+
+    func testIdleQuitCannotBypassBusyOrLiveMutation() async throws {
+        // Neither an in-flight operation nor newer live/copied uncertainty can borrow cached idle permission.
+        let (controller, backend, store) = try idlePendingFixture()
+        await controller.requestQuit()
+        XCTAssertTrue(controller.canQuit)
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let restore = Task { await controller.restoreDirect() }
+        await waitUntil { barrier.waiting }
+        await controller.requestQuit()
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        backend.mutationRequiresReconciliation = true
+        barrier.release(backend.snapshot); await restore.value
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertTrue(controller.mutationRequiresReconciliation)
+        backend.mutationRequiresReconciliation = false
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        XCTAssertFalse(controller.canQuit)
+        await controller.refresh()
+        await controller.requestQuit()
+        XCTAssertTrue(controller.canQuit)
+        backend.mutationRequiresReconciliation = true
+        XCTAssertFalse(controller.mutationRequiresReconciliation)
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        await controller.requestQuit()
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+        XCTAssertNotNil(try store.readExisting().pending)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+
+    func testIdleQuitRejectsMemoryOnlyRecovery() async throws {
+        // A failed intent save plus unexpected child exit must not turn missing durable recovery into permission.
+        let controller = await started()
+        let state = store.directory.appendingPathComponent("state.json")
+        let bytesBefore = try Data(contentsOf: state)
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: state.path)
+        await controller.activate()
+        backend.exitChild()
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: state.path)
+        backend.snapshot.provider.proxyReady = false
+        await controller.requestQuit()
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
+        XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+        XCTAssertNil(try store.readExisting().pending)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+
+    func testIdleQuitRelaunchRetainsPending() async throws {
+        // Relaunch cannot treat a successful idle Quit as desktop confirmation or consume the retained journal.
+        let expectedPending = CompanionJournal.Pending(context: context, phase: .restoring)
+        try store.save(CompanionJournal(selectedConfigurationPath: context.configPath, pending: expectedPending))
+        let state = store.directory.appendingPathComponent("state.json")
+        let bytesBefore = try Data(contentsOf: state)
+        var first: RouterController? = makeController()
+        await first?.requestQuit()
+        XCTAssertTrue(first?.quitRequested == true)
+        first = nil; store.releaseInstanceLock()
+        let relaunched = makeController()
+        await relaunched.refresh()
+        XCTAssertFalse(relaunched.canQuit)
+        XCTAssertNotEqual(relaunched.desktopConfirmation, .confirmedDirect)
+        XCTAssertEqual(try store.readExisting().pending, expectedPending)
+        XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+        XCTAssertTrue(backend.controls.isEmpty)
+        XCTAssertEqual(backend.startCount, 0)
+        XCTAssertEqual(backend.stopCount, 0)
+        await relaunched.requestQuit()
+        XCTAssertTrue(relaunched.quitRequested)
+        XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+    }
+
+    func testIdleQuitAuthorizationInvalidatesOnChangedPoll() async throws {
+        // A changed revision/context/provider or failed poll must revoke permission even before the next explicit action.
+        let changes: [(inout Inspection) -> Void] = [
+            { $0.revision = "changed-direct" },
+            { $0.context?.providerId = "other" },
+            { $0.provider.recordPhase = "restored" }
+        ]
+        for change in changes {
+            let (controller, backend, _) = try idlePendingFixture()
+            await controller.requestQuit()
+            XCTAssertTrue(controller.canQuit)
+            let original = backend.snapshot
+            change(&backend.snapshot)
+            await controller.refresh()
+            XCTAssertFalse(controller.canQuit)
+            backend.snapshot = original
+            await controller.refresh()
+            XCTAssertFalse(controller.canQuit)
+            await controller.requestQuit()
+            XCTAssertTrue(controller.canQuit)
+            backend.inspectionError = .commandFailed
+            await controller.refresh()
+            XCTAssertFalse(controller.canQuit)
+        }
+    }
+
+    func testIdleQuitAfterUnexpectedOwnedExitRequiresFreshEvidence() async throws {
+        // An exited activated child retains recovery, and only a later fresh direct inspection grants idle permission.
+        let controller = await activated()
+        backend.exitChild()
+        XCTAssertFalse(controller.canQuit)
+        backend.snapshot.provider = .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "restored")
+        backend.snapshot.revision = "direct-after-exit"
+        await controller.requestQuit()
+        XCTAssertTrue(controller.quitRequested)
+        XCTAssertNotEqual(controller.desktopConfirmation, .confirmedDirect)
+        XCTAssertNotNil(try store.readExisting().pending)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+
     func testQuitBlockReasonRecoveryAndBusyPriority() async {
         // In-flight or uncertain work must take precedence over later recovery instructions.
         let controller = await activated()
@@ -285,7 +514,8 @@ import XCTest
         XCTAssertTrue(controller.canQuit)
         XCTAssertNil(controller.error)
     }
-    private func withQueuedPolling(_ controller: RouterController, action: @escaping () async -> Void) async {
+    private func withQueuedPolling(_ controller: RouterController, backend fixtureBackend: ControlledBackend? = nil, action: @escaping () async -> Void) async {
+        let backend = fixtureBackend ?? self.backend!
         // Queuing timer requests is not newer evidence and cannot discard this unchanged action inspection.
         let baseline = backend.inspectedPaths.count
         let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
