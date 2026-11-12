@@ -70,8 +70,10 @@ async function setupProxy(t, handler, options = {}) {
     credentialReader: options.credentialReader,
     getProjectRoutingMode: options.getProjectRoutingMode,
   });
+  const acceptedSockets = [];
+  proxy.on("request", req => acceptedSockets.push(req.socket));
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, acceptedSockets, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -85,6 +87,8 @@ function request(
     body = '{"model":"unchanged","input":"PROMPT_SENTINEL"}',
     onChunk,
     pauseMs = 0,
+    agent,
+    signal,
   } = {},
 ) {
   return new Promise((resolve, reject) => {
@@ -94,6 +98,8 @@ function request(
         port: f.proxyPort,
         path,
         method,
+        agent,
+        signal,
         headers: [
           "Host",
           "127.0.0.1",
@@ -1621,4 +1627,304 @@ nodeTest("managed mode is captured synchronously and invalid results fail closed
     assert.equal((await request(denied)).status, 500);
     assert.equal(denied.calls.length, 0);
   }
+});
+
+function assertRoutingCompletions(f, expected) {
+  const events = diagnosticEvents(f), starts = events.filter(event => event.event === "started");
+  assert.deepEqual(starts.map(event => [event.routingMode, event.routeSelection]), expected);
+  assert.equal(events.filter(event => event.event === "completed").length, starts.length);
+  for (const start of starts) {
+    const completions = events.filter(event => event.event === "completed" && event.requestId === start.requestId);
+    assert.equal(completions.length, 1);
+    for (const field of ["routingMode", "routeSelection", "routeAlias", "source", "projectId", "operation"])
+      assert.equal(completions[0][field], start[field]);
+    if (start.routeSelection === "global") assert.equal(Object.hasOwn(start, "routeAlias"), false);
+  }
+  assert.doesNotMatch(f.logs(), /synthetic|SENTINEL|https:|127\.0\.0\.1/);
+}
+
+// Moving the mode read below global authentication would route either held request incorrectly.
+nodeTest("received mode survives held global authentication", async t => {
+  for (const initialMode of ["off", "on"]) {
+    let mode = initialMode;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [];
+    t.after(() => release.resolve());
+    const reader = managedCredentialReader(reads);
+    const f = await setupProxy(t, async (req, res) => res.end("global"), {
+      projectHandler: async (req, res) => res.end("project"), credentialRouting,
+      getProjectRoutingMode: () => mode,
+      credentialReader: async reference => {
+        const value = await reader(reference);
+        if (reference === globalReference) { entered.resolve(); await release.promise; }
+        return value;
+      },
+    });
+    const body = Buffer.from(' {"previous_response_id":"original","input":"π"}\n');
+    const pending = request(f, {token: "synthetic-global", path: "/v1/responses?held=a%2Fb", body});
+    await within(entered.promise, "global authentication was not held");
+    mode = initialMode === "off" ? "on" : "off";
+    release.resolve();
+    const result = await within(pending, "held global authentication did not finish");
+    assert.equal(result.status, 200);
+    assert.equal(result.body, initialMode === "off" ? "global" : "project");
+    assert.equal(f.calls.length, initialMode === "off" ? 1 : 0);
+    assert.equal(f.projectCalls.length, initialMode === "on" ? 1 : 0);
+    const [call] = initialMode === "off" ? f.calls : f.projectCalls;
+    assert.equal(call.url, initialMode === "off" ? "/api/v1/responses?held=a%2Fb" : "/region/v1/responses?held=a%2Fb");
+    assert.equal(call.headers.host, new URL(initialMode === "off" ? f.globalBaseUrl : f.projectBaseUrl).host);
+    assert.equal(call.headers.authorization, initialMode === "off" ? "Bearer synthetic-global" : "Bearer synthetic-project");
+    assert.deepEqual(call.bodyBytes, body);
+    assert.deepEqual(reads, initialMode === "off" ? [globalReference] : [globalReference, projectAReference]);
+    assertRoutingCompletions(f, [[initialMode, initialMode === "off" ? "global" : "override"]]);
+  }
+});
+
+// Recapturing during an identity retry would use the new mode for a previously received request.
+nodeTest("received mode survives identity retry and new project appearance", async t => {
+  for (const initialMode of ["off", "on"]) {
+    let mode = initialMode, pathReads = 0;
+    const retry = Promise.withResolvers(), reads = [];
+    const project = "33333333-3333-4333-8333-333333333333";
+    const f = await setupProxy(t, async (req, res) => res.end("global"), {
+      projectHandler: async (req, res) => res.end("project"), credentialRouting,
+      getProjectRoutingMode: () => mode, credentialReader: managedCredentialReader(reads),
+    });
+    f.config.projectRoutes[project] = "route-a";
+    // An unsuccessful attempt reads JSON and SQLite before retrying the JSON read.
+    Object.defineProperty(f.config, "codexHome", {configurable: true, get() {
+      if (++pathReads === 3) retry.resolve();
+      return f.dir;
+    }});
+    const body = Buffer.from(' {"model":"unchanged","input":"new-project"} \n');
+    const pending = request(f, {token: "synthetic-global", raw: headers(CHILD), body});
+    await within(retry.promise, "missing saved membership did not enter identity retry");
+    assert.equal(Object.hasOwn(f.state["thread-project-assignments"], CHILD), false);
+    assert.equal(Object.hasOwn(f.state["local-projects"], project), false);
+    assert.equal(f.calls.length + f.projectCalls.length, 0);
+    mode = initialMode === "off" ? "on" : "off";
+    f.state["local-projects"][project] = {id: project};
+    f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: project};
+    await f.saveState();
+    const result = await within(pending, "saved membership did not release identity retry");
+    assert.equal(result.status, 200);
+    assert.equal(result.body, initialMode === "off" ? "global" : "project");
+    assert.ok(pathReads >= 4);
+    assert.equal(f.calls.length, initialMode === "off" ? 1 : 0);
+    assert.equal(f.projectCalls.length, initialMode === "on" ? 1 : 0);
+    const [call] = initialMode === "off" ? f.calls : f.projectCalls;
+    assert.equal(call.url, initialMode === "off" ? "/api/v1/responses" : "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(initialMode === "off" ? f.globalBaseUrl : f.projectBaseUrl).host);
+    assert.equal(call.headers.authorization, initialMode === "off" ? "Bearer synthetic-global" : "Bearer synthetic-project");
+    assert.deepEqual(call.bodyBytes, body);
+    assert.deepEqual(reads, initialMode === "off" ? [globalReference] : [globalReference, projectAReference]);
+    assertRoutingCompletions(f, [[initialMode, initialMode === "off" ? "global" : "override"]]);
+    assert.equal(diagnosticEvents(f)[0].projectId, project);
+  }
+});
+
+// Reselecting after a held key lookup would mix a request's original target with a later mode.
+nodeTest("selected pair survives held project credential and repeated switches", async t => {
+  let mode = "on";
+  const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [];
+  t.after(() => release.resolve());
+  const reader = managedCredentialReader(reads);
+  let projectReads = 0;
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"), credentialRouting,
+    getProjectRoutingMode: () => mode,
+    credentialReader: async reference => {
+      const value = await reader(reference);
+      if (reference === projectAReference && ++projectReads === 1) { entered.resolve(); await release.promise; }
+      return value;
+    },
+  });
+  const body = Buffer.from(' {"previous_response_id":"original","input":"held-key"} \n');
+  const first = request(f, {token: "synthetic-global", body, path: "/v1/responses?held=1"});
+  await within(entered.promise, "project credential retrieval was not held");
+  mode = "off";
+  assert.equal((await request(f, {token: "synthetic-global", body, path: "/v1/responses?off=1"})).body, "global");
+  mode = "on";
+  assert.equal((await request(f, {token: "synthetic-global", body, path: "/v1/responses?on=1"})).body, "project");
+  mode = "off";
+  release.resolve();
+  assert.equal((await within(first, "held project credential did not finish")).body, "project");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 2);
+  assert.equal(f.calls[0].url, "/api/v1/responses?off=1");
+  assert.equal(f.calls[0].headers.authorization, "Bearer synthetic-global");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.deepEqual(f.projectCalls.map(call => call.url), ["/region/v1/responses?on=1", "/region/v1/responses?held=1"]);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.authorization, "Bearer synthetic-project");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
+  for (const call of [...f.calls, ...f.projectCalls]) assert.deepEqual(call.bodyBytes, body);
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, globalReference, projectAReference]);
+  assertRoutingCompletions(f, [["off", "global"], ["on", "override"], ["on", "override"]]);
+});
+
+// Switching must leave open streams on their selected origins and client abort must complete once.
+nodeTest("active stream survives switches and cancellation", async t => {
+  let mode = "on";
+  const releaseProject = Promise.withResolvers(), releaseGlobal = Promise.withResolvers();
+  const projectStarted = Promise.withResolvers(), globalStarted = Promise.withResolvers();
+  const cancelled = Promise.withResolvers(), releaseCancelled = Promise.withResolvers();
+  const abortController = new AbortController(), reads = [], projectChunks = [], globalChunks = [], cancelledChunks = [];
+  t.after(() => { releaseProject.resolve(); releaseGlobal.resolve(); releaseCancelled.resolve(); abortController.abort(); });
+  const f = await setupProxy(t, async (req, res) => {
+    res.writeHead(200, {"content-type": "text/event-stream"});
+    res.write("data: global-1\n\n");
+    await releaseGlobal.promise;
+    res.end("data: global-2\n\n");
+  }, {
+    projectHandler: async (req, res) => {
+      res.writeHead(200, {"content-type": "text/event-stream"});
+      if (req.url.endsWith("cancel=1")) {
+        res.once("close", () => { cancelled.resolve(); releaseCancelled.resolve(); });
+        res.write("data: cancel-1\n\n");
+        await releaseCancelled.promise;
+      } else {
+        res.write("data: project-1\n\n");
+        await releaseProject.promise;
+        res.end("data: project-2\n\n");
+      }
+    },
+    credentialRouting, getProjectRoutingMode: () => mode, credentialReader: managedCredentialReader(reads),
+  });
+  const body = Buffer.from(' {"model":"unchanged","input":"stream"} \n');
+  const first = request(f, {token: "synthetic-global", body, path: "/v1/responses?project=1",
+    onChunk: chunk => { projectChunks.push(chunk); projectStarted.resolve(); }});
+  await within(projectStarted.promise, "project stream was buffered");
+  mode = "off";
+  const second = request(f, {token: "synthetic-global", body, path: "/v1/responses?global=1",
+    onChunk: chunk => { globalChunks.push(chunk); globalStarted.resolve(); }});
+  await within(globalStarted.promise, "global stream was buffered");
+  mode = "on";
+  const aborted = request(f, {token: "synthetic-global", body, path: "/v1/responses?cancel=1", signal: abortController.signal,
+    onChunk: chunk => { cancelledChunks.push(chunk); abortController.abort(); }});
+  await assert.rejects(within(aborted, "cancelled client did not close"), {code: "ABORT_ERR"});
+  await within(cancelled.promise, "cancelled upstream remained open");
+  mode = "off";
+  releaseProject.resolve();
+  releaseGlobal.resolve();
+  assert.equal((await within(first, "original project stream did not finish")).body, "data: project-1\n\ndata: project-2\n\n");
+  assert.equal((await within(second, "original global stream did not finish")).body, "data: global-1\n\ndata: global-2\n\n");
+  assert.equal(Buffer.concat(projectChunks).toString(), "data: project-1\n\ndata: project-2\n\n");
+  assert.equal(Buffer.concat(globalChunks).toString(), "data: global-1\n\ndata: global-2\n\n");
+  assert.equal(Buffer.concat(cancelledChunks).toString(), "data: cancel-1\n\n");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 2);
+  assert.equal(f.calls[0].url, "/api/v1/responses?global=1");
+  assert.equal(f.calls[0].headers.authorization, "Bearer synthetic-global");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.deepEqual(f.projectCalls.map(call => call.url), ["/region/v1/responses?project=1", "/region/v1/responses?cancel=1"]);
+  for (const call of f.projectCalls) {
+    assert.equal(call.headers.authorization, "Bearer synthetic-project");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
+  for (const call of [...f.calls, ...f.projectCalls]) assert.deepEqual(call.bodyBytes, body);
+  assert.deepEqual(reads, [globalReference, projectAReference, globalReference, globalReference, projectAReference]);
+  assertRoutingCompletions(f, [["on", "override"], ["off", "global"], ["on", "override"]]);
+  const completions = diagnosticEvents(f).filter(event => event.event === "completed");
+  assert.equal(completions.filter(event => event.status === 499 && event.errorCode === "CANCELLED").length, 1);
+  assert.equal(completions.filter(event => event.status === 200).length, 2);
+});
+
+// Caching mode on a keep-alive connection would misroute later compact and background requests.
+nodeTest("reused connection captures each compact and background request", async t => {
+  let mode = "off";
+  const reads = [], agent = new http.Agent({keepAlive: true, maxSockets: 1});
+  t.after(() => agent.destroy());
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"), credentialRouting,
+    getProjectRoutingMode: () => mode, credentialReader: managedCredentialReader(reads),
+    allowUnassignedThreadTitles: true,
+  });
+  f.edge(T1, CHILD);
+  const title = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const compactBodyBytes = Buffer.from(' {"model":"unchanged","input":"compact π"} \n');
+  const ordinaryBodyBytes = Buffer.from(' {"previous_response_id":"original","input":"background"} \n');
+  const options = {agent, token: "synthetic-global"};
+  assert.equal((await request(f, {...options, body: ordinaryBodyBytes})).body, "global");
+  mode = "on";
+  assert.equal((await request(f, {...options, path: "/v1/responses/compact?x=a%2Fb", body: compactBodyBytes})).body, "project");
+  mode = "off";
+  assert.equal((await request(f, {...options, raw: headers(CHILD, {turn_trigger: "background"}), body: ordinaryBodyBytes})).body, "global");
+  mode = "on";
+  assert.equal((await request(f, {...options, raw: headers(CHILD, {turn_trigger: "background"}), body: ordinaryBodyBytes})).body, "project");
+  assert.equal((await request(f, {...options, raw: titleHeaders(title), body: ordinaryBodyBytes})).body, "global");
+  assert.equal((await request(f, {...options, path: "/v1/models?x=a%2Fb", method: "GET", raw: [], body: ""})).body, "global");
+  assert.equal((await request(f, {agent, path: "/healthz", method: "GET", raw: [], authenticated: false, body: ""})).status, 200);
+  assert.equal(f.acceptedSockets.length, 7);
+  const [firstSocket, secondSocket] = f.acceptedSockets;
+  assert.equal(firstSocket, secondSocket);
+  for (const socket of f.acceptedSockets) assert.equal(socket, firstSocket);
+  assert.equal(f.calls.length, 4);
+  assert.equal(f.projectCalls.length, 2);
+  assert.deepEqual(f.projectCalls[0].bodyBytes, compactBodyBytes);
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses/compact?x=a%2Fb");
+  assert.deepEqual(f.projectCalls[1].bodyBytes, ordinaryBodyBytes);
+  for (const call of f.projectCalls) assert.equal(call.headers.authorization, "Bearer synthetic-project");
+  for (const call of f.calls) assert.equal(call.headers.authorization, "Bearer synthetic-global");
+  for (const call of f.calls.slice(0, 3)) {
+    assert.equal(call.url, "/api/v1/responses");
+    assert.deepEqual(call.bodyBytes, ordinaryBodyBytes);
+  }
+  assert.equal(f.calls[3].url, "/api/v1/models?x=a%2Fb");
+  assert.deepEqual(f.calls[3].bodyBytes, Buffer.alloc(0));
+  assert.deepEqual(reads, [globalReference, globalReference, projectAReference, globalReference,
+    globalReference, projectAReference, globalReference, globalReference]);
+  const events = diagnosticEvents(f), health = events.filter(event => event.operation === "health");
+  assert.equal(health.length, 1);
+  assert.equal(health[0].routingMode, "on");
+  assert.equal(health[0].routeSelection, undefined);
+  const starts = events.filter(event => event.event === "started");
+  assert.deepEqual(starts.map(event => [event.routingMode, event.routeSelection, event.source, event.operation]), [
+    ["off", "global", "direct", "responses"], ["on", "override", "direct", "compact"],
+    ["off", "global", "ancestor", "responses"], ["on", "override", "ancestor", "responses"],
+    ["on", "global", "unassigned_title", "responses"], ["on", "global", "catalog", "catalog"],
+  ]);
+  for (const start of starts) {
+    const complete = events.filter(event => event.event === "completed" && event.requestId === start.requestId);
+    assert.equal(complete.length, 1);
+    assert.equal(complete[0].routingMode, start.routingMode);
+    assert.equal(complete[0].routeSelection, start.routeSelection);
+  }
+});
+
+// Shared role references still need fresh reads; a switch cannot turn an upstream failure into retry.
+nodeTest("managed shared references read freshly and never retry a failed selected destination", async t => {
+  let mode = "on";
+  const reads = [], values = ["caller-one", "project-one", "caller-two", "caller-three", "project-three"];
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => { mode = "off"; res.writeHead(401); res.end("selected-rejected"); },
+    credentialRouting: urls => {
+      const routing = credentialRouting(urls);
+      routing.routeTargets["route-a"].credential = globalReference;
+      return routing;
+    },
+    getProjectRoutingMode: () => mode,
+    credentialReader: async reference => { reads.push(reference); return values.shift(); },
+  });
+  const body = Buffer.from(' {"previous_response_id":"original","input":"shared"} \n');
+  assert.equal((await request(f, {token: "caller-one", body})).status, 401);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal((await request(f, {token: "caller-two", body})).body, "global");
+  mode = "on";
+  assert.equal((await request(f, {token: "caller-three", body})).status, 401);
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference, globalReference, globalReference]);
+  assert.equal(values.length, 0);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.projectCalls.length, 2);
+  assert.equal(f.calls[0].url, "/api/v1/responses");
+  assert.equal(f.calls[0].headers.host, new URL(f.globalBaseUrl).host);
+  assert.equal(f.calls[0].headers.authorization, "Bearer caller-two");
+  assert.deepEqual(f.projectCalls.map(call => call.headers.authorization), ["Bearer project-one", "Bearer project-three"]);
+  for (const call of f.projectCalls) {
+    assert.equal(call.url, "/region/v1/responses");
+    assert.equal(call.headers.host, new URL(f.projectBaseUrl).host);
+  }
+  for (const call of [...f.calls, ...f.projectCalls]) assert.deepEqual(call.bodyBytes, body);
+  assertRoutingCompletions(f, [["on", "override"], ["off", "global"], ["on", "override"]]);
 });
