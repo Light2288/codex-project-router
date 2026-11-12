@@ -36,6 +36,7 @@ export function createProxy(
     upstreamAgent,
     inactivityTimeoutMs = 300000,
     credentialReader = readKeychainCredential,
+    getProjectRoutingMode,
   } = {},
 ) {
   const server = http.createServer(
@@ -49,6 +50,8 @@ export function createProxy(
         resolution,
         requestMetadata,
         operation,
+        routingMode,
+        routeSelection,
         completed = false;
       const record = (event, status, errorCode) => {
         try {
@@ -56,6 +59,8 @@ export function createProxy(
             event,
             requestId,
             ...resolution,
+            routingMode,
+            routeSelection,
             operation,
             requestMetadata,
             status,
@@ -119,6 +124,12 @@ export function createProxy(
         }
       });
       try {
+        if (getProjectRoutingMode !== undefined) {
+          const mode = getProjectRoutingMode();
+          if (mode !== "on" && mode !== "off")
+            throw new RouterError("INTERNAL_ERROR");
+          routingMode = mode;
+        }
         const admission = admitRequest(req.method, req.url, req.rawHeaders);
         operation = admission.kind === "model"
           ? admission.upstreamPath.split("?")[0] === "/responses/compact"
@@ -158,10 +169,20 @@ export function createProxy(
             ? await identifyProject(req.rawHeaders, config, {
                 signal: controller.signal,
                 allowUnassignedTitle: operation === "responses",
+                requireRoute: routingMode === undefined,
               })
             : { source: "catalog" };
         if (controller.signal.aborted || res.destroyed || completed) return;
-        if (config.credentialRouting && resolution.routeAlias !== undefined) {
+        const selectOverride = config.credentialRouting &&
+          resolution.routeAlias !== undefined && routingMode !== "off";
+        if (routingMode !== undefined) {
+          routeSelection = selectOverride ? "override" : "global";
+          if (!selectOverride) {
+            const { routeAlias: _suspendedAlias, ...membership } = resolution;
+            resolution = membership;
+          }
+        }
+        if (selectOverride) {
           const targets = config.credentialRouting.routeTargets;
           if (!Object.hasOwn(targets, resolution.routeAlias))
             throw new RouterError("CREDENTIAL_UNMAPPED");

@@ -126,3 +126,25 @@ test("unattributed title diagnostics never fabricate project ownership", () => {
   for(const field of ["ownerThreadId","projectId","routeAlias"]) assert.equal(Object.hasOwn(event,field),false);
   assert.doesNotMatch(output,/SENTINEL/);
 });
+
+test("managed diagnostic selection cannot imply suspended override", () => {
+  let output = "";
+  const stream = new Writable({write(chunk, encoding, cb) {output += chunk; cb();}});
+  for (const fields of [
+    {routingMode: "off", routeSelection: "global"},
+    {routingMode: "on", routeSelection: "override"},
+    {routingMode: "on", routeSelection: "global"},
+    {routingMode: "MODE_SENTINEL", routeSelection: "SELECTION_SENTINEL"},
+  ]) emitDiagnostic(stream, {event: "started", source: "direct", projectId: P1, routeAlias: "route-a", ...fields});
+  const [off, override, inherited, invalid] = output.trim().split("\n").map(JSON.parse);
+  assert.equal(off.routingMode, "off");
+  assert.equal(off.routeSelection, "global");
+  assert.equal(Object.hasOwn(off, "routeAlias"), false);
+  assert.equal(override.routingMode, "on");
+  assert.equal(override.routeSelection, "override");
+  assert.equal(override.routeAlias, "route-a");
+  assert.equal(Object.hasOwn(inherited, "routeAlias"), false);
+  assert.equal(Object.hasOwn(invalid, "routingMode"), false);
+  assert.equal(Object.hasOwn(invalid, "routeSelection"), false);
+  assert.doesNotMatch(output, /SENTINEL/);
+});

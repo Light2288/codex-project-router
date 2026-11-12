@@ -25,7 +25,6 @@ async function catalog(codexHome, cfg) {
         typeof project.name !== "string" || identities.has(id.toLowerCase()))
         throw new RouterError("STATE_UNAVAILABLE");
       identities.add(id.toLowerCase());
-      // Routing still uses exact keys, as the existing identity resolver does.
       const routeAlias = cfg && Object.hasOwn(cfg.projectRoutes, id) ? cfg.projectRoutes[id] : null;
       entries.push({ id, name: project.name, routeAlias,
         routeState: routeAlias === null ? "unmapped" : cfg.credentialRouting &&
@@ -35,7 +34,7 @@ async function catalog(codexHome, cfg) {
       const mappings = new Map();
       for (const [id, routeAlias] of Object.entries(cfg.projectRoutes)) {
         const normalized = id.toLowerCase();
-        if (mappings.has(normalized) && mappings.get(normalized) !== routeAlias)
+        if (mappings.has(normalized) || identities.has(normalized) && !Object.hasOwn(projects, id))
           throw new RouterError("STATE_UNAVAILABLE");
         mappings.set(normalized, routeAlias);
         if (!Object.hasOwn(projects, id)) entries.push({ id, name: "", routeAlias, routeState: "catalog_missing" });

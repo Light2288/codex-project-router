@@ -68,6 +68,7 @@ async function setupProxy(t, handler, options = {}) {
     upstreamAgent: options.untrusted ? undefined : agent,
     inactivityTimeoutMs: options.timeoutMs,
     credentialReader: options.credentialReader,
+    getProjectRoutingMode: options.getProjectRoutingMode,
   });
   const proxyPort = await listening(proxy, t);
   return { ...f, calls, projectCalls, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
@@ -1425,3 +1426,199 @@ test("new parent and fork claims cannot admit an unresolved chat", async (t) => 
   }
 });
 }
+
+function managedCredentialReader(reads) {
+  return async reference => {
+    reads.push(reference);
+    if (reference === globalReference) return "synthetic-global";
+    if (reference === projectAReference || reference === projectBReference) return "synthetic-project";
+    throw new Error("REFERENCE_SENTINEL");
+  };
+}
+nodeTest("managed modes select exact paired origins and credentials", async t => {
+  let mode = "off";
+  const reads = [];
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"),
+    credentialRouting, credentialReader: managedCredentialReader(reads), getProjectRoutingMode: () => mode,
+  });
+  delete f.config.projectRoutes[P2];
+  const sentBodyBytes = Buffer.from(' {"model":"original-model","previous_response_id":"continuation-original","input":"π"} \n');
+  const options = {token: "synthetic-global", path: "/v1/responses?x=a%2Fb&x=2", body: sentBodyBytes};
+  assert.equal((await request(f, options)).body, "global");
+  assert.equal((await request(f, {...options, raw: headers(T2)})).body, "global");
+  mode = "on";
+  assert.equal((await request(f, options)).body, "project");
+  assert.equal((await request(f, {...options, raw: headers(T2)})).body, "global");
+  assert.equal(f.calls[0].headers.authorization, "Bearer synthetic-global");
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer synthetic-project");
+  assert.deepEqual(f.projectCalls[0].bodyBytes, sentBodyBytes);
+  assert.equal(f.calls.length, 3);
+  assert.equal(f.projectCalls.length, 1);
+  for (const call of f.calls) {
+    assert.equal(call.headers.authorization, "Bearer synthetic-global");
+    assert.equal(call.url, "/api/v1/responses?x=a%2Fb&x=2");
+    assert.deepEqual(call.bodyBytes, sentBodyBytes);
+  }
+  assert.equal(f.projectCalls[0].url, "/region/v1/responses?x=a%2Fb&x=2");
+  assert.deepEqual(reads, [globalReference, globalReference, globalReference, projectAReference, globalReference]);
+  assert.deepEqual(diagnosticEvents(f).filter(e => e.event === "started").map(e => [e.routingMode, e.routeSelection, e.routeAlias]), [
+    ["off", "global", undefined], ["off", "global", undefined], ["on", "override", "route-a"], ["on", "global", undefined],
+  ]);
+  assert.doesNotMatch(f.logs(), /synthetic|SENTINEL/);
+});
+nodeTest("managed legacy preserves caller authorization without Keychain", async t => {
+  for (const mode of ["off", "on", undefined]) {
+    const f = await setupProxy(t, async (req, res) => res.end("global"), {
+      projectHandler: async (req, res) => res.end("unexpected"),
+      credentialReader: () => { throw new Error("KEYCHAIN_MUST_NOT_RUN"); },
+      ...(mode === undefined ? {} : {getProjectRoutingMode: () => mode}),
+    });
+    assert.equal((await request(f, {authorization: "bEaReR caller-original"})).status, 200);
+    delete f.config.projectRoutes[P1];
+    const result = await request(f, {authorization: "bEaReR caller-original"});
+    if (mode === undefined) {
+      assert.equal(result.status, 422);
+      assert.equal(JSON.parse(result.body).error.code, "ROUTE_UNMAPPED");
+    } else assert.equal(result.status, 200);
+    assert.equal(f.projectCalls.length, 0);
+    for (const call of f.calls) assert.equal(call.headers.authorization, "bEaReR caller-original");
+    if (mode !== undefined) for (const event of diagnosticEvents(f)) assert.equal(Object.hasOwn(event, "routeAlias"), false);
+  }
+});
+nodeTest("managed off suspends missing or unavailable explicit target", async t => {
+  for (const problem of ["missing", "unavailable", "shared reference"]) {
+    const reads = [];
+    const f = await setupProxy(t, async (req, res) => res.end("global"), {
+      projectHandler: async (req, res) => res.end("unexpected"),
+      credentialRouting: urls => {
+        const value = credentialRouting(urls);
+        if (problem === "missing") delete value.routeTargets["route-a"];
+        if (problem === "shared reference") value.routeTargets["route-a"].credential = globalReference;
+        return value;
+      },
+      getProjectRoutingMode: () => "off",
+      credentialReader: async reference => {
+        reads.push(reference);
+        if (reference !== globalReference || reads.length > 2) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return "synthetic-global";
+      },
+    });
+    assert.equal((await request(f, {token: "incorrect"})).status, 401);
+    assert.equal((await request(f, {token: "synthetic-global"})).body, "global");
+    assert.deepEqual(reads, [globalReference, globalReference]);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.projectCalls.length, 0);
+    assert.equal(Object.hasOwn(diagnosticEvents(f).find(e => e.event === "started"), "routeAlias"), false);
+  }
+});
+nodeTest("managed on explicit failure never inherits", async t => {
+  for (const failure of ["missing", "credential", "shared reference", 402, 429, 503, "TLS", "connection", 307]) {
+    const reads = [];
+    let mode = "on";
+    const f = await setupProxy(t, async (req, res) => res.end("unexpected-global"), {
+      projectHandler: async (req, res) => {
+        res.writeHead(typeof failure === "number" ? failure : 200, failure === 307 ? {location: `${f.globalBaseUrl}/redirect`} : {});
+        res.end("selected-response");
+      },
+      untrustedProject: failure === "TLS",
+      credentialRouting: urls => {
+        const value = credentialRouting(urls);
+        if (failure === "missing") delete value.routeTargets["route-a"];
+        if (failure === "shared reference") value.routeTargets["route-a"].credential = globalReference;
+        return value;
+      },
+      getProjectRoutingMode: () => mode,
+      credentialReader: async reference => {
+        reads.push(reference);
+        if (reads.length === 1) return "synthetic-global";
+        if (failure === "credential" || failure === "shared reference") throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return "synthetic-project";
+      },
+    });
+    if (failure === "connection") await new Promise(resolve => f.projectUpstream.close(resolve));
+    const result = await request(f, {token: "synthetic-global"});
+    const expectedStatus = failure === "missing" ? 422 : failure === "credential" || failure === "shared reference" ? 503 : failure === "TLS" || failure === "connection" ? 502 : failure;
+    assert.equal(result.status, expectedStatus, String(failure));
+    assert.equal(mode, "on");
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.projectCalls.length, typeof failure === "number" ? 1 : 0);
+    assert.equal(reads.length, failure === "missing" ? 1 : 2);
+    assert.doesNotMatch(f.logs(), /synthetic|SENTINEL/);
+  }
+});
+nodeTest("managed identity ambiguity never inherits", async t => {
+  const id = "abcdefab-abcd-4abc-8abc-abcdefabcdef";
+  for (const mode of ["off", "on"]) for (const problem of ["catalog mismatch", "duplicate catalog", "mapping mismatch", "duplicate mapping", "ancestor conflict", "projectless", "header conflict"]) {
+    const f = await setupProxy(t, async (req, res) => res.end("unexpected"), {getProjectRoutingMode: () => mode});
+    f.state["local-projects"] = {[id]: {id}};
+    f.state["thread-project-assignments"][T1].projectId = id;
+    f.config.projectRoutes = {};
+    if (problem === "catalog mismatch") f.state["local-projects"][id].id = P2;
+    if (problem === "duplicate catalog") f.state["local-projects"][id.toUpperCase()] = {id};
+    if (problem === "mapping mismatch" || problem === "duplicate mapping") f.config.projectRoutes[id.toUpperCase()] = "route-a";
+    if (problem === "duplicate mapping") f.config.projectRoutes[id] = "route-a";
+    if (problem === "ancestor conflict") {
+      f.state["local-projects"][P2] = {id: P2};
+      f.edge(T2, T1);
+    }
+    if (problem === "projectless") f.state["projectless-thread-ids"].push(T1);
+    await f.saveState();
+    const result = await request(f, problem === "header conflict" ? {raw: headers(T1, {thread_id: T2})} : {});
+    const rejected = JSON.parse(result.body);
+    assert.equal(rejected.error.code, "IDENTITY_CONFLICT");
+    assert.equal(f.calls.length + f.projectCalls.length, 0);
+  }
+});
+nodeTest("new identified project inherits before browsing", async t => {
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {getProjectRoutingMode: () => "on"});
+  const project = "33333333-3333-4333-8333-333333333333";
+  f.state["local-projects"][project] = {id: project};
+  f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: project};
+  await f.saveState();
+  assert.equal((await request(f, {raw: headers(CHILD)})).body, "global");
+  assert.equal(f.calls.length, 1);
+  assert.equal(Object.hasOwn(f.config.projectRoutes, project), false);
+});
+nodeTest("managed catalog and title permissions remain independent", async t => {
+  for (const mode of ["off", "on"]) for (const policy of [false, true]) for (const observe of [false, true]) {
+    const reads = [];
+    const f = await setupProxy(t, async (req, res) => res.end("global"), {
+      getProjectRoutingMode: () => mode, allowUnassignedThreadTitles: policy, observeRequestMetadata: observe,
+      credentialRouting, credentialReader: managedCredentialReader(reads),
+    });
+    assert.equal((await request(f, {token: "synthetic-global", method: "GET", path: "/v1/models?x=1", raw: [], body: ""})).status, 200);
+    assert.equal((await request(f, {token: "synthetic-global", raw: titleHeaders()})).status, policy ? 200 : 503);
+    assert.equal((await request(f, {token: "synthetic-global", path: "/v1/responses/compact", raw: titleHeaders()})).status, 503);
+    assert.equal(f.calls.length, policy ? 2 : 1);
+    assert.deepEqual(reads, [globalReference, globalReference, globalReference]);
+    for (const event of diagnosticEvents(f).filter(e => e.event === "started")) {
+      assert.equal(event.routingMode, mode);
+      assert.equal(event.routeSelection, "global");
+      assert.equal(Object.hasOwn(event, "routeAlias"), false);
+    }
+  }
+});
+nodeTest("managed mode is captured synchronously and invalid results fail closed", async t => {
+  let mode = "off", getterCalls = 0;
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  const f = await setupProxy(t, async (req, res) => res.end("global"), {
+    projectHandler: async (req, res) => res.end("project"), credentialRouting,
+    getProjectRoutingMode: () => { getterCalls++; return mode; },
+    credentialReader: async reference => {
+      if (reference === globalReference) { entered.resolve(); await release.promise; return "synthetic-global"; }
+      return "synthetic-project";
+    },
+  });
+  const pending = request(f, {token: "synthetic-global"});
+  await within(entered.promise, "global lookup did not begin");
+  mode = "on";
+  release.resolve();
+  assert.equal((await pending).body, "global");
+  assert.equal(getterCalls, 1);
+  for (const invalid of [undefined, null, true, "ON", Promise.resolve("on")]) {
+    const denied = await setupProxy(t, async (req, res) => res.end("unexpected"), {getProjectRoutingMode: () => invalid});
+    assert.equal((await request(denied)).status, 500);
+    assert.equal(denied.calls.length, 0);
+  }
+});

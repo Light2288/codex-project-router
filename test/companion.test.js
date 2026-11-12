@@ -104,16 +104,18 @@ test("catalog rejects malformed and normalized conflicting identities without us
     assert.doesNotMatch(JSON.stringify(result), secret);
   }
 });
-test("catalog preserves exact mapping key semantics", async t => {
+test("catalog rejects case-only mapping mismatch and duplicate normalized mapping keys", async t => {
   const f = await setup(t);
   const id = "abcdefab-abcd-4abc-8abc-abcdefabcdef";
   f.state["local-projects"] = { [id]: { id: id.toUpperCase(), name: "Case project" } };
   f.config.projectRoutes = { [id.toUpperCase()]: "route-a" };
   await f.saveState(); await f.saveConfig();
-  assert.deepEqual((await inspectCompanion({ configPath: f.configPath })).catalog.entries, [
-    { id: id.toUpperCase(), name: "", routeAlias: "route-a", routeState: "catalog_missing" },
-    { id, name: "Case project", routeAlias: null, routeState: "unmapped" },
-  ]);
+  assert.deepEqual((await inspectCompanion({ configPath: f.configPath })).catalog, {state: "unavailable", entries: []});
+  for (const alias of ["route-a", "route-b"]) {
+    f.config.projectRoutes[id] = alias;
+    await f.saveConfig();
+    assert.deepEqual((await inspectCompanion({ configPath: f.configPath })).catalog, {state: "unavailable", entries: []});
+  }
 });
 test("mutation rejects changed activation context", async t => {
   const f = await setup(t);
