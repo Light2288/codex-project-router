@@ -103,7 +103,7 @@ import CompanionCore
                 terminate()
             } else {
                 let reason = controller.quitBlockReason ?? .contextUnavailable
-                let response = await presentQuitAlert(QuitAlert.make(reason: reason))
+                let response = await presentQuitAlert(QuitAlert.make(reason: reason, ownsRouter: controller.ownedRouter != nil))
                 if response == .alertFirstButtonReturn {
                     if let showControls { showControls() }
                     else { openControls() }

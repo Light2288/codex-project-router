@@ -34,10 +34,10 @@ import CompanionCore
     func testFixedAlertCopyAndCancelBinding() async throws {
         // Wrong reason selection or raw backend/context interpolation must not reach native alert content.
         let cases: [(RouterController.QuitBlockReason, String)] = [
-            (.directConfirmationPending, "Direct-response confirmation is pending. Open Controls to complete the check."),
-            (.operationInProgress, "A router operation is still running or needs reconciliation. Open Controls to review its status."),
-            (.directRecoveryRequired, "Direct recovery is incomplete. Open Controls to restore the direct connection, then complete the manual restart and response check."),
-            (.contextUnavailable, "Quit could not be completed safely. Open Controls to review the current status and recovery guidance.")
+            (.directConfirmationPending, "Codex may still need the router. Check the direct connection before quitting."),
+            (.operationInProgress, "A router operation is running or needs checking. Review its status before quitting."),
+            (.directRecoveryRequired, "The app still needs to restore the direct connection before it can quit."),
+            (.contextUnavailable, "The app cannot check that quitting is safe. Review its status and recovery instructions.")
         ]
         for (reason, message) in cases {
             let fixtureStore = PrivateStore(directory: root.appendingPathComponent(UUID().uuidString))
@@ -56,15 +56,56 @@ import CompanionCore
             }
             await controller.requestQuit()
             XCTAssertEqual(controller.quitBlockReason, reason)
-            let alert = QuitAlert.make(reason: try XCTUnwrap(controller.quitBlockReason))
+            let alert = QuitAlert.make(reason: try XCTUnwrap(controller.quitBlockReason), ownsRouter: controller.ownedRouter != nil)
             XCTAssertEqual(alert.alertStyle, .warning)
             XCTAssertEqual(alert.messageText, "Cannot quit yet")
             XCTAssertEqual(alert.informativeText, message)
-            XCTAssertEqual(alert.buttons.map(\.title), ["Open Controls", "Keep Running"])
+            XCTAssertEqual(alert.buttons.map(\.title), ["Show steps to quit", "Keep Running"])
             XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r")
             XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}")
             XCTAssertFalse(([alert.messageText, alert.informativeText] + alert.buttons.map(\.title)).joined().contains(sentinel))
         }
+    }
+
+    func testPendingWithoutOwnedRouterRequestsFreshQuitCheck() async throws {
+        // A pending result without ownership must request another Quit check rather than manual confirmation.
+        let controller = try await makeController(pending: true)
+        XCTAssertNil(controller.ownedRouter)
+        XCTAssertEqual(controller.quitBlockReason, .directConfirmationPending)
+        let alert = QuitAlert.make(reason: try XCTUnwrap(controller.quitBlockReason), ownsRouter: false)
+        XCTAssertEqual(alert.messageText, "Cannot quit yet")
+        XCTAssertEqual(alert.informativeText, "Quit needs a fresh check of the saved recovery information. Review the status, then try Quit again.")
+        XCTAssertEqual(alert.buttons.map(\.title), ["Show steps to quit", "Keep Running"])
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}")
+        XCTAssertFalse(([alert.messageText, alert.informativeText] + alert.buttons.map(\.title)).joined().contains(sentinel))
+    }
+
+    func testDelegateUsesOwnershipAfterDeniedAttempt() async throws {
+        // Ownership lost during the attempt must not retain the owned-router restart description.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let child = try XCTUnwrap(controller.ownedRouter)
+        let inspection = QuitBarrier<Inspection>()
+        backend.inspectBarrier = inspection
+        var presentCount = 0
+        let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { alert in
+            presentCount += 1
+            XCTAssertNil(controller.ownedRouter)
+            XCTAssertEqual(controller.quitBlockReason, .directConfirmationPending)
+            XCTAssertEqual(alert.informativeText, "Quit needs a fresh check of the saved recovery information. Review the status, then try Quit again.")
+            return .alertSecondButtonReturn
+        }, showControls: { XCTFail("Keep Running must not reveal controls") },
+           terminate: { XCTFail("A denied attempt must not terminate") })
+        let quit = try XCTUnwrap(delegate.requestQuit())
+        try await waitUntil { inspection.waiting }
+        backend.onChildExit?(child.id, 0)
+        inspection.release(backend.snapshot)
+        await quit.value
+        XCTAssertEqual(presentCount, 1)
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertNotNil(try store.load().pending)
+        XCTAssertEqual(backend.stopCount, 0)
     }
 
     func testOpenControlsAndKeepRunningActions() async throws {
@@ -81,7 +122,7 @@ import CompanionCore
             var controlsAfterDeniedAttempt = -1, inspectionsAfterDeniedAttempt = -1, stopsAfterDeniedAttempt = -1
             let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { alert in
                 presentCount += 1
-                XCTAssertEqual(alert.informativeText, "Direct-response confirmation is pending. Open Controls to complete the check.")
+                XCTAssertEqual(alert.informativeText, "Codex may still need the router. Check the direct connection before quitting.")
                 journalAfterDeniedAttempt = Result { try self.store.load() }
                 confirmationAfterDeniedAttempt = controller.desktopConfirmation
                 recoveryAfterDeniedAttempt = controller.recoveryContext
