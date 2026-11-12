@@ -2,10 +2,9 @@
 
 Date: 2026-11-12
 
-Status: native and automated acceptance completed. All three tasks have independent
-approval, including the evidence-only Task 3 follow-up. The final sequential
-specification/quality gate remains pending; this record does not yet claim
-completion of the increment.
+Status: completed. Native and automated acceptance, independent task reviews and
+the sole final sequential specification/quality gate passed. No final findings
+remain. The existing checkout and local branch are preserved.
 
 Scope: the approved `companion-quit-guidance` increment, based on
 `f1e00832a000510043a02e6abce442a4d8ee473d`. The approved specification and separate
@@ -227,7 +226,18 @@ correction obtained the attributed user result above and retained the original
 automation qualification. Scoped re-review marked the finding addressed with no
 new breakage; the Task 3 deliverable is approved.
 
-The sole integrated final specification review followed by quality review remains
-pending for the follow-up range starting at
-`f1e00832a000510043a02e6abce442a4d8ee473d`. No final review disposition is claimed;
-lifecycle/checklists stay open until those reviews have actual dispositions.
+The sole integrated final gate reviewed the complete 13-file follow-up diff from
+`f1e00832a000510043a02e6abce442a4d8ee473d` through
+`18189380d0fcd2239d5426f119f3ab4430ca20c5`, with the approved pair, full production
+context, task dispositions and actual automated/native evidence. Specification
+review passed with no findings before quality review opened. Quality review then
+passed with findings NONE. Current, expected and echoed package identities and
+exact-byte hash matched; the package stayed unchanged across the two stages.
+No final corrective wave was needed.
+
+Closeout changes only lifecycle/checklist metadata and this sanitized record.
+Product/test sources and the signed build remain the versions covered by fresh
+acceptance; no redundant full suite was rerun for those documentation-only changes.
+Whitespace and clean-Git checks complete the closeout. Full VoiceOver and live
+operational validation remain unproven as documented. No push, merge or further
+increment is performed.

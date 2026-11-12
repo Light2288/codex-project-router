@@ -104,4 +104,4 @@ Use temporary owner-only journals/configuration and positively tracked native pr
 
 **Execution endpoint:** Deliver the clearer blocked-Quit dialog and targeted guidance at existing controls, with preserved permission/cancellation safeguards, documentation, fresh automated/native verification and sequential final review; report results and limitations, then stop before broader UI work or integration.
 
-**Current stage:** Stage 4 — specification and separate implementation plan explicitly approved on 2026-11-12; implementation authorized.
+**Current stage:** Stage 4 complete — implemented after separate scope/design, specification and plan approvals. Fresh automated acceptance, isolated native observations (including attributed human visibility checks), independent task reviews and the sole final sequential specification/quality gate passed. See `docs/validation/companion-quit-guidance.md`. Stop before broader companion work or integration; keep the existing branch and checkout.
