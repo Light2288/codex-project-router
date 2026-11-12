@@ -147,10 +147,15 @@ async function readRecord(path, context) {
     throw new RouterError("ACTIVATION_CONFLICT");
   }
 }
-async function context(configPath) {
+async function context(configPath, expectedContext) {
   const cfg = await loadRouterConfig(configPath),
     path = await realpath(configPath),
     dir = dirname(path);
+  // Bind companion authorization to the configuration loaded by this operation,
+  // before opening a lock or writing provider/recovery state in its directory.
+  if (expectedContext !== undefined && !isDeepStrictEqual(expectedContext, {
+    configPath: path, codexHome: cfg.codexHome, providerId: cfg.providerId, listenPort: cfg.listenPort,
+  })) throw new RouterError("ACTIVATION_CONFLICT");
   await privateDirectory(dir);
   return {
     cfg,
@@ -223,15 +228,15 @@ async function locked(c, fn) {
     await unlink(path);
   }
 }
-async function operation(configPath, fn) {
+async function operation(configPath, fn, expectedContext) {
   try {
-    const c = await context(configPath);
+    const c = await context(configPath, expectedContext);
     return await locked(c, () => fn(c));
   } catch (e) {
     throw e instanceof RouterError ? e : new RouterError("STORAGE_FAILED");
   }
 }
-export async function activate(configPath) {
+export async function activate(configPath, { expectedContext } = {}) {
   return operation(configPath, async (c) => {
     const file = await ownedFile(c.codexPath),
       p = provider(file.text, c.cfg),
@@ -285,9 +290,9 @@ export async function activate(configPath) {
       prepared,
     );
     return { state: "active", changed: true, restartRequired: true };
-  });
+  }, expectedContext);
 }
-export async function rollback(configPath) {
+export async function rollback(configPath, { expectedContext } = {}) {
   return operation(configPath, async (c) => {
     const file = await ownedFile(c.codexPath),
       p = provider(file.text, c.cfg),
@@ -316,9 +321,9 @@ export async function rollback(configPath) {
         existing.text,
       );
     return { state: "direct", changed, restartRequired: changed };
-  });
+  }, expectedContext);
 }
-export async function status(configPath) {
+export async function inspectActivation(configPath) {
   try {
     const c = await context(configPath),
       file = await ownedFile(c.codexPath),
@@ -337,12 +342,28 @@ export async function status(configPath) {
         : p.url === (existing?.record.originalBaseUrl ?? c.cfg.upstreamBaseUrl)
           ? "direct"
           : "conflict";
+    const recordPhase = existing?.record.phase ?? "none";
     return {
-      state,
-      proxyReady,
-      recoveryRequired: existing?.record.phase === "prepared",
+      context: {
+        configPath: c.configPath,
+        codexHome: c.cfg.codexHome,
+        providerId: c.cfg.providerId,
+        listenPort: c.cfg.listenPort,
+      },
+      // Only operational identity contributes: never hash authentication data
+      // or raw provider/configuration bytes into comparison metadata.
+      revision: digest(JSON.stringify([
+        configFingerprint(c.cfg), state,
+        existing ? [existing.record.routerConfigPath, existing.record.codexConfigPath,
+          existing.record.providerId, existing.record.backupFile, recordPhase] : null,
+      ])),
+      recordPhase,
+      status: { state, proxyReady, recoveryRequired: recordPhase === "prepared" },
     };
   } catch (e) {
     throw e instanceof RouterError ? e : new RouterError("STORAGE_FAILED");
   }
+}
+export async function status(configPath) {
+  return (await inspectActivation(configPath)).status;
 }

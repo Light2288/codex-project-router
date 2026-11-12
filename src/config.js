@@ -1,5 +1,5 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { readFile, realpath, stat, lstat } from "node:fs/promises";
+import { isAbsolute, relative, resolve, dirname, basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { RouterError } from "./errors.js";
@@ -63,6 +63,19 @@ export async function loadRouterConfig(configPath) {
     const within = relative(root, actualPath);
     if (!within.startsWith("..") && !isAbsolute(within))
       throw new RouterError("CONFIG_INVALID");
+    // Packaging relocates the source root; canonical ancestors remain the
+    // authority for keeping private configuration out of any checkout/bundle.
+    for (let dir = dirname(actualPath); ; dir = dirname(dir)) {
+      if (basename(dir).toLowerCase().endsWith(".app"))
+        throw new RouterError("CONFIG_INVALID");
+      try {
+        await lstat(join(dir, ".git"));
+        throw new RouterError("CONFIG_INVALID");
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+      }
+      if (dirname(dir) === dir) break;
+    }
     const info = await stat(actualPath);
     if (
       !info.isFile() ||

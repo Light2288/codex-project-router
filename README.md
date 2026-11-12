@@ -180,6 +180,27 @@ Desktop project/chat creation, sending prompts, moving/forking chats, and restar
 
 Record each case as an observed pass, observed failure, or not run. Credential-routing validation requires A/B responses and automatic titles, overlap, same-chat follow-up, reassignment and the subsequent request, plus exact recovery and direct-response confirmation. Exercise fork, saved subagent and compaction cases opportunistically and explicitly record any unrun cases. Missing required user actions or evidence leaves live validation incomplete. Observed incompatibilities remain failed capabilities. Earlier identification/title validation and passing synthetic tests do not establish live credential-routing compatibility.
 
+## Native menu-bar companion (macOS)
+
+The local Apple silicon app keeps router start, provider activation, direct recovery
+and manual desktop-response confirmation in one controls window. It requires macOS
+14 or newer and an installed Node 24; configuration stays private in place. The app
+never starts routing on launch or selection. Closing controls leaves the app and
+owned listener running; Quit uses guarded direct recovery.
+
+```sh
+npm run companion:test
+npm run companion:build
+npm run companion:package-test
+open "dist/Codex Project Router.app"
+```
+
+The app can move independently of this checkout and uses only its bundled router
+resources plus an installed absolute Node path. See [companion setup, lifecycle,
+packaging and recovery](companion/README.md) for runtime selection, provider-wide
+activation effects, separate readiness/ownership/confirmation facts, external
+listener cleanup, manual GUI checks and deferred work.
+
 ## Development checks
 
 ```sh
