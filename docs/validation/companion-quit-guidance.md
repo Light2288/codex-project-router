@@ -2,10 +2,9 @@
 
 Date: 2026-11-12
 
-Status: in progress. Tasks 1 and 2 have independent task approval, and fresh
-automated acceptance passed. Isolated native observations, Task 3 review and the
-final sequential specification/quality gate remain pending. This record does not
-yet claim completion of the increment.
+Status: native and automated acceptance completed. Tasks 1 and 2 have independent
+task approval. Task 3 review and the final sequential specification/quality gate
+remain pending; this record does not yet claim completion of the increment.
 
 Scope: the approved `companion-quit-guidance` increment, based on
 `f1e00832a000510043a02e6abce442a4d8ee473d`. The approved specification and separate
@@ -108,32 +107,96 @@ interaction, scrolling, emphasis, focus, accessibility or cancellation visibilit
 
 ## Isolated native observation
 
-Pending; parent-owned. Automated package checks do not establish the following
-interaction or usability observations:
+The parent used a fresh relocated copy of the signed release app in an owner-only
+synthetic HOME and CFFIXED_USER_HOME, with 60 synthetic projects. Seatbelt denied
+real Codex/router private paths, checkout reads/writes and non-loopback outbound
+traffic. A negative checkout-read control failed as required, and each tracked
+native launch positively held its synthetic instance lock. Initial on-screen
+window presence was independently established. The Mac was initially locked; UI
+interaction resumed only after the user unlocked it.
 
-- Primary guidance from open, closed, minimized and project-scrolled Controls;
-  recovery expansion, visible emphasis and repeat navigation to the same target.
-- Ordinary polls preserving user scroll/focus, close/reopen clearing guidance,
-  keyboard/accessibility reachability and no highlighted operation invocation.
-- Current unavailable-journal and owned-confirmation destinations/text with
-  unchanged synthetic provider/router/journal bytes after showing guidance.
-- Keep Running/Escape/cancel visibility preservation, with attributed human
-  observation if a UI inspection tool activates/restores the window.
-- Clean idle Direct exit without a dialog and retained pending recovery on
-  relaunch, using the fresh signed build.
+### Unavailable evidence, navigation and focus
 
-Native verification must use only a confined, relocated signed synthetic fixture
-with owner-only HOME/CFFIXED_USER_HOME, denial of real private/checkout access and
-non-loopback outbound traffic, a negative checkout-read control, positive native
-instance-lock/process proof and exact tracked-process/port cleanup. Raw fixture
-paths, PIDs and checkpoints stay outside Git. No real operational/private changes,
-credential access, Codex restart or model response is required or claimed.
+Only after initialization, the harness replaced its synthetic pending journal
+with invalid bytes to force a fresh denied Quit. Cmd-Q displayed the exact
+unavailable-evidence description with **Show steps to quit** and **Keep Running**.
+Return on the primary action revealed the existing window, expanded its manual
+recovery disclosure and brought the target into view. AX and screenshots showed
+the fixed inline guidance, semibold text and black outline. The focused element
+was the non-actionable guidance text. Tab moved to project search without
+invoking an operation.
+
+After scrolling to synthetic project rows 35–44, multiple ordinary two-second
+polls left the visible rows and scroll placement unchanged. A new Quit/primary
+request for the identical destination returned to the expanded recovery target,
+with guidance focus and emphasis. This was an explicit new request, not polling.
+
+The automation also invoked minimize, then Quit/primary, and separately red close,
+then Quit/primary. Final screenshots in both sequences showed the one existing
+window and readable targeted recovery guidance. These are action/result sequences;
+automation activation prevents an independent claim about hidden/minimized
+visibility between those calls. Red close followed by ordinary Cmd-O reopen
+removed guidance and outline, without replaying navigation. Existing disclosure
+expansion remained ordinary view state.
+
+For cancellation visibility, no target-app inspection occurred during the human
+handoff. The user performed menu-bar Quit → Keep Running and repeat Quit → Escape
+with the window minimized and reported **“Both left it minimized.”** The user then
+closed the window and repeated both paths, reporting **“Both left it closed.”**
+These are attributed human observations rather than inferred automation results.
+The harness subsequently verified the exact native process remained alive and
+that router/provider bytes and the deliberately invalid journal were unchanged.
+
+### Idle Quit, retained recovery and owned-router guidance
+
+The harness restored only its original synthetic journal. Explicit Cmd-Q exited
+naturally with code 0 and no signal, without a manual response check, Codex restart
+or model request. Router configuration, provider settings and pending journal
+bytes were unchanged, and the selected port was empty. No post-Quit target-app
+inspection was made before process-exit verification, avoiding accidental relaunch.
+
+Fresh relaunch retained pending recovery and showed Direct, no matching listener,
+no owned router and Not confirmed. The parent clicked **Start router** only in this
+confined fixture. The app showed matching readiness and ownership; the harness
+positively tracked the exact Node child by parent PID and bundled CLI/config
+identity. No activation or upstream request occurred.
+
+Application-menu Quit displayed the exact owned-router description. The primary
+action focused the approved owned-confirmation guidance and visibly outlined the
+existing direct-response button. Return while guidance text was focused invoked
+nothing; Tab moved to search, desktop confirmation stayed Not confirmed and all
+synthetic router/provider/journal bytes remained unchanged. The response-confirmation
+button was never pressed.
+
+The parent then sent SIGTERM only to that positively tracked synthetic router,
+leaving the native app running. AX and screenshots showed the obsolete restart
+instruction removed and the exact idle retry guidance at operational facts.
+Search retained keyboard focus; there was no new explicit navigation request,
+automatic Quit or confirmation. Explicit Cmd-Q subsequently exited naturally with
+code 0 and no signal, preserving the pending journal and unchanged provider/router
+bytes, with the port empty.
+
+### Cleanup and limits
+
+The harness restored the original synthetic journal, verified all exact tracked
+native/router processes had exited and the selected port was empty, then removed
+only its temporary fixture. Raw fixture paths, process identities, checkpoints
+and runtime evidence stayed outside Git. No product code changed after the fresh
+build, so automated acceptance was not repeated for this evidence-only update.
+
+Accessibility evidence covers exposed AX text/buttons, explicit guidance focus,
+Tab movement and Return invoking no default operation. A full VoiceOver audit is
+not claimed. Hidden/minimized cancellation relies on the attributed human result;
+primary reveal evidence retains the automation-activation qualification above.
+No real operational configuration, Keychain, gateway/model call or Codex restart
+was used. These tests establish neither desktop-loaded settings nor live billing
+or complete stream delivery. Predecessor history and its qualifications remain
+unchanged.
 
 ## Review and completion
 
-Pending: parent native evidence and privacy/process cleanup, independent Task 3
-review, then the sole integrated final specification review followed by quality
-review for the follow-up range starting at
-`f1e00832a000510043a02e6abce442a4d8ee473d`. No final disposition or completed
-native acceptance is claimed. Lifecycle/checklists stay open until those items
-have actual evidence and review dispositions.
+Native evidence and privacy/process cleanup are complete. Independent Task 3
+review and the sole integrated final specification review followed by quality
+review remain pending for the follow-up range starting at
+`f1e00832a000510043a02e6abce442a4d8ee473d`. No final review disposition is claimed;
+lifecycle/checklists stay open until those reviews have actual dispositions.
