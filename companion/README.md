@@ -273,22 +273,51 @@ Controls distinguish the pending check from conditional idle exit permission;
 only Quit verifies the saved evidence for that exit.
 
 A denied Quit presents the native **Cannot quit yet** alert with fixed
-guidance for the current blocker. Pending direct confirmation reads:
-“Direct-response confirmation is pending. Open Controls to complete the check.”
-**Open Controls** (Return) reveals the existing controls window, including when
-closed or minimized. **Keep Running** (Escape/cancel) dismisses the alert without
-changing window visibility. Complete any required direct restoration and manual
-Codex restart/working-response confirmation in Controls when required by the
-guarded state before requesting Quit again. Neither alert action confirms recovery
-or performs a routing operation; opening Controls retains its ordinary refresh
-behavior. Repeated Quit requests
-during cleanup or the alert do not queue another attempt or dialog. Dismissal
-never retries Quit, even if the state became safe while the alert was visible.
+reason-specific text. For example, pending direct confirmation with an owned
+router reads: “Codex may still need the router. Check the direct connection before
+quitting.” An unavailable status or recovery record instead reads: “The app
+cannot check that quitting is safe. Review its status and recovery instructions.”
+**Show steps to quit** (Return) reveals and raises the existing controls window,
+including when closed or minimized. After the ordinary state refresh completes,
+it brings the relevant existing controls into view, outlines the target and places
+semibold guidance beside it. The guidance text receives keyboard/accessibility
+focus; it does not invoke the highlighted control or make it a default action.
+No separate steps window or duplicate recovery controls are added.
+
+The destination follows current evidence after refresh, rather than the earlier
+alert alone: an operation points to status and **Refresh**; recovery points to
+**Restore direct**; an owned router awaiting a direct response points to the
+existing direct-response confirmation; unavailable evidence expands the existing
+manual-recovery instructions when available, otherwise pointing to Setup/status.
+If safe Stop or normal Quit has become available, guidance explains that result
+and asks for another explicit Quit. Disabled actions fall back to status/recovery
+instructions. An idle Direct app with no owned router is asked to choose Quit
+again for a fresh saved-evidence check, without a restart or response prerequisite.
+An owned router may still require restoring Direct, restarting Codex and verifying
+a working direct response before confirmation and a subsequent Quit.
+
+Guidance updates when evidence changes. Ordinary polling does not repeat the
+scroll/focus request; choosing **Show steps to quit** again navigates again even
+to the same target. Guidance is discarded when Controls closes, so ordinary
+close/reopen has no stale emphasis. The menu-bar **Open controls…** action retains
+its ordinary behavior. **Keep Running**, Escape, abort and cancel dismiss the
+alert without navigation, changing window visibility or retrying Quit. Closing
+Controls still leaves the companion running.
+
+Showing guidance neither grants exit permission nor confirms recovery, restores
+settings, starts/stops a listener or clears saved recovery. The user must perform
+any required operation and request Quit explicitly again. Repeated Quit requests
+during cleanup, the alert or its guidance refresh do not queue another attempt or
+dialog. Dismissal never retries Quit, even if the state became safe while the
+alert was visible.
 Successful guarded Quit, including the existing safe initialization-failure and
 second-instance exceptions, exits without showing this alert. These messages do
 not diagnose or fix why a prior confirmation might reopen.
-The accepted **Show steps to quit** preference and broader alert wording/button
-or step-navigation changes remain deferred to a later approved increment.
+The previously deferred **Show steps to quit** wording and targeted existing-control
+guidance are delivered in this follow-up. Actual verification evidence and pending
+native/review items are recorded in
+[`docs/validation/companion-quit-guidance.md`](../docs/validation/companion-quit-guidance.md).
+Broader terminology/layout changes and a dedicated steps panel remain deferred.
 
 An occupied or unknown port after owned-child exit remains distinct from
 matching readiness. External listeners are never adopted or signalled.
