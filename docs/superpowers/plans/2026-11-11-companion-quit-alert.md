@@ -1,10 +1,10 @@
-# Companion Blocked-Quit Alert Implementation Plan
+# Companion Quit Behavior and Blocked-Quit Alert Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Explain a denied Quit with a native alert and a clear route to existing Controls, preserving the controller's exit safeguards.
+**Goal:** Allow verified idle direct-state Quit without a desktop restart or response check, preserving pending recovery and existing owned-listener protection.
 
-**Architecture:** Add a read-only blocking-reason projection to the existing controller. Present fixed native alert content from the common application Quit path and retain one synchronous request guard through the entire attempt and alert response. Use small defaulted presentation/action closures for deterministic app tests, without adding a new service or changing routing authorization.
+**Architecture:** Extend the private store with a non-creating read of existing recovery evidence. Add a narrowly scoped controller authorization acquired only by a fresh explicit Quit attempt; reuse the existing application termination flow. Update only conditional Controls guidance that would otherwise falsely require confirmation before an eligible idle exit; retain the existing blocked alert and its coordination.
 
 **Tech Stack:** Swift 6 toolchain, Swift language mode v5, SwiftUI/AppKit, XCTest, macOS 14+, installed Node 24, existing Node test/build/package scripts.
 
@@ -12,190 +12,202 @@
 
 **Slug:** `companion-quit-alert`
 
-**Status:** APPROVED
+**Status:** APPROVED — revision 2 approved 2026-11-12
 
 **Created:** 2026-11-11
 
 **Updated:** 2026-11-12
 
-**Provenance:** Implements only the alert increment confirmed by the user's `confirmed` and the subsequently presented specification approved by `approved`, both on 2026-11-11. The completed companion specification/plan and `docs/validation/companion-operational-controls.md` remain prerequisite evidence, not tasks to repeat. No plan approval or implementation authorization is inferred from those messages.
+**Provenance:** Revision of the existing same-path plan for specification revision 2, explicitly approved by the user's `approved` after its presentation on 2026-11-12. Original alert-only specification/plan approvals and implementation remain in Git history. The user's `ok, resolve that Quit behavior before refining the alert` confirmed the revised scope. Approval of the original plan does not authorize these additional tasks; this revised plan requires its own approval.
 
 **Execution tier:** full
 
 **Implementation model role:** full
 
-**Execution method:** Preserve the user's explicitly selected Subagent-driven method: a fresh implementer and independent task review, followed by the required sequential final review. The user approved the separately presented plan on 2026-11-12.
+**Execution method:** Preserve the user's explicitly selected Subagent-driven method: fresh implementer and independent review per task, then the sole final sequential specification/quality gate. No new execution-method selection is needed.
 
 ## Global Constraints
 
-- Native title **Cannot quit yet**; actions **Open Controls** and **Keep Running**. No **Quit Anyway**.
-- Observed-case message: **Direct-response confirmation is pending. Open Controls to complete the check.**
-- Preserve controller reconciliation, authorized child-stop behavior, ownership checks, confirmation rules and initialization-failure/second-instance safe exits. Do not change `canQuit`, `requestQuit()` authorization, journal schema, or normal window refresh semantics.
-- Fixed sanitized messages only; no private paths, project IDs/mappings, endpoints, credentials, references, raw exceptions or subprocess output.
-- Use synthetic private state and positively tracked test processes. No real proxy activation, gateway calls, credential access, Codex restart or model prompt is needed for this increment.
-- Existing checkout only. Preserve the completed companion branch; no worktree, force update, push or merge. Gate-required fast-forward maintenance of local main is permitted only after this plan is approved.
-- Defer diagnosis of reopened confirmation, relaxing Quit guards, account/default/assignment editing, notification redesign and startup integration.
+- No owned router remains; a retained process handle whose exit has not been established does not count as absence.
+- No controller mutation or child-stop operation is in progress; live or copied backend uncertainty cannot be bypassed.
+- Fresh matching configuration/context, direct provider settings, recovery-required false, record absent/restored and usable revision are required for the added exit.
+- Any pending recovery information to retain has a valid durable private journal consistent with that context. A memory-only obligation does not qualify.
+- Successful idle Quit does not clear the pending journal, mark desktop confirmation complete, or report that Codex has loaded direct settings.
+- Preserve owned-listener shutdown, direct-only start, normal exit, initialization-failure and second-instance exceptions. No external listener adoption or termination.
+- Retain native title **Cannot quit yet**, actions **Open Controls** and **Keep Running**, and current fixed descriptions for remaining guarded states. No **Quit Anyway**, label change or step navigation in this revision.
+- Use synthetic private state and positively tracked processes. No real activation/configuration change, gateway call, Keychain access, Codex restart or model prompt is required.
+- Existing checkout and `fix/companion-quit-alert` branch; preserve work. No worktree, push or merge. Do not repeat initial branch creation or update main merely to resume this approved increment.
 
 ## Review Focus
 
-1. Two Quit calls before the first Task begins must claim only one request synchronously — `testQuitClaimsSynchronouslyAndIgnoresRepeatedRequests`.
-2. A held backend attempt or modal alert must not allow nested termination requests to queue more operations — `testHeldQuitAndAlertRejectReentrantTermination`.
-3. Live backend uncertainty can precede the copied controller flag; feedback must prefer reconciliation — `testQuitBlockReasonUsesLiveBackendUncertainty`.
-4. State becoming safe while an alert is open must not cause an automatic retry or exit — `testStateChangeDuringAlertDoesNotRetryOrTerminate`.
-5. Missing/conflicting context or a failed child stop must not falsely prescribe direct confirmation — `testQuitBlockReasonUnavailableAndFailedStop` and `testFixedAlertCopyAndCancelBinding`.
+1. A journal deleted, replaced, linked or corrupted after controller initialization must not qualify from its in-memory copy — Task 3 `testReadExistingNeverCreatesOrRepairsEvidence`, Task 4 `testIdleQuitRejectsChangedDurableJournal`.
+2. A prior eligible-looking snapshot or successful authorization must not survive a changed revision/context or failed fresh inspection — Task 4 `testIdleQuitRequiresFreshMatchingEvidence`.
+3. Live backend uncertainty newer than the copied controller flag must deny exit — Task 4 `testIdleQuitCannotBypassBusyOrLiveMutation`.
+4. Child death plus failed journal persistence must not lose an obligation that exists only in memory — Task 4 `testIdleQuitRejectsMemoryOnlyRecovery`.
+5. Eligibility becoming true while an existing alert is held must not cause an automatic retry or termination — Task 4 `testStateChangeDuringAlertDoesNotRetryOrTerminate`.
 
 ---
 
-## Evidence, boundaries and file responsibilities
+## Resolution, baseline and completed work
 
-Inspection baseline: `feat/companion-operational-controls`, HEAD `c2887a5bcb4248b81f769be8fe7fc4485ecdf7e8`; local main and origin/main both `66cc1c9e24361ea3dd807e4ade2c8a2f37317220`. Only this specification was untracked before planning. These are inspected local refs, not a fresh remote synchronization.
+Artifact pair: NEW_ONLY specification and NEW_ONLY plan at the paths above, exact shared slug and Spec reference; no legacy/conflicting candidates. Preserve both basenames and Created dates. Architecture map `docs/architecture/map.md` and ADR documents are absent; no freshness claim/regeneration applies. Inspected key paths are the controller/store, native delegate/Controls, XCTest targets, package scripts and validation report.
 
-Artifact resolution: specification NEW_ONLY at the explicit Spec path; plan MISSING before creation, using its exact basename. No legacy candidates or conflicting same-slug artifacts were found. Architecture map `docs/architecture/map.md` and ADR documents are absent; no map freshness claim or regeneration applies. Current controller, delegate, test targets and package scripts supply the architecture evidence.
+Baseline: HEAD `54b6018e2c4dbca4f5d78dac72adb86abae14e3c`, branch `fix/companion-quit-alert`. Only the revised specification was modified before planning. This stacked branch retains the unmerged companion prerequisite `c2887a5`; main is not assumed to contain it.
 
-| File | Responsibility |
+| Original task | Established implementation and task review | Resume instruction |
+|---|---|---|
+| 1 — reason projection | `9ce48b8`, independent task review passed | Preserve; adjust affected assertions only for the newly approved permission |
+| 2 — native alert | `dd16096`, independent task review passed; evidence updates `39f3a72`, `54b6018` | Preserve implementation; carry remaining verification/final gate into Task 5 |
+
+Do not redispatch or recreate those tasks. Previously observed verification: 85 native, 664 Node and three package tests passed, with a signed build. User confirmed Escape dismisses the alert and leaves Controls minimized. Closed-window preservation is not separately human-confirmed. Why confirmation reopened is unproven. Fresh revised-behavior evidence is still required.
+
+## File responsibilities
+
+| File | Change |
 |---|---|
-| `companion/Sources/CompanionCore/RouterController.swift` | Read-only reason projection using existing private evidence |
-| `companion/Tests/CompanionCoreTests/RouterControllerTests.swift` | Reason/precedence/no-side-effect regressions with existing controlled backend/barriers |
-| `companion/Sources/CodexProjectRouter/QuitAlert.swift` (new) | Native alert factory containing fixed messages/buttons |
-| `companion/Sources/CodexProjectRouter/RouterApp.swift` | Common Quit coordination and small injectable native actions |
-| `companion/Tests/CompanionAppTests/QuitAlertTests.swift` (new) | App coordination, copy and action tests with private synthetic fixtures |
-| `companion/Tests/CompanionAppTests/ControlsPresentationTests.swift` | Existing last-window-close regression retained |
-| `companion/README.md` | Explain blocked Quit and its two actions |
-| `docs/validation/companion-quit-alert.md` (new) | Sanitized fresh evidence, review dispositions and limits |
+| `companion/Sources/CompanionCore/PrivateStore.swift` | Non-creating read of existing safe journal |
+| `companion/Tests/CompanionCoreTests/PrivateStoreTests.swift` | Read-only/durability/privacy boundary tests |
+| `companion/Sources/CompanionCore/RouterController.swift` | Fresh idle Quit authorization, invalidation and unavailable-evidence reason |
+| `companion/Tests/CompanionCoreTests/RouterControllerTests.swift` | Permission, retention, denied cases and relaunch regressions |
+| `companion/Tests/CompanionAppTests/QuitAlertTests.swift` | New idle success; preserve denied-alert tests using genuinely guarded fixtures |
+| `companion/Sources/CodexProjectRouter/ControlsView.swift` | Conditional guidance only, including its existing presentation model |
+| `companion/Tests/CompanionAppTests/ControlsPresentationTests.swift` | Guidance and truthful pending-state regression |
+| `companion/README.md`, `docs/validation/companion-quit-alert.md` | Operational explanation, new evidence and final dispositions |
 
-Commands below are grounded in `package.json`, `companion/Package.swift`, `companion/README.md` and `docs/validation/companion-operational-controls.md`. The Swift `--filter` pattern is already used for `RouterControllerTests`; `QuitAlertTests` will be a new class in the existing app test target. No new script, dependency or production test mode is needed.
+The delegate, alert factory, backend, wire schema and router/provider implementation need no production change. No new dependency or journal schema is planned. Any concrete need to change these boundaries must be explained before broadening edits.
 
-## Execution preflight — only after explicit plan approval
+Commands below are grounded in `package.json`, `companion/Package.swift`, companion README and the prior validation report. Focused commands use the existing Swift `--filter` convention with classes already in configured test targets. Record full commands, actual exits and decisive proof lines; do not substitute prior counts for new runs.
 
-- [ ] Record both approved artifact paths and their separate approval messages; update plan lifecycle metadata only after approval. Recheck branch, diff, HEAD and dependencies. Preserve unrelated edits.
-- [ ] Safely refresh main using `git fetch origin`, `git switch main`, then `git merge --ff-only origin/main`. Stop on divergence or checkout conflicts without discarding work. Do not merge the companion into main.
-- [ ] Create the stacked implementation branch with `git switch -c fix/companion-quit-alert c2887a5bcb4248b81f769be8fe7fc4485ecdf7e8`. This explicit prerequisite contains the unmerged companion that main lacks. If upstream changes invalidate that dependency or require material plan changes, report the conflict before proceeding; do not silently rebase or change scope.
-- [ ] Commit the approved specification and plan on that branch with `git add docs/superpowers/specs/2026-11-11-companion-quit-alert.md docs/superpowers/plans/2026-11-11-companion-quit-alert.md` and `git commit -m "docs: approve companion quit alert specification and plan"`. Expected: artifact-only commit; prerequisite branch remains intact.
+## Resume preflight — after revised plan approval
 
-### Task 1: Project the existing Quit blocking condition [size: S | risk: none | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
+- [ ] Record revision 2 spec approval and the separate revised-plan approval; update lifecycle metadata. Recheck HEAD/status and preserve changes. Original main refresh/stacked branch creation are already complete; continue this branch without repeating them.
+- [ ] Resume this plan's existing SDD workspace/ledger, preserving original task reports/reviews. Add Tasks 3–5 and their baselines; do not overwrite or replay Tasks 1/2. Commit only the approved revised pair with `git add docs/superpowers/specs/2026-11-11-companion-quit-alert.md docs/superpowers/plans/2026-11-11-companion-quit-alert.md` and `git commit -m "docs: approve idle companion quit correction"`. Expected: artifact-only commit, other work intact.
 
-**Acceptance criteria:** AC-02, AC-03, AC-05, AC-06
+### Task 3: Read existing recovery evidence without creating state [size: S | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,data]
 
-**Files:** Modify controller and its core test file listed above.
+**Acceptance criteria:** AC-03, AC-09, AC-10
 
-**Interfaces:** Produces nested `public enum RouterController.QuitBlockReason: Equatable` with cases `operationInProgress`, `directConfirmationPending`, `directRecoveryRequired`, `contextUnavailable`, and `public var quitBlockReason: QuitBlockReason? { get }`. Consumes current controller/backend evidence only; no helper calls or persistence.
+**Risk:** This method supplies private-file authority; creating missing evidence or bypassing no-follow/owner/mode checks could incorrectly authorize exit. Keep existing validation and writer semantics intact.
 
-- [ ] **Step 1: Write focused failing reason tests.** Reuse `makeController()`, `activated()`, `ControlledBackend` and `Barrier` in `RouterControllerTests`. Seed a temporary journal before controller creation for pending/no-child cases. Named tests and required assertions:
+**Files:** Modify `PrivateStore.swift`; test `PrivateStoreTests.swift`.
+
+**Interfaces:** Produce module-internal `func readExisting() throws -> CompanionJournal`. It returns the existing validated journal or throws `CompanionError.privateState`; never creates a directory, journal or lock. Reuse `readJournal` and validation. Give private `openDirectory` a `createIfMissing: Bool = true` parameter; false omits mkdir/create-directory behavior while retaining owned, mode-0700, no-follow checks. Existing callers keep their default creating behavior.
+
+- [ ] **Step 1: Add failing store tests**, with literal temporary fixtures and these named assertions:
 
 ```swift
-// testQuitBlockReasonDirectPendingIsReadOnly: clean Direct, pending journal, no child
-XCTAssertEqual(controller.quitBlockReason, .directConfirmationPending)
-XCTAssertFalse(controller.canQuit)
-XCTAssertEqual(try store.load(), journalBefore)
-XCTAssertEqual(backend.inspectedPaths.count, inspectionsBefore)
-XCTAssertEqual(backend.controls.count, controlsBefore)
-XCTAssertEqual(backend.stopCount, stopsBefore)
-// testQuitBlockReasonRecoveryAndBusyPriority: active/recovery evidence, then held action
-XCTAssertEqual(controller.quitBlockReason, .directRecoveryRequired)
-// while the controlled action is held:
-XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
-// testQuitBlockReasonUsesLiveBackendUncertainty: flip backend flag without refresh
-XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
-// testQuitBlockReasonUnavailableAndFailedStop: each unavailable/conflicting context,
-// missing revision, and denied child-stop fixture uses the generic fallback
-XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
-// testQuitBlockReasonPermittedExceptions: normal permitted, failed init, second instance
+// testReadExistingReturnsPendingJournalWithoutWriting
+XCTAssertEqual(try store.readExisting(), expectedPendingJournal)
+XCTAssertEqual(try Data(contentsOf: state), originalBytes)
+XCTAssertEqual(try entries(directory), originalEntries)
+// testReadExistingNeverCreatesOrRepairsEvidence: missing directory, then missing state
+XCTAssertThrowsError(try store.readExisting())
+XCTAssertFalse(FileManager.default.fileExists(atPath: missingPath.path))
+// testReadExistingRejectsUnsafeEvidence: corrupt, symlinked, multiply linked,
+// non-private mode and over-64-KiB state; each remains byte/directory unchanged
+XCTAssertThrowsError(try store.readExisting()) { XCTAssertEqual($0 as? CompanionError, .privateState) }
+```
+
+Use a local test directory-listing helper `entries(_ directory: URL) throws -> [String]` with sorted names. Reuse current corruption/link fixtures; no foreign-UID claim without direct evidence. Include unsafe/symlinked directory rejection and assert that invalid input is not replaced. Expected values come from fixture literals, not store serialization under test.
+
+- [ ] **Step 2: Run RED:** `swift test --package-path companion --filter PrivateStoreTests`. Expected: missing `readExisting` API diagnostic before implementation.
+- [ ] **Step 3: Implement the interface** in `PrivateStore.swift`, reusing safe bounded read/decode checks. Missing evidence throws; existing `load`, `save`, locking, atomic replacement and schema remain unchanged.
+- [ ] **Step 4: Run GREEN:** repeat the focused command, then `npm run companion:test`. Expected: new and existing store/native tests pass without warnings; no journal creation by `readExisting`.
+- [ ] **Step 5: Commit and task-review:** `git add companion/Sources/CompanionCore/PrivateStore.swift companion/Tests/CompanionCoreTests/PrivateStoreTests.swift`, then `git commit -m "feat: inspect existing companion recovery without writes"`. Require independent task spec/quality dispositions before Task 4; no extra user gate.
+
+### Task 4: Authorize the narrow idle direct exit and preserve guarded alerts [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,data]
+
+**Acceptance criteria:** AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-09, AC-10
+
+**Risk:** Permission must bind fresh inspection and durable evidence across actor suspension, background refresh and termination callbacks. Journal matching is part of this same permission boundary; filesystem safety is owned by Task 3.
+
+**Files:** Modify controller, `RouterControllerTests.swift` and `QuitAlertTests.swift`. No production delegate or alert factory change.
+
+**Interfaces:** Consume Task 3 `PrivateStore.readExisting()`. Preserve public `canQuit`, `quitRequested`, `quitBlockReason`, `requestQuit() async` and delegate `requestQuit() -> Task<Void, Never>?`. Add private `idleQuitAuthorized` and `idleQuitJournalUnavailable` flags, private computed `hasIdleDirectQuitContext: Bool`, and private `authorizeIdleDirectQuit() -> Bool`. These are controller implementation details, not new user APIs.
+
+- [ ] **Step 1: Add failing behavioral controller/app regressions.** Seed owner-only valid pending journals before controller creation. Required names and decisive assertions:
+
+```swift
+// testIdleQuitPreservesPendingRecovery: all journal phases; matching Direct none/restored
+let bytesBefore = try Data(contentsOf: state)
+await controller.requestQuit()
+XCTAssertTrue(controller.quitRequested)
+XCTAssertTrue(controller.canQuit)
 XCTAssertNil(controller.quitBlockReason)
-```
-
-Also compare desktop confirmation, recovery context and `quitRequested` before/after repeated getter reads; projection must leave them unchanged. Retain existing authorization assertions in all fixtures. Set live backend uncertainty in a retained-recovery fixture as well to prove precedence over confirmation/recovery advice.
-
-- [ ] **Step 2: Run RED.** `swift test --package-path companion --filter RouterControllerTests`. Expected: compilation fails specifically for the missing reason API; record this before adding product code.
-- [ ] **Step 3: Implement the projection.** Priority: safe initialization/second-instance exits → nil; busy or copied/live backend uncertainty → operation; otherwise `canQuit` → nil; unusable/unmatched/unreadable context or missing revision → unavailable; `cleanDirect(context)` with retained pending/recovery → direct confirmation; readable router/prepared/active/recovery-required evidence → direct recovery; remaining denial, including failed stop → unavailable. Keep this a computed read-only property; never derive exit permission from it.
-- [ ] **Step 4: Run GREEN.** Repeat the focused Swift command. Expected: all controller tests pass, including unchanged stop/Quit guards and all new reason/no-side-effect assertions.
-- [ ] **Step 5: Commit and independently review this task.** `git add companion/Sources/CompanionCore/RouterController.swift companion/Tests/CompanionCoreTests/RouterControllerTests.swift` then `git commit -m "feat: expose sanitized companion quit blocking reasons"`. Expected: task-only commit. Apply the selected task review workflow before Task 2, without an extra user approval gate.
-
-### Task 2: Present one native alert and verify the complete increment [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency]
-
-**Acceptance criteria:** AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08
-
-**Risk:** AppKit modal run loops, asynchronous controller operations and application termination callbacks can reenter Quit. Hold one synchronous guard through presentation and response handling; prove that behavior with held boundaries.
-
-**Files:** Create `QuitAlert.swift`, `QuitAlertTests.swift` and validation report; modify `RouterApp.swift` and companion README. Retain the existing window-close test. Do not change `ControlsView.swift`, backend/wire code, operational state or prior validation reports.
-
-**Interfaces:** Consumes Task 1's reason API. Produce `@MainActor enum QuitAlert` with `static func make(reason: RouterController.QuitBlockReason) -> NSAlert`. Extend the internal delegate initializer with defaulted closures:
-
-```swift
-init(controller: RouterController,
-     presentQuitAlert: @escaping @MainActor (NSAlert) async -> NSApplication.ModalResponse = {
-         NSApp.activate(ignoringOtherApps: true)
-         return $0.runModal()
-     },
-     showControls: (@MainActor () -> Void)? = nil,
-     terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) })
-@discardableResult func requestQuit() -> Task<Void, Never>?
-```
-
-Nil `showControls` invokes existing `openControls()`. Default paths remain native; tests inject closures and await the returned task. Add only private per-test fixture/barrier support in the new test file, following the existing temporary store/backend patterns; no production protocol or generalized coordinator.
-
-- [ ] **Step 1: Write failing app tests.** `QuitAlertTests` constructs alerts without presenting real modal UI; delegate tests use injected presentation/window/termination spies and a synthetic `CompanionBackend`. Assert named cases:
-
-```swift
-// testFixedAlertCopyAndCancelBinding (all four reasons; exact direct case below)
-XCTAssertEqual(alert.messageText, "Cannot quit yet")
-XCTAssertEqual(alert.informativeText,
-    "Direct-response confirmation is pending. Open Controls to complete the check.")
-XCTAssertEqual(alert.buttons.map(\.title), ["Open Controls", "Keep Running"])
-XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}")
-// testOpenControlsAndKeepRunningActions: separately first, second and abort responses
-XCTAssertEqual(showControlsCount, expectedOpenCount) // 1 for first button; otherwise 0
-XCTAssertEqual(terminateCount, 0)
-XCTAssertEqual(try store.load(), journalAfterDeniedAttempt)
-XCTAssertEqual(backend.controls.count, controlsAfterDeniedAttempt)
-// testQuitClaimsSynchronouslyAndIgnoresRepeatedRequests
-let first = delegate.requestQuit()
-XCTAssertNotNil(first)
-XCTAssertNil(delegate.requestQuit()) // before the first task gets actor time
-// testHeldQuitAndAlertRejectReentrantTermination: repeat at held inspect and held alert
-XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateCancel)
-XCTAssertNil(delegate.requestQuit())
-// after releasing each held boundary: one attempt/stop and one alert, no queued work
-XCTAssertEqual(presentCount, 1)
-// testStateChangeDuringAlertDoesNotRetryOrTerminate: make state safe while held;
-// release Keep Running, await returned task, assert no second attempt and no exit
-XCTAssertEqual(terminateCount, 0)
-// testSuccessfulAndSafeExceptionQuitsSkipAlert: normal, failed init, second instance
-XCTAssertEqual(presentCount, 0)
+XCTAssertEqual(try Data(contentsOf: state), bytesBefore)
+XCTAssertNotEqual(controller.desktopConfirmation, .confirmedDirect)
+XCTAssertTrue(backend.controls.isEmpty)
+XCTAssertEqual(backend.stopCount, 0)
+// testIdleQuitRequiresFreshMatchingEvidence: old display Direct, new snapshot
+// routed/prepared/conflicting/unavailable, changed config/home/provider/port,
+// missing revision, or inspection failure; each must deny without clearing evidence
+XCTAssertFalse(controller.quitRequested)
+// testIdleQuitRejectsChangedDurableJournal: delete, corrupt or valid-but-different
+// journal AFTER initialization; no recreation/repair, generic unavailable reason
+XCTAssertEqual(controller.quitBlockReason, .contextUnavailable)
+// testIdleQuitCannotBypassBusyOrLiveMutation: held action, then live/copied flags
+XCTAssertFalse(controller.quitRequested)
+XCTAssertEqual(controller.quitBlockReason, .operationInProgress)
+// testIdleQuitRejectsMemoryOnlyRecovery: failed pending save + unexpected child exit
+XCTAssertFalse(controller.quitRequested)
+// testIdleQuitRelaunchRetainsPending: release first instance, recreate from same store
+XCTAssertNotEqual(relaunched.desktopConfirmation, .confirmedDirect)
+XCTAssertEqual(try store.readExisting().pending, expectedPending)
+XCTAssertTrue(backend.controls.isEmpty)
+// testIdlePendingQuitTerminatesWithoutAlert (real delegate/controller, injected exit)
 XCTAssertEqual(terminateCount, 1)
+XCTAssertEqual(presentCount, 0)
 ```
 
-For each alert reason assert its fixed message below and absence of a synthetic private sentinel. Inject that sentinel into backend error/context fixtures to show alert content is independent of raw state. Verify actions leave confirmation/recovery untouched; counters are captured after the existing denied attempt so its authorized inspect/stop behavior is not mistaken for an alert side effect. Hold stop as well as inspection in the reentrancy test, and check exactly one stop. Preserve `testClosingLastWindowDoesNotRequestQuit` and test the common termination callback's success path returns `.terminateNow` only after existing authorization.
+Also verify a second fresh explicit Quit succeeds, journal bytes stay unchanged across relaunch, and no automatic start/stop/confirmation occurs. Include external listener readiness with no owned child: it is never adopted/signalled. Existing never-activated start-only and owned activated/restored pending tests must keep their stop permissions. Update the old projection-only test's post-Quit expectation to the new eligible success while preserving all getter no-side-effect assertions.
 
-- [ ] **Step 2: Run RED.** `swift test --package-path companion --filter QuitAlertTests`. Expected: compilation fails for the new alert/initializer/request return API before product changes.
-- [ ] **Step 3: Implement fixed native content.** Use `NSAlert`, warning style, specified title and button order, Return for Open Controls and Escape for Keep Running. The other messages are exactly:
-  - operation: “A router operation is still running or needs reconciliation. Open Controls to review its status.”
-  - recovery: “Direct recovery is incomplete. Open Controls to restore the direct connection, then complete the manual restart and response check.”
-  - unavailable: “Quit could not be completed safely. Open Controls to review the current status and recovery guidance.”
-- [ ] **Step 4: Coordinate the common Quit path.** Claim `quitInProgress` synchronously before creating the returned Task; repeated requests return nil. Clear it with `defer` after the controller attempt and any alert response/action. Await unchanged `controller.requestQuit()`. If `quitRequested && canQuit`, set existing `terminationApproved` and call injected terminate without alert. Otherwise capture current reason (fallback unavailable), await one alert, reveal Controls only for `.alertFirstButtonReturn`, and return without retry or rechecking for automatic exit. All other/cancel responses keep running. Preserve menu/keyboard/common termination routing and existing window behavior.
-- [ ] **Step 5: Run focused GREEN.** `swift test --package-path companion --filter QuitAlertTests`, then `swift test --package-path companion --filter ControlsPresentationTests`. Expected: all new app cases and existing four presentation cases pass; no real modal window or process exit in unit tests.
-- [ ] **Step 6: Document user behavior.** Update companion README with the title/actions, unchanged guards, successful-exit behavior, and the requirement to complete existing recovery/confirmation in Controls. Do not claim the reopened-confirmation cause was fixed.
-- [ ] **Step 7: Run fresh acceptance checks.** Run sequentially: `npm run companion:test`, `npm test`, `npm run companion:build`, `npm run companion:package-test`, `node --check src/cli.js`, `git diff --check`. Expected: all native/Node tests pass; fresh app builds and is ad-hoc signed; all three package tests pass with zero skips; syntax/whitespace exit 0. Earlier recorded counts are context, not this run's results. No broader repeat is needed absent changes/failures.
-- [ ] **Step 8: Observe isolated native behavior.** Reuse the synthetic relocation/Seatbelt procedure in `test/companion-package.test.js` (native source-denial test) for a private one-off fixture runner. Use temporary `HOME` plus `CFFIXED_USER_HOME`, owner-only config/catalog/provider/journal, a matching pending `direct_confirmation` and Direct provider, installed Node, no listener start, denied real Codex/router private paths and checkout access, outbound denied except loopback. Prove the exact tracked native PID holds the synthetic instance lock before interacting. Select the exact running app path for UI automation; retain only sanitized observations, not raw accessibility state. Check menu Quit and Cmd-Q with Controls open, closed and minimized; exact observed-case alert; Open Controls reveals it; Keep Running/Escape preserve window visibility; repeated Quit produces one alert. Assert synthetic provider/config bytes unchanged and no child listener. Clean up only the tracked synthetic process (bounded termination if pending state prevents ordinary exit). No real operational file changes, provider activation, credentials, desktop restart or gateway/model check. If a platform interaction cannot be established, keep it explicitly unverified rather than substituting automated claims.
-- [ ] **Step 9: Record evidence and commit.** Create `docs/validation/companion-quit-alert.md` with actual commands/results, RED/GREEN, native observations, untouched-operational-state safeguards and limitations. Keep raw fixture paths/checkpoints outside Git. `git add companion/Sources/CodexProjectRouter/RouterApp.swift companion/Sources/CodexProjectRouter/QuitAlert.swift companion/Tests/CompanionAppTests/QuitAlertTests.swift companion/README.md docs/validation/companion-quit-alert.md` then `git commit -m "fix: explain blocked companion quit with a native alert"`. Expected: increment-only changes, with no private fixture or unrelated product edits. Independently review the task using the selected workflow.
-- [ ] **Step 10: Complete the final sequential review.** Use `personal-workflows:code-review`: specification review first, quality review only after its passing disposition. Review the entire alert increment from prerequisite `c2887a5` through current HEAD with both approved artifacts and fresh evidence; disclose the unmerged prerequisite and reference its completed report rather than repeating its review. Resolve findings within this scope, rerun affected checks after fixes, and preserve reviewer dispositions in the new validation report with a final documentation commit. No additional user gate between ordinary tasks; material scope/spec/plan changes retain their required approval gates.
+In app tests, move denied direct-pending fixtures to a real guarded synthetic owned child: create the pending controller, then call its existing `start()` using `QuitBackend`. Capture counters after fixture setup; do not weaken presentation assertions or fake controller permission. For the reason-copy table use separate controlled fixtures so one case's state cannot authorize another.
+
+Revise `testStateChangeDuringAlertDoesNotRetryOrTerminate`: start pending with backend mutation uncertainty, hold the real denied alert, then clear uncertainty and refresh. Dismissal must neither terminate nor inspect/retry again; a subsequent explicit Quit obtains fresh evidence and succeeds without another alert. Retain held inspection/stop/reentrant request, safe-exception and last-window-close coverage.
+
+- [ ] **Step 2: Run RED:** `swift test --package-path companion --filter RouterControllerTests`, then `swift test --package-path companion --filter QuitAlertTests`. Expected: new eligible-exit assertions fail under the old blanket pending guard; record those behavioral failures before controller edits. Fix test setup errors before proceeding.
+- [ ] **Step 3: Implement permission acquisition.** `hasIdleDirectQuitContext` checks usable state, no owned child, matching retained/durable journal context, `cleanDirect`, usable revision and no copied/live uncertainty; it must not depend on `busy` being false while executing the current Quit action. `authorizeIdleDirectQuit()` additionally compares `try store.readExisting()` with the full current in-memory journal and records authorization only on an exact match. Catch failures as fixed private-state/unavailable feedback; never rewrite evidence. Require a successful fresh action-time inspection before invoking this method. A missing durable pending obligation cannot qualify.
+- [ ] **Step 4: Integrate and invalidate authorization.** Preserve the existing normal exit path; add the new alternative to `canQuit` only while idle, with matching current direct evidence and live backend certainty. Reset the private authorization/failure flags when `begin()` starts another explicit operation. Invalidate authorization on failed inspection, relevant revision/context/provider change, changed recovery evidence or child ownership/exit change. An unchanged/coalesced poll alone must not revoke a just-completed valid attempt. `requestQuit()` sets `quitRequested` only after either established normal permission or the fresh new authorization. `quitBlockReason` remains read-only; unavailable journal evidence precedes direct-confirmation advice. Preserve existing owned stop, confirmation and journal mutation logic.
+- [ ] **Step 5: Run GREEN:** repeat both focused Swift commands, then `npm run companion:test`. Expected: all old and new native tests pass, including adjusted guarded-alert fixtures; no pending evidence or confirmation consumed by idle Quit. Review the complete native output for failures, not only the focused counts.
+- [ ] **Step 6: Commit and task-review:** `git add companion/Sources/CompanionCore/RouterController.swift companion/Tests/CompanionCoreTests/RouterControllerTests.swift companion/Tests/CompanionAppTests/QuitAlertTests.swift`, then `git commit -m "fix: permit verified idle companion quit with pending recovery"`. Require independent spec/quality task review before Task 5.
+
+### Task 5: Present truthful conditional guidance and verify the whole increment [size: M | risk: none | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
+
+**Acceptance criteria:** AC-01, AC-03, AC-04, AC-05, AC-07, AC-08, AC-09, AC-10
+
+**Files:** Modify `ControlsView.swift`, `ControlsPresentationTests.swift`, companion README and existing validation report. Parent owns isolated native orchestration and final integrated review after implementer report.
+
+**Interfaces:** Add `ControlsPresentation.recoveryGuidance: String?` and `ControlsPresentation.quitGuidance: String`. Use existing controller public evidence; do not add a permission API or perform storage I/O from presentation. Replace the existing unconditional orange recovery text and confirmation-section footer with these properties.
+
+- [ ] **Step 1: Add failing presentation tests.** Add a localized private fixture `withPendingDirectController(_ body: (RouterController, DisplayBackend, PrivateStore) async throws -> Void) async throws` that seeds matching pending Direct state; use literal synthetic context. `testIdlePendingGuidanceDoesNotDemandConfirmationToQuit` asserts the two idle messages below, pending/unknown confirmation, and no native action, confirmation or store mutation from presentation. `testOwnedPendingGuidanceRetainsShutdownCheck` uses a synthetic owned-child backend fixture to assert that the guarded messages still require a direct-response check. Existing setup, catalog, window-close and polling tests remain unchanged.
+- [ ] **Step 2: Run RED:** `swift test --package-path companion --filter ControlsPresentationTests`. Expected: missing guidance property API, before view implementation.
+- [ ] **Step 3: Implement conditional guidance.** When recovery context exists, direct confirmation is not recorded, no child is owned and `canConfirmDirectResponse` establishes clean matching Direct evidence, use recovery text **The direct response check is still pending. You can close this idle app after Quit verifies the saved recovery information.** and footer **Closing this idle app does not confirm that Codex has reloaded its settings.** These describe a conditional check, not cached exit authority. For clean Direct with an owned child use recovery text **Direct settings are saved. Confirm a working direct response before Stop or Quit.** Retain the existing guarded footer. For other retained recovery keep existing recovery guidance; for absent/confirmed recovery omit the orange text. Leave alert descriptions, labels, navigation, confirmation buttons and normal window refresh untouched.
+- [ ] **Step 4: Run focused GREEN:** repeat the presentation command. Expected: new idle/owned guidance cases and existing presentation tests pass without performing an operation.
+- [ ] **Step 5: Document the behavior.** Update companion README: eligible idle Quit needs no restart/model prompt; pending evidence survives and is not a direct-response confirmation; owned-listener shutdown still retains the existing restart/check safeguards; uncertainty/context/storage failures deny the new permission. Preserve prior validation results/limits and accepted-but-deferred Show steps to quit preference.
+- [ ] **Step 6: Run fresh acceptance, sequentially:** `npm run companion:test`, `npm test`, `npm run companion:build`, `npm run companion:package-test`, `node --check src/cli.js`, `git diff --check`. Expected: all native/Node tests pass; fresh signed release app; all three package tests pass with zero skips; syntax/whitespace exit 0. Do not repeat full checks without a subsequent change, failure or unresolved concern.
+- [ ] **Step 7: Observe isolated native idle Quit and relaunch.** Reuse the prior private relocated-app/Seatbelt fixture procedure from `test/companion-package.test.js` and retained plan workspace. Temporary HOME plus CFFIXED_USER_HOME, owner-only matching pending Direct state, synthetic nonexistent auth command, no listener start, denied real private/checkout paths and non-loopback outbound access. Prove each tracked native PID holds its synthetic lock. Exercise menu and Cmd-Q entry, including closed/minimized Controls. Observe process exit rather than calling getApp/getAX after Quit (that tool can relaunch/restore a window). Verify no blocked alert, provider/config/journal bytes unchanged, no listener, no confirmation input. Relaunch the same fixture journal and observe pending/unknown desktop state with no automatic routing; Quit again. Preserve prior denied-alert/native evidence and its remaining limits; do not infer them from this success case. Clean up only tracked synthetic processes and fixture files. No real operational changes or user Codex restart/prompt.
+- [ ] **Step 8: Record and commit evidence.** Update `docs/validation/companion-quit-alert.md` with actual revised RED/GREEN, full commands/exits/results, native idle exit/relaunch and durable-state proof; retain original observations and feedback history. Raw fixture paths/checkpoints stay outside Git. `git add companion/Sources/CodexProjectRouter/ControlsView.swift companion/Tests/CompanionAppTests/ControlsPresentationTests.swift companion/README.md docs/validation/companion-quit-alert.md`, then `git commit -m "fix: distinguish idle quit from confirmed direct recovery"`. Complete the independent task review; resolve any native verification items before marking the deliverable complete.
+- [ ] **Step 9: Complete final sequential review.** Invoke `personal-workflows:code-review` once in integrated mode as the sole final whole-increment seat. Package the full `c2887a5..HEAD` alert-plus-behavior diff, approved revised pair, prior task dispositions and fresh evidence. Specification review must pass before quality opens. Resolve findings under the selected execution workflow, rerun affected checks after fixes and commit dispositions to the existing report. Do not repeat prerequisite companion review or dispatch a generic final reviewer. No new user gate between ordinary tasks.
 
 ## Criterion traceability
 
 | Criterion | Task / evidence |
 |---|---|
-| AC-01 | Task 2 common Quit tests plus native menu/Cmd-Q and window-state observations |
-| AC-02 | Task 1 direct-pending projection; Task 2 exact copy and native fixture |
-| AC-03 | Task 1 priority/unavailable cases; Task 2 fixed sanitized message assertions |
-| AC-04 | Task 2 action/cancel counters, journal/confirmation invariants and native window observations |
-| AC-05 | Task 1 permitted-exception/no-mutation cases; Task 2 success/exception/common callback and existing close test; full native regressions |
-| AC-06 | Task 1 projection invariants; Task 2 pre-task, held inspect/stop/alert and state-change regressions |
-| AC-07 | Task 2 focused/full checks, fresh build/package, isolated native check and README/report |
-| AC-08 | Task 2 sequential final specification/quality dispositions and final delivery report |
+| AC-01 | Task 4 delegate success/guarded entry tests; Task 5 isolated native entry/exit observations plus preserved alert evidence |
+| AC-02 | Task 4 fresh idle permission and no prompt/confirmation regression |
+| AC-03 | Tasks 3/4 unsafe durable evidence and fixed unavailable reason; Task 5 truthful conditional guidance |
+| AC-04 | Task 4 retained denied-action/reentry tests; Task 5 unchanged alert factory/labels and window-close regression |
+| AC-05 | Task 4 full native normal/exception/owned-child/direct-only guard coverage |
+| AC-06 | Task 4 synchronous/held-state/no-auto-retry and later explicit fresh Quit |
+| AC-07 | Task 5 full suites, fresh build/package, isolated native observation and docs |
+| AC-08 | Task 5 sole sequential final gate, dispositions and delivery report |
+| AC-09 | Task 3 non-creating safe read; Task 4 journal equality/bytes/relaunch/memory-only tests; Task 5 native retained-state proof |
+| AC-10 | Task 4 failure/context/helper/owned-child matrix; Task 5 conditional guidance |
 
 ## Self-review and execution endpoint
 
-Self-review completed against AC-01–AC-08: all covered; signatures agree across tasks; five Review Focus cases have named tests; commands follow current repository scripts/test targets; tests/fixtures and docs stay within alert scope. No material product decision remains unresolved. Native modal visibility remains a verification obligation, not a planning claim.
+Self-review completed: AC-01–AC-10 map to tasks; five Review Focus conditions have named regressions; API names agree across consumers; security file validation is separated from controller concurrency; affected app fixtures are updated in Task 4 so each task can finish with a passing suite. Commands follow existing scripts/targets. Original completed implementation and approval history are preserved without replay. No material product question remains unresolved.
 
-Deliver the reviewed alert, tests, fresh build/package/native evidence and documentation; commit on the stacked fix branch, report the working result and honest limits, and stop. Do not publish, merge, investigate confirmation recurrence or begin a later increment. The companion prerequisite remains a separate unmerged branch.
+Deliver the defined idle direct exit with durable pending-state retention, preserved listener/alert safeguards, conditional guidance, documentation, fresh checks/native evidence and the final whole-increment sequential review. Report the result and honest limitations; stop before general alert refinement, publication, push, merge or another increment.
 
-**Current stage:** Stage 4 — after this plan was separately presented, the user replied `approved` on 2026-11-12. This authorizes implementation of the approved specification/plan pair using the preserved Subagent-driven method and Git constraints. No push or merge is authorized.
+**Current stage:** Stage 4 — the revised plan was presented with its path and scope; the user separately replied `approved` on 2026-11-12. This authorizes Tasks 3–5 using the preserved Subagent-driven method on the existing fix branch. The revision 2 specification received its own earlier explicit approval.
