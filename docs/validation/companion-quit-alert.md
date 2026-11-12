@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: initial alert and revised idle-Quit implementation passed automated verification. Prior native visibility observations remain qualified below; revised native idle exit/relaunch and final sequential review are pending parent-owned work.
+Status: initial alert and revised idle-Quit implementation passed automated verification and isolated native idle exit/relaunch checks. Independent task reviews passed; final sequential review is pending. Prior denied-alert visibility qualifications remain below.
 
 Scope: the approved `companion-quit-alert` increment, stacked on the completed,
 unmerged companion operational-controls prerequisite (`c2887a5`). The approved
@@ -182,10 +182,38 @@ confinement. It observed a native window and synthetic instance lock, byte-exact
 rollback, tracked child exits and a reusable synthetic port. This package coverage
 does not establish menu/Cmd-Q interaction or idle exit/relaunch.
 
-Native idle exit/relaunch and retained-state proof remain pending parent
-orchestration. The prior denied-alert observations above are preserved separately
-and are not inferred from idle success. Task review and the sole sequential final
-whole-increment review also remain pending parent orchestration.
+### Isolated native idle Quit and relaunch
+
+The parent tested the fresh signed release app in an owner-only temporary HOME
+and CFFIXED_USER_HOME. The fixture used literal pending direct-confirmation
+information and a Direct provider, with no listener started. Seatbelt denied
+real Codex/router private paths, checkout access and non-loopback outbound
+network; the negative checkout-read control failed as required. Every launch
+positively established that its tracked native process held its own synthetic
+instance lock.
+
+Three attempts exited normally: application-menu Quit with Controls open,
+Cmd-Q after minimizing Controls, and application-menu Quit after closing Controls.
+Each tracked process exited with code 0 and no termination signal. No blocked
+alert, acknowledgement, Codex restart, model prompt or response-confirmation
+input was needed. Process exit established success; accessibility attachment
+was not used after Quit, since it can relaunch an app. Close/minimize sequences
+establish exit after those actions, without claiming separate window-visibility
+preservation against the automation's activation effects.
+
+The same journal was retained across the three launches. Before each repeated
+Quit, native state showed Direct, no matching listener ready, no owned router,
+Not confirmed and pending direct-check guidance. No automatic routing occurred.
+Byte comparisons after each natural exit and before relaunch confirmed that
+router configuration, provider settings and pending journal were unchanged.
+The selected synthetic port was empty each time. Cleanup required no process
+signal, repeated those checks, and removed only the tracked temporary fixture.
+No actual private operational configuration, credential or Keychain access,
+Codex restart or model request was used.
+
+Prior denied-alert observations remain separate and qualified; idle success
+does not establish desktop-loaded settings, alter owned-listener safeguards or
+resolve why an earlier confirmation reopened.
 
 ## Operational-state safeguards
 
@@ -199,9 +227,7 @@ neither show a modal dialog nor exit the test process.
 
 ## Review dispositions and final gate — pending
 
-Independent task reviews approved Task 1 and Task 2 code and automated evidence
-with no findings. Task 2 correctly leaves native observations and the final gate
-for parent resolution.
+Independent task reviews approved Tasks 1–5 code and automated evidence with no findings. Parent-owned native idle verification is recorded above; the prior denied-alert qualifications remain. The sole final specification/quality gate remains pending.
 
 Specification review must pass before quality review of the whole increment from
 `c2887a5` through the final implementation and evidence. Both dispositions and any
