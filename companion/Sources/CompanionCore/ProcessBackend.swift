@@ -28,13 +28,72 @@ private final class BoundedCapture {
     }
     func discard() { lock.lock(); bytes.removeAll(keepingCapacity: false); lock.unlock() }
 }
+// The child can delay reading beyond the deadline. Keep delivery nonblocking and retained
+// through uncertainty; completion includes both full delivery and the final stdin close.
+private final class CommandInput {
+    private let queue = DispatchQueue(label: "companion.command-input")
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private var bytes: Data
+    private var offset = 0
+    private var writer: DispatchSourceWrite?
+    private var closing = false
+    private var ended = false, failed = false
+    init(handle: FileHandle, bytes: Data) { self.handle = handle; self.bytes = bytes }
+    var snapshot: (ended: Bool, failed: Bool) {
+        lock.lock(); defer { lock.unlock() }; return (ended, failed)
+    }
+    func start() {
+        queue.async { [self] in
+            let flags = fcntl(handle.fileDescriptor, F_GETFL)
+            guard flags >= 0, fcntl(handle.fileDescriptor, F_SETFL, flags | O_NONBLOCK) == 0,
+                  fcntl(handle.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { finish(failed: true); return }
+            guard !bytes.isEmpty else { finish(failed: false); return }
+            let source = DispatchSource.makeWriteSource(fileDescriptor: handle.fileDescriptor, queue: queue)
+            source.setEventHandler { [weak self] in self?.writeAvailable() }
+            writer = source; source.resume()
+        }
+    }
+    private func writeAvailable() {
+        guard !closing else { return }
+        // Bound work per event as well as retained input; every write is nonblocking.
+        for _ in 0..<4 {
+            let count = bytes.withUnsafeBytes { buffer in
+                Darwin.write(handle.fileDescriptor, buffer.baseAddress!.advanced(by: offset), min(4096, buffer.count - offset))
+            }
+            if count > 0 {
+                offset += count
+                if offset == bytes.count { finish(failed: false); return }
+            } else if count < 0 && errno == EINTR { continue }
+            else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { return }
+            else { finish(failed: true); return }
+        }
+    }
+    private func finish(failed: Bool) {
+        guard !closing else { return }
+        closing = true; bytes.removeAll(keepingCapacity: false)
+        if let writer {
+            writer.setCancelHandler { [self] in closeInput(failed: failed) }
+            writer.cancel(); self.writer = nil
+        } else { closeInput(failed: failed) }
+    }
+    private func closeInput(failed: Bool) {
+        var failed = failed
+        do { try handle.close() } catch { failed = true }
+        lock.lock(); self.failed = failed; ended = true; lock.unlock()
+    }
+}
 private final class RunningCommand {
     let process: Process
-    var inputFailed = false
+    private let input: CommandInput
+    var inputFailed: Bool { input.snapshot.failed }
     let stdout = BoundedCapture(limit: 1024 * 1024)
     let stderr = BoundedCapture(limit: 16 * 1024)
-    init(process: Process) { self.process = process }
-    var drained: Bool { stdout.snapshot.eof && stderr.snapshot.eof }
+    init(process: Process, input: FileHandle, bytes: Data?) {
+        self.process = process; self.input = CommandInput(handle: input, bytes: bytes ?? Data())
+    }
+    func startInput() { input.start() }
+    var drained: Bool { input.snapshot.ended && stdout.snapshot.eof && stderr.snapshot.eof }
     var overflow: Bool { stdout.snapshot.overflow || stderr.snapshot.overflow }
     func discard() { stdout.discard(); stderr.discard() }
 }
@@ -241,7 +300,7 @@ private final class RunningCommand {
         process.environment = childEnvironment
         let stdout = Pipe(), stderr = Pipe(), stdin = Pipe()
         process.standardOutput = stdout; process.standardError = stderr; process.standardInput = stdin
-        let command = RunningCommand(process: process)
+        let command = RunningCommand(process: process, input: stdin.fileHandleForWriting, bytes: input)
         command.stdout.attach(stdout.fileHandleForReading); command.stderr.attach(stderr.fileHandleForReading)
         do { try process.run() }
         catch {
@@ -249,13 +308,7 @@ private final class RunningCommand {
             stderr.fileHandleForReading.readabilityHandler = nil
             throw CompanionError.commandFailed
         }
-        do {
-            if let input { try stdin.fileHandleForWriting.write(contentsOf: input) }
-            try stdin.fileHandleForWriting.close()
-        } catch {
-            // Even failed stdin delivery can follow a partial provider write. The caller retains it.
-            command.inputFailed = true
-        }
+        command.startInput()
         return command
     }
     private var childEnvironment: [String: String] {

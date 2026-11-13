@@ -30,6 +30,69 @@ import Darwin
         if let data = try? String(contentsOf: resources.appendingPathComponent("src/pid")), let pid = Int32(data), kill(pid, 0) == 0 { kill(pid, SIGKILL) }
         try FileManager.default.removeItem(at: root)
     }
+    private func largeSetupChange(_ preview: SetupPreview) -> SetupChange {
+        .migrate(accounts: (0..<1000).map { AccountRecord(id: UUID().uuidString, displayName: "Synthetic \($0)", upstreamBaseUrl: "https://example.invalid/api", credential: preview.incomingCredential!) }, incomingCredential: preview.incomingCredential, defaultAccountId: preview.defaultAccountId)
+    }
+    func testLargeSetupInputLeavesMainActorResponsiveWhileHelperDelaysReading() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview)
+        let encoded = try JSONEncoder().encode(change)
+        XCTAssertGreaterThan(encoded.count, 65_536); XCTAssertLessThan(encoded.count, 1024 * 1024)
+        try setMode("stdinDelayed")
+        let started = Date()
+        let request = Task { try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: UUID().uuidString) }
+        try await waitForFixture("stdin-paused")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1, "Stdin delivery blocked MainActor before its first UI heartbeat")
+        let result = try await request.value
+        XCTAssertTrue(result.changed)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        let delivered = try Data(contentsOf: resources.appendingPathComponent("src/setup-request"))
+        XCTAssertGreaterThan(delivered.count, 65_536)
+    }
+    func testLargeSetupInputTimeoutRetainsWritingHelperUntilNaturalExit() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        try setMode("stdinTimeout")
+        let started = Date()
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Stalled reader accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5.8)
+        let pid = try fixturePID()
+        XCTAssertEqual(kill(pid, 0), 0); XCTAssertTrue(backend.setupHelperIsRunning)
+        XCTAssertThrowsError(try backend.finishSetupReconciliation(operationID: op))
+        try await waitForExit(pid)
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+        XCTAssertEqual(backend.uncertainSetupOperationID, op)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+    }
+    func testLargeSetupInputCancellationRetainsDeliveryWithoutRetry() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        try setMode("stdinCancelled")
+        let started = Date()
+        let request = Task { try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op) }
+        try await waitForFixture("stdin-paused")
+        let pid = try fixturePID()
+        request.cancel()
+        do { _ = try await request.value; XCTFail("Cancelled input accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+        XCTAssertEqual(kill(pid, 0), 0); XCTAssertTrue(backend.setupHelperIsRunning)
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: UUID().uuidString); XCTFail("Cancelled input retried") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
+        try releaseFixture("release-stdin"); try await waitForExit(pid)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+    }
+    func testEarlyStdinClosureRejectsPlausibleSuccessAfterIncompleteDelivery() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        let response = SetupCommitResult(context: preview.context, operationId: op, setupState: "ready", configurationRevision: String(repeating: "b", count: 64), checkpointPath: nil, changed: true)
+        try JSONEncoder().encode(response).write(to: resources.appendingPathComponent("src/stdin-response"))
+        try setMode("stdinEarlyExit")
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Incomplete delivery accepted as success") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        try await waitForExit(try fixturePID())
+        XCTAssertTrue(backend.mutationRequiresReconciliation); XCTAssertFalse(backend.setupHelperIsRunning)
+        XCTAssertEqual(backend.uncertainSetupOperationID, op)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+    }
     func testSetupBridgeUsesMetadataOnlyLargerInputAndValidatesReturnedStates() async throws {
         let preview = try await backend.previewSetup(configPath: config, browseHome: root)
         XCTAssertEqual(preview.sourceKind, "accounts")

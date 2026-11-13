@@ -83,6 +83,17 @@ if len(sys.argv) > 2 and sys.argv[2] == 'serve':
         try:
             c, _ = listener.accept(); c.close()
         except socket.timeout: pass
+mode = behavior.get('mode', 'valid')
+if mode in ['stdinDelayed', 'stdinTimeout', 'stdinCancelled', 'stdinEarlyExit']:
+    with open(os.path.join(root, 'stdin-paused'), 'w') as f: f.write('paused')
+    if mode == 'stdinEarlyExit':
+        os.close(0)
+        with open(os.path.join(root, 'stdin-response')) as f: response = json.load(f)
+        print(json.dumps(dict(schemaVersion=1, ok=True, result=response))); sys.exit(0)
+    if mode == 'stdinCancelled':
+        deadline = time.monotonic() + 8
+        while not os.path.exists(os.path.join(root, 'release-stdin')) and time.monotonic() < deadline: time.sleep(.01)
+    else: time.sleep(1.5 if mode == 'stdinDelayed' else 6.3)
 request = json.load(sys.stdin)
 mode = behavior.get('mode', 'valid')
 if mode == 'heldMutation' and request['action'] != 'inspect':
