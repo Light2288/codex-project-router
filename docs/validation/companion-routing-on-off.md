@@ -3,12 +3,12 @@
 Created: 2026-11-12
 Updated: 2026-11-13
 
-Status: automated packaging acceptance and the user-assisted live sequence are
-recorded with their transport qualifications. Final direct recovery is complete
-and independently verified. The additional isolated lost-acknowledgement check
-observed Unavailable and automatic read reconciliation; its transient Uncertain
-state was not observed. Fixture cleanup is verified; final sequential
-specification/quality review is pending; this is not yet a release-completion claim.
+Status: automated acceptance, qualified live observations and exact direct
+recovery are recorded. The first final specification review requested two
+additional native observations; the focused remediation below now records them.
+All synthetic fixtures are cleaned up, and the user's original Keyboard
+navigation setting is restored. The scoped specification follow-up and final
+quality review remain pending; increment completion is not yet claimed.
 
 Scope: the approved `companion-routing-on-off` increment. The approved
 [specification](../superpowers/specs/2026-11-12-companion-routing-on-off.md) and
@@ -145,7 +145,7 @@ processes exited, the synthetic ports were independently empty, and both fixture
 drivers completed cleanup. Product source and the signed build were unchanged.
 
 
-### Lost mode replies and fresh reconciliation — 2026-11-13
+### Lost mode replies and fresh reconciliation — earlier attempt, 2026-11-13
 
 A separate relocated signed fixture retained the same source/private-path and
 non-loopback confinement, negative source-read controls, visible native window
@@ -158,8 +158,9 @@ The ten-second instruction asked for Uncertain, but the user instead reported
 Unavailable with the orange warning: “Routing control is unavailable. Keep the
 router running and use direct recovery if needed”. The existing controller path
 and regression test explicitly distinguish a lost-set acknowledgement from a
-later failed read: the latter publishes Unavailable. The transient Uncertain
-label was not observed and is not counted as a native pass. This was an overly
+later failed read: the latter publishes Unavailable. In this earlier attempt the
+transient Uncertain label was not observed and is not counted as a native pass. A later focused
+remediation observation is recorded separately below. This was an overly
 narrow observation instruction, not evidence of a known On/Off label or a
 product correction.
 
@@ -172,6 +173,86 @@ evidence; it does not imply an automatic mutation retry. The user then performed
 found the exact native/managed processes absent, the synthetic port empty and
 provider/router/journal bytes unchanged. Only the positively attributed fixture
 driver was terminated afterward; no application or listener was signalled.
+
+### Final-review native evidence remediation — 2026-11-13
+
+The first integrated specification review returned MISSING for the transient
+Uncertain observation and native keyboard reachability beyond search. Quality
+review did not start. One focused evidence-remediation wave prepared two serial
+small-catalog fixtures, using the unchanged signed app and the established
+source/real-private-path and non-loopback confinement. No product change was made.
+
+The user reported Keyboard navigation initially Off and temporarily enabled it
+through System Settings. A confined, windowless AppKit probe independently
+reported native full keyboard access enabled. Fixture-local defaults had not
+enabled actual AppKit navigation; those experiments changed no real preferences.
+After both fixtures, the user restored the original checkbox state to Off. A
+fresh confined AppKit probe reported full keyboard access disabled; this claims
+restoration of that setting, not whole preference-file byte equality.
+
+Using Tab/Shift-Tab and Space, the user expanded Advanced/Setup, opened the
+configuration picker and the runtime picker, and cancelled each with Escape
+without selecting a file. The first keyboard Start activated its button but
+showed The router could not be started. Independent checks found no listener or
+child and unchanged synthetic files. The new external launcher used the wrong
+argument positions for the native Node CA flag. An exact-argv replay reproduced
+the import failure on a separate synthetic port. Corrected external launcher
+files then passed Ready Off, correlated read/set, withheld replies with responsive
+HTTP, fresh reconciliation, same-child identity and exact teardown/port-absence
+checks before the native retry. The evidence log's newline escape was verified
+correct; an initial contrary suspicion was discarded without a log-format fix.
+This is retained as a fixture failure and correction, not a product regression
+or product fix.
+
+The native keyboard Start retry showed Off/action On. The user then focused the
+On action, pressed Space once and watched continuously. Both Uncertain — refresh
+to check and The routing mode is uncertain. Refresh before switching again. were
+explicitly observed. Timestamped withheld replies and separate checks confirmed
+the same native app, exact owned child/sole responsive listener and unchanged
+provider/router/journal bytes. Releasing only the withheld replies, without
+replaying them, produced automatic On/action Off/active route-a assignment, which
+the user confirmed without manual Refresh or another mode action. The user then
+performed keyboard Off and Stop, observed Router not running, and used Command-Q
+to quit the synthetic Router app normally. Independent cleanup observed native
+exit 0 without a signal, no child/listener and original synthetic file bytes.
+
+The second idle fixture retained a valid pending direct-confirmation context; no
+router was started or provider activated. The user reported being able to focus
+the recovery buttons, while observing that ordinary focus moving outside the
+viewport did not scroll it into view. Source comparison found explicit scrolling
+only for Quit-guidance requests in both the baseline and current view. The new
+layout exposes more controls below Projects; no baseline native comparison was
+performed, so runtime regression provenance is unproven. The user then explicitly
+confirmed both focus outlines were clear after scrolling without clicking a
+control, and Page Up/Page Down revealed the focused
+button using the keyboard without pointer scrolling or activation. The manual
+recovery disclosure also expanded with keyboard focus and Space. For the guarded
+Quit check, the user collapsed Advanced and followed the Command-Q/Return
+instructions. The user qualified the timing: the recovery area
+was already revealed on the Quit request, before Show steps to quit. Source
+inspection confirms a blocked-Quit error can expand Advanced before the alert;
+the primary response separately issues targeted navigation. The user observed
+the Click Refresh and review any recovery instructions guidance text focused;
+one Tab moved focus to Start router (routing Off), with keyboard paging available
+to reveal off-screen focus. This establishes the observed keyboard path, not
+independent proof that the primary response caused the earlier expansion.
+
+Only the synthetic journal had been invalidated to trigger the guard. It was
+restored exactly before the user used Command-Q on the synthetic Router again;
+the app exited without an alert. Independent cleanup observed native exit 0
+without a signal, no child/listener and original configuration/provider/pending-
+journal bytes. The pending synthetic response check was preserved; no response
+button was pressed, no router started in this phase and no false working-response
+confirmation was made. All fixture drivers finished normally.
+
+Missing automatic reveal of ordinary off-screen focus remains an open usability
+observation for final quality review. Keyboard paging success does not establish
+an unperformed VoiceOver check or an automatic-scroll fix. A final fresh private
+recovery recheck also passed: actual selected/normal contexts direct/restored,
+no pending desktop check, real port empty and instance lock unheld, exact original
+non-provider bytes/modes and selected provider table, and unchanged final restored
+provider text with only the previously qualified project-settings difference
+from the original checkpoint. The current signed app verified successfully.
 
 ## Live setup observations — 2026-11-13
 
@@ -367,8 +448,11 @@ outside Git. No actual credentials were printed or committed.
 - Final whole-branch sequential specification then quality review, including
   disposition of remaining evidence limitations, is pending.
 
-The transient lost-set Uncertain label remains unobserved; Unavailable and
-automatic same-child read reconciliation were observed as described above.
+The earlier lost-set attempt missed the transient Uncertain label. Both texts
+were later observed during the focused remediation above. Native keyboard
+reachability was exercised with Keyboard navigation temporarily enabled and
+keyboard paging; ordinary focus does not automatically reveal off-screen
+controls. Cleanup and restoration of the original setting are verified.
 The native observations do not establish VoiceOver behavior or every
 sizing/runtime/error combination. The keyboard observation is qualified above.
 The live run establishes the specific visible same-chat sequence and symbolic
