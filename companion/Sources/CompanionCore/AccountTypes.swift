@@ -17,9 +17,11 @@ public struct AccountRecord: Codable, Equatable {
     public init(id: String, displayName: String, upstreamBaseUrl: String, credential: CredentialReference) { self.id = id; self.displayName = displayName; self.upstreamBaseUrl = upstreamBaseUrl; self.credential = credential }
     /// Normalize form input before constructing the account/receipt shared with Node.
     public static func normalizedUpstreamBaseURL(_ value: String) throws -> String {
+        let authority = value.split(separator: "/", maxSplits: 3, omittingEmptySubsequences: false).prefix(3)
         guard !value.contains("\\"), !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              authority.allSatisfy({ $0.utf8.allSatisfy({ $0 < 128 }) }),
               value.range(of: "%(?![0-9A-Fa-f]{2})", options: .regularExpression) == nil,
-              let url = URLComponents(string: value), url.scheme?.lowercased() == "https", let rawHost = url.host, !rawHost.isEmpty, rawHost.utf8.allSatisfy({ $0 < 128 }),
+              let url = URLComponents(string: value), url.scheme?.lowercased() == "https", let rawHost = url.encodedHost, !rawHost.isEmpty,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.port == nil || (0...65535).contains(url.port!) else { throw AccountValidationError.invalidUpstreamURL }
         var host = rawHost.lowercased()

@@ -21,6 +21,7 @@ final class AccountTypesTests: XCTestCase {
             ("https://example.invalid/provider%2froot/%25token/", "https://example.invalid/provider%2froot/%25token"),
             ("https://example.invalid/v1//account/", "https://example.invalid/v1//account"),
             ("https://example.invalid/v1 path/", "https://example.invalid/v1%20path"),
+            ("https://xn--bcher-kva.invalid/api/", "https://xn--bcher-kva.invalid/api"),
             ("https://127.0.0.1:8443/api/", "https://127.0.0.1:8443/api"),
             ("https://[0:0:0:0:0:0:0:1]:8443/api/", "https://[::1]:8443/api")
         ]
