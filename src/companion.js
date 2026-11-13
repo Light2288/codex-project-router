@@ -118,3 +118,6 @@ export async function runCompanionControl({ action, configPath, expectedContext 
     throw new RouterError("ACTIVATION_CONFLICT");
   return { activate, rollback }[action](configPath, { expectedContext });
 }
+
+// Setup remains a one-shot metadata boundary, separate from managed mode control.
+export { previewAccountSetup, commitAccountSetup } from "./account-setup.js";

@@ -112,3 +112,35 @@ test("inspection activation and offline rollback never call credentials helpers 
     assert.deepEqual(counts, [0, 0]);
   }
 });
+
+test("setup preview is a bounded metadata-only one-shot action", async t => {
+  const f = await fixture(t), configPath = await realpath(f.configPath);
+  await writeFile(join(f.dir,"config.toml"), `model_provider = "test_gateway"\n[model_providers.test_gateway]\nbase_url = "${f.config.upstreamBaseUrl}"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.test_gateway.auth]\ncommand = "/OPAQUE_HELPER_SENTINEL"\nargs = ["SECRET_SENTINEL"]\n`, {mode:0o600});
+  const result = await run({schemaVersion:1,action:"setup_preview",configPath});
+  assert.equal(result.code,0); assert.equal(result.stderr,""); assert.equal(result.envelope.result.sourceKind,"legacy");
+  assert.equal(result.envelope.result.incomingHint,null);
+  assert.doesNotMatch(result.stdout,/OPAQUE_HELPER_SENTINEL|SECRET_SENTINEL/);
+  const padded=JSON.stringify({schemaVersion:1,action:"setup_preview",configPath})+" ".repeat(20*1024);
+  assert.equal((await run(padded)).code,0);
+  const old=JSON.stringify({schemaVersion:1,action:"inspect",configPath})+" ".repeat(20*1024);
+  assert.equal((await run(old)).envelope.error.code,"CONFIG_INVALID");
+  for(const input of [
+    JSON.stringify({schemaVersion:1,action:"setup_preview",configPath})+" ".repeat(1024*1024),
+    {schemaVersion:1,action:"setup_commit",configPath,expectedContext:{},expectedRevision:"x",operationId:"x",change:{}},
+    {schemaVersion:1,action:"setup_preview",configPath,secret:"SECRET_SENTINEL"},
+  ]) {
+    const failed=await run(input); assert.equal(failed.envelope.ok,false); assert.equal(failed.envelope.error.code,"CONFIG_INVALID"); assert.doesNotMatch(failed.stdout,/SECRET_SENTINEL/);
+  }
+});
+
+test("setup commit validates native parent lease and returns only saved metadata", async t => {
+  const f=await fixture(t), configPath=await realpath(f.configPath);
+  await writeFile(join(f.dir,"config.toml"), `model_provider = "test_gateway"\n[model_providers.test_gateway]\nbase_url = "${f.config.upstreamBaseUrl}"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.test_gateway.auth]\ncommand = "/OPAQUE_HELPER_SENTINEL"\n`, {mode:0o600});
+  const preview=(await run({schemaVersion:1,action:"setup_preview",configPath})).envelope.result;
+  const operationId="aaaaaaaa-1111-4111-8111-111111111111", ref={keychainPath:"/synthetic.keychain-db",service:"synthetic",account:"synthetic"};
+  await writeFile(join(f.dir,".activation.lock"),JSON.stringify({pid:process.pid,setupOperationId:operationId,configPath}),{mode:0o600});
+  const change={kind:"migrate",accounts:preview.accounts.map(({sourceAlias,...a})=>({...a,credential:ref})),incomingCredential:ref,defaultAccountId:null};
+  const committed=await run({schemaVersion:1,action:"setup_commit",configPath,expectedContext:preview.context,expectedRevision:preview.configurationRevision,operationId,change});
+  assert.equal(committed.code,0); assert.equal(committed.envelope.result.setupState,"required");
+  assert.doesNotMatch(committed.stdout,/OPAQUE_HELPER_SENTINEL|keychain|synthetic|https:/); assert.equal(committed.stderr,"");
+});

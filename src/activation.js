@@ -325,7 +325,7 @@ export async function rollback(configPath, { expectedContext } = {}) {
     return { state: "direct", changed, restartRequired: changed };
   }, expectedContext, true);
 }
-export async function inspectActivation(configPath) {
+export async function inspectActivation(configPath, { probeProxy = true } = {}) {
   try {
     const c = await context(configPath, undefined, true),
       inspection = await inspectRouterConfiguration(configPath),
@@ -335,7 +335,7 @@ export async function inspectActivation(configPath) {
     if (operationalFingerprint(inspection.config) !== operationalFingerprint(c.cfg)) throw new RouterError("ACTIVATION_CONFLICT");
     const routingReady = inspection.setupState === "ready" || inspection.setupState === "migration_required";
     let proxyReady = false;
-    if (routingReady) {
+    if (routingReady && probeProxy) {
       try {
         await ready(inspection.config);
         proxyReady = true;
