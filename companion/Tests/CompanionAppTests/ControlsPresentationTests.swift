@@ -22,7 +22,7 @@ import CompanionCore
         try store.save(CompanionJournal(selectedConfigurationPath: context.configPath,
             pending: .init(context: context, phase: .directConfirmation)))
         let backend = DisplayBackend()
-        backend.snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "legacy"),
+        backend.snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"),
             context: context, revision: "synthetic-presentation-revision",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "restored"),
             catalog: .init(state: "ready", entries: []))
@@ -116,6 +116,9 @@ import CompanionCore
         try await withPendingDirectController { controller, backend, _ in
             backend.routingError = nil
             await controller.start()
+            backend.snapshot.configuration.mode = "legacy"
+            backend.snapshot.configuration.setupState = "migration_required"
+            await controller.refresh()
             let project = Inspection.Entry(id: "legacy", name: "Legacy", routeAlias: "route-a", routeState: "mapped")
             for mode in [ProjectRoutingMode.off, .on] {
                 await controller.setProjectRouting(mode)

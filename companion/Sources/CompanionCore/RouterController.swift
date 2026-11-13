@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Darwin
 
 @MainActor @Observable public final class RouterController {
     public enum DesktopConfirmation: Equatable { case unknown, routedPending, directPending, confirmedRouted, confirmedDirect }
@@ -18,6 +19,9 @@ import Observation
     public private(set) var mutationRequiresReconciliation = false
     public private(set) var projectRoutingStatus: ProjectRoutingStatus = .notRunning
     public private(set) var routingModeError: String?
+    public private(set) var uncertainSetupOperationID: String?
+    public private(set) var configurationLockRequiresResolution = false
+    private var setupReserved = false
 
     @ObservationIgnored private let backend: any CompanionBackend
     @ObservationIgnored private let store: PrivateStore
@@ -46,13 +50,13 @@ import Observation
     public var needsManualListenerCleanup: Bool {
         ownedRouter == nil && (lastStopOutcome?.portState == .occupied || inspection?.provider.proxyReady == true)
     }
-    public var canSelectNode: Bool { usable && !busy }
+    public var canSelectNode: Bool { usable && !busy && !mutationRequiresReconciliation }
     public var canSelectConfiguration: Bool { usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation }
     public var canStart: Bool {
-        usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && matchingContext != nil && inspection?.provider.proxyReady == false
+        usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && matchingContext != nil && inspection?.provider.proxyReady == false && inspection?.configuration.setupState == "ready"
     }
     public var canActivate: Bool {
-        guard usable, !busy, !mutationRequiresReconciliation, let child = ownedRouter, child.process.isRunning, matchingContext == child.context,
+        guard usable, !busy, !mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let child = ownedRouter, child.process.isRunning, matchingContext == child.context,
               let provider = inspection?.provider else { return false }
         return provider.proxyReady == true && ["direct", "router"].contains(provider.state) &&
             !provider.recoveryRequired && !["prepared", "unavailable"].contains(provider.recordPhase)
@@ -113,12 +117,39 @@ import Observation
             selectedNode = journal.nodeExecutablePath.map { URL(fileURLWithPath: $0) }
             if let selectedNode { backend.setNodeExecutable(selectedNode) }
             usable = true
+            loadSetupEvidence()
             backend.onChildExit = { [weak self] id, _ in self?.childExited(id) }
         } catch {
             secondInstance = (error as? CompanionError) == .instanceRunning
             // Initialization cannot launch a child/helper; failed private evidence stays untouched.
             initializationFailed = !secondInstance
             self.error = safe(error)
+        }
+    }
+
+    private func loadSetupEvidence() {
+        guard let selectedConfiguration else { return }
+        let directory = selectedConfiguration.deletingLastPathComponent()
+        var hasEvidence = false
+        for name in ["account-setup.json", ".activation.lock"] {
+            var info = stat()
+            if lstat(directory.appendingPathComponent(name).path, &info) == 0 { hasEvidence = true }
+            else if errno != ENOENT { configurationLockRequiresResolution = true; mutationRequiresReconciliation = true; return }
+        }
+        guard hasEvidence else { return }
+        do {
+            let transaction = SetupTransactionStore(configPath: selectedConfiguration)
+            switch try transaction.inspectLease() {
+            case .absent: break
+            case .activation: configurationLockRequiresResolution = true
+            case let .setup(operationID): uncertainSetupOperationID = operationID
+            }
+            if let receipt = try transaction.load(), receipt.phase != .complete { uncertainSetupOperationID = receipt.operationId }
+            mutationRequiresReconciliation = uncertainSetupOperationID != nil || configurationLockRequiresResolution
+            if mutationRequiresReconciliation { error = "Account setup or activation is incomplete. Review the saved evidence and resolve the activation lock manually before continuing." }
+        } catch {
+            configurationLockRequiresResolution = true; mutationRequiresReconciliation = true
+            self.error = CompanionError.privateState.rawValue
         }
     }
 
@@ -138,6 +169,59 @@ import Observation
         await inspectNow()
     }
 
+    public var canBeginAccountSetup: Bool {
+        usable && !busy && !mutationRequiresReconciliation && !backend.mutationRequiresReconciliation &&
+            ownedRouter == nil && selectedConfiguration != nil && !recoveryObligation && journal.pending == nil
+    }
+    /// Reserves the action and inspection boundary until finishAccountSetup, including OS consent.
+    public func beginAccountSetup() async throws -> SetupPreview {
+        guard canBeginAccountSetup, let setup = backend as? any AccountSetupBackend, begin() else { throw CompanionError.mutationBusy }
+        await acquireInspectionSlot(); setupReserved = true
+        do { return try await authoritativeSetupPreview(setup) }
+        catch { finishAccountSetup(); throw error }
+    }
+    func revalidateAccountSetup(_ expected: SetupPreview, includePreview: Bool = true) async throws {
+        guard setupReserved, let setup = backend as? any AccountSetupBackend else { throw CompanionError.mutationBusy }
+        if includePreview {
+            let fresh = try await authoritativeSetupPreview(setup)
+            guard fresh.context == expected.context, fresh.configurationRevision == expected.configurationRevision else { throw CompanionError.mutationBusy }
+        } else {
+            try await verifySetupDirect(expected.context)
+            guard await setup.probeSetupPort(expected.context) == .empty else { throw CompanionError.mutationBusy }
+        }
+    }
+    private func authoritativeSetupPreview(_ setup: any AccountSetupBackend) async throws -> SetupPreview {
+        guard let selectedConfiguration, !backend.mutationRequiresReconciliation else { throw CompanionError.mutationBusy }
+        let preview = try await setup.previewSetup(configPath: selectedConfiguration, browseHome: browseHome)
+        guard preview.context.configPath == selectedConfiguration.path else { throw CompanionError.mutationBusy }
+        try await verifySetupDirect(preview.context)
+        guard await setup.probeSetupPort(preview.context) == .empty else { throw CompanionError.mutationBusy }
+        let latest = try await setup.previewSetup(configPath: selectedConfiguration, browseHome: browseHome)
+        guard latest.context == preview.context, latest.configurationRevision == preview.configurationRevision else { throw CompanionError.mutationBusy }
+        return latest
+    }
+    private func verifySetupDirect(_ context: ActivationContext) async throws {
+        guard setupReserved, ownedRouter == nil, !recoveryObligation, journal.pending == nil,
+              selectedConfiguration?.path == context.configPath, await inspectInSlot(queryRoutingMode: false),
+              !recoveryObligation, !backend.mutationRequiresReconciliation else { throw CompanionError.mutationBusy }
+        if inspection?.configuration.state == "missing" {
+            guard inspection?.context == nil, inspection?.provider.recoveryRequired == false else { throw CompanionError.mutationBusy }
+        } else {
+            guard matchingContext == context, cleanDirect(context), inspection?.provider.proxyReady == false else { throw CompanionError.mutationBusy }
+        }
+    }
+    func markAccountSetupUncertain(_ operationID: String) {
+        uncertainSetupOperationID = operationID; mutationRequiresReconciliation = true
+    }
+    func completeAccountSetup(operationID: String) {
+        if uncertainSetupOperationID == operationID, !backend.mutationRequiresReconciliation { uncertainSetupOperationID = nil }
+        finishAccountSetup()
+    }
+    public func finishAccountSetup() {
+        mutationRequiresReconciliation = backend.mutationRequiresReconciliation || uncertainSetupOperationID != nil || configurationLockRequiresResolution
+        if setupReserved { setupReserved = false; releaseInspectionSlot(); finish() }
+    }
+
     public func selectConfiguration(_ path: URL) async {
         guard canSelectConfiguration, begin() else { reject(); return }
         defer { finish() }
@@ -147,6 +231,7 @@ import Observation
             var next = journal; next.selectedConfigurationPath = canonical.path
             try persist(next)
             selectedConfiguration = canonical; inspection = nil; revision = nil
+            loadSetupEvidence()
             projectRoutingStatus = .notRunning; routingModeError = nil
             dependencyContext = nil; hasDepended = false; desktopConfirmation = .unknown
             await inspectNow()
@@ -169,7 +254,7 @@ import Observation
         guard begin() else { return }
         defer { finish() }
         guard await inspectNow() else { return }
-        guard !backend.mutationRequiresReconciliation, let context = matchingContext, ownedRouter == nil, inspection?.provider.proxyReady == false else { reject(); return }
+        guard !backend.mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let context = matchingContext, ownedRouter == nil, inspection?.provider.proxyReady == false else { reject(); return }
         do {
             let directSession = !hasDepended && !recoveryObligation && cleanDirect(context)
             let child: OwnedRouter
@@ -195,7 +280,7 @@ import Observation
         guard begin() else { return }
         defer { finish() }
         guard await inspectNow() else { return }
-        guard !backend.mutationRequiresReconciliation, let context = matchingContext, let child = ownedRouter, child.process.isRunning,
+        guard !backend.mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let context = matchingContext, let child = ownedRouter, child.process.isRunning,
               child.context == context, let provider = inspection?.provider, provider.proxyReady == true,
               ["direct", "router"].contains(provider.state), !provider.recoveryRequired,
               !["prepared", "unavailable"].contains(provider.recordPhase) else { reject(); return }
@@ -349,7 +434,7 @@ import Observation
         return desktopConfirmation == .confirmedDirect || (!hasDepended && directOnlyChild == child.id)
     }
     private func begin() -> Bool {
-        guard usable, !busy else { if !busy { reject() }; return false }
+        guard usable, !busy, uncertainSetupOperationID == nil, !configurationLockRequiresResolution else { if !busy { reject() }; return false }
         busy = true; error = nil; generation &+= 1; quitRequested = false
         idleQuitAuthorized = false; idleQuitJournalUnavailable = false
         return true
@@ -389,7 +474,7 @@ import Observation
         inspectionSequence &+= 1
         let requestSequence = inspectionSequence
         let requestGeneration = generation
-        defer { mutationRequiresReconciliation = backend.mutationRequiresReconciliation }
+        defer { mutationRequiresReconciliation = backend.mutationRequiresReconciliation || uncertainSetupOperationID != nil || configurationLockRequiresResolution }
         do {
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }

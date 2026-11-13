@@ -16,6 +16,7 @@ import CompanionCore
 
 @MainActor final class RouterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let controller: RouterController
+    let accountSetup: AccountSetupController?
     let navigation: QuitGuidanceNavigation
     private var controlsWindow: NSWindow?
     private var polling: Timer?
@@ -28,12 +29,15 @@ import CompanionCore
     override convenience init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let resources = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("router")
-        let controller = RouterController(backend: ProcessBackend(resourcesURL: resources, nodeExecutable: nil),
+        let backend = ProcessBackend(resourcesURL: resources, nodeExecutable: nil)
+        let controller = RouterController(backend: backend,
             store: PrivateStore(directory: home.appendingPathComponent(".codex-project-router/companion")),
             browseHome: home.appendingPathComponent(".codex"))
-        self.init(controller: controller)
+        let setup = AccountSetupController(router: controller, backend: backend, keychain: KeychainStore(), browseHome: home.appendingPathComponent(".codex"))
+        self.init(controller: controller, accountSetup: setup)
     }
     init(controller: RouterController,
+         accountSetup: AccountSetupController? = nil,
          navigation: QuitGuidanceNavigation? = nil,
          presentQuitAlert: @escaping @MainActor (NSAlert) async -> NSApplication.ModalResponse = {
              NSApp.activate(ignoringOtherApps: true)
@@ -41,7 +45,7 @@ import CompanionCore
          },
          showControls: (@MainActor () -> Void)? = nil,
          terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
-        self.controller = controller
+        self.controller = controller; self.accountSetup = accountSetup
         self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
         self.showControls = showControls

@@ -9,6 +9,7 @@ public final class SetupTransactionStore {
     private var directoryFD: Int32 = -1, leaseFD: Int32 = -1
     private var operationID: String?, context: ActivationContext?, currentReceipt: SetupReceipt?
     private var receiptIdentity: stat?, phase: SetupReceipt.Phase?
+    var hasOwnedLease: Bool { leaseFD >= 0 }
     public init(configPath: URL) { self.configPath = configPath }
     deinit {
         // Closing this process's descriptors does not discard uncertain persistent evidence.
@@ -50,6 +51,31 @@ public final class SetupTransactionStore {
         currentReceipt = receipt; phase = .prepared
     }
 
+    /// A rejected fresh check can release only intent-free, unchanged evidence owned by this instance.
+    public func cancelBeforeMutation() throws {
+        guard phase == nil else { throw CompanionError.privateState }
+        try validateLease(); try validateReceiptIdentity()
+        guard unlinkat(directoryFD, leaseName, 0) == 0, fsync(directoryFD) == 0 else { throw CompanionError.privateState }
+        close(leaseFD); leaseFD = -1; close(directoryFD); directoryFD = -1
+        operationID = nil; context = nil
+    }
+
+    public enum LeaseEvidence: Equatable { case absent, activation, setup(operationID: String) }
+    /// Read-only relaunch evidence; a PID is never exposed as native control authority.
+    public func inspectLease() throws -> LeaseEvidence {
+        let dir = try openDirectory(); defer { close(dir) }
+        guard let before = try identity(dir, leaseName) else { return .absent }
+        guard let bytes = try readBytes(dir, leaseName), let after = try identity(dir, leaseName), same(before, after),
+              let object = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any],
+              let owner = try? JSONDecoder().decode(LeaseOwner.self, from: bytes), owner.pid > 0,
+              try readBytes(dir, leaseName) == bytes else { throw CompanionError.privateState }
+        if Set(object.keys) == ["pid"] { return .activation }
+        guard Set(object.keys) == ["pid", "setupOperationId", "configPath"],
+              let lease = try? JSONDecoder().decode(Lease.self, from: bytes), UUID(uuidString: lease.setupOperationId) != nil,
+              lease.configPath == configPath.path else { throw CompanionError.privateState }
+        return .setup(operationID: lease.setupOperationId)
+    }
+
     public func load() throws -> SetupReceipt? {
         let fd = try openDirectory(); defer { close(fd) }
         return try readReceipt(fd)
@@ -80,6 +106,7 @@ public final class SetupTransactionStore {
         operationID = nil; context = nil; phase = nil
     }
 
+    private struct LeaseOwner: Decodable { var pid: Int32 }
     private struct Lease: Codable, Equatable { var pid: Int32; var setupOperationId: String; var configPath: String }
     private func valid(_ context: ActivationContext) -> Bool {
         [context.configPath, context.codexHome].allSatisfy { $0.hasPrefix("/") && !$0.contains("\0") } && (1...65535).contains(context.listenPort) && context.providerId.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil

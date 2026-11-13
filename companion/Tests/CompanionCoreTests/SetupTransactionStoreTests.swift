@@ -14,6 +14,40 @@ final class SetupTransactionStoreTests: XCTestCase {
         receipt = SetupReceipt(operationId: UUID().uuidString, account: account, context: context)
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
+    func testFreshCheckFailureReleasesOnlyUnpreparedUnchangedLease() throws {
+        let store = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
+        try store.begin(context: context, operationID: receipt.operationId, receipt: nil)
+        try store.cancelBeforeMutation()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".activation.lock").path))
+        XCTAssertNil(try store.load())
+        try store.begin(context: context, operationID: receipt.operationId, receipt: nil)
+        let lock = root.appendingPathComponent(".activation.lock")
+        try FileManager.default.moveItem(at: lock, to: root.appendingPathComponent("held-lock"))
+        try Data("replacement".utf8).write(to: lock)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lock.path)
+        XCTAssertThrowsError(try store.cancelBeforeMutation())
+        XCTAssertEqual(try String(contentsOf: lock), "replacement")
+    }
+    func testLeaseInspectionDistinguishesSetupFromActivationWithoutAdoption() throws {
+        let config = URL(fileURLWithPath: context.configPath), store = SetupTransactionStore(configPath: config)
+        XCTAssertEqual(try store.inspectLease(), .absent)
+        try store.begin(context: context, operationID: receipt.operationId, receipt: nil)
+        let observer = SetupTransactionStore(configPath: config), path = root.appendingPathComponent(".activation.lock")
+        let bytes = try Data(contentsOf: path)
+        XCTAssertEqual(try observer.inspectLease(), .setup(operationID: receipt.operationId))
+        XCTAssertThrowsError(try observer.cancelBeforeMutation()); XCTAssertThrowsError(try observer.finishVerified())
+        XCTAssertEqual(try Data(contentsOf: path), bytes)
+        try store.cancelBeforeMutation()
+        for content in ["{\"pid\":123}", "{\"pid\":true}", "{}", "malformed", "{\"pid\":123,\"unexpected\":true}"] {
+            try Data(content.utf8).write(to: path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+            if content == "{\"pid\":123}" { XCTAssertEqual(try observer.inspectLease(), .activation) }
+            else { XCTAssertThrowsError(try observer.inspectLease()) }
+            XCTAssertEqual(try String(contentsOf: path), content)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
+        XCTAssertThrowsError(try observer.inspectLease())
+    }
     func testReceiptPrecedesCreationAndSurvivesRelaunch() async throws {
         let store = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
         try store.begin(context: context, operationID: receipt.operationId, receipt: receipt)
