@@ -67,6 +67,7 @@ import CompanionCore
         RunLoop.main.add(timer, forMode: .common)
         polling = timer
     }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { accountSetup?.canDismiss ?? true }
     func windowWillClose(_ notification: Notification) {
         navigation.clear()
         scheduleRefresh(windowVisible: false)
@@ -85,7 +86,7 @@ import CompanionCore
         if controlsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Codex Project Router"
-            window.contentView = NSHostingView(rootView: ControlsView(controller: controller, navigation: navigation))
+            window.contentView = NSHostingView(rootView: ControlsView(controller: controller, navigation: navigation, accountSetup: accountSetup))
             window.minSize = NSSize(width: 760, height: 680)
             window.isReleasedWhenClosed = false
             window.delegate = self
