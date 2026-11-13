@@ -274,29 +274,31 @@ test("invalid account inspection preserves catalog context and recovery without 
 });
 
 test("missing selected setup destination keeps explicit normal-home catalog without inventing context", async t => {
-  const f = await setup(t);
+  const f = await setup(t), browseHome = await realpath(f.dir);
   await unlink(f.configPath);
-  const result = await inspectCompanion({configPath:f.configPath,browseHome:f.dir});
+  const result = await inspectCompanion({configPath:f.configPath,browseHome});
   assert.deepEqual(result.configuration,{state:"missing"});
   assert.equal(result.catalog.state,"ready");
   assert.deepEqual(result.catalog.entries.map(e=>e.name),["Alpha","Beta"]);
   assert.ok(result.catalog.entries.every(e=>e.routeAlias===null && e.routeState==="unmapped"));
   assert.equal(result.context,undefined); assert.equal(result.revision,undefined);
   assert.equal(result.provider.state,"unavailable");
+  assert.equal(result.provider.recoveryRequired,false);
+  assert.equal(result.provider.proxyReady,null);
   assert.doesNotMatch(JSON.stringify(result),secret);
   assert.equal((await inspectCompanion({configPath:f.configPath})).catalog.state,"unavailable");
   // A dangling link is existing unsafe evidence, not an absent setup destination.
   await symlink(f.configPath+".absent",f.configPath);
-  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
   await unlink(f.configPath);
   const linkedDirectory=join(f.dir,"linked directory"); await symlink(f.dir,linkedDirectory);
-  assert.equal((await inspectCompanion({configPath:join(linkedDirectory,"absent.json"),browseHome:f.dir})).catalog.state,"unavailable");
+  assert.equal((await inspectCompanion({configPath:join(linkedDirectory,"absent.json"),browseHome})).catalog.state,"unavailable");
   for (const bytes of ["{SECRET_SENTINEL",JSON.stringify({...f.config,schemaVersion:999})]) {
     await writeFile(f.configPath,bytes,{mode:0o600});
-    assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+    assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
   }
   await f.saveConfig(); await chmod(f.configPath,0o644);
-  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
 });
 
 test("valid selected configuration keeps its own home authoritative over browse fallback", async t => {
@@ -305,4 +307,23 @@ test("valid selected configuration keeps its own home authoritative over browse 
   const result=await inspectCompanion({configPath:f.configPath,browseHome:other});
   assert.deepEqual(result.catalog.entries,expectedEntries(false));
   assert.deepEqual(result.context,contextFor(f));
+});
+
+
+test("missing destination provider recovery stays required for unsafe or unsettled direct evidence", async t => {
+  const f=await setup(t), browseHome=await realpath(f.dir); await unlink(f.configPath);
+  const inspect=()=>inspectCompanion({configPath:f.configPath,browseHome});
+  assert.equal((await inspect()).provider.recoveryRequired,false);
+  for(const name of ["activation.json","companion-journal.json","codex-config-11111111-1111-4111-8111-111111111111.toml","account-setup-checkpoint-synthetic.json"]) {
+    const path=join(f.dir,name); await writeFile(path,"SECRET_SENTINEL",{mode:0o600});
+    assert.equal((await inspect()).provider.recoveryRequired,true,name);
+    assert.equal(await readFile(path,"utf8"),"SECRET_SENTINEL"); await unlink(path);
+  }
+  for(const bytes of ["{SECRET_SENTINEL",f.original.replace("supports_websockets = false","supports_websockets = true"),f.original.replace(f.config.upstreamBaseUrl,"http://127.0.0.1:8787/v1")]) {
+    await writeFile(f.providerPath,bytes); assert.equal((await inspect()).provider.recoveryRequired,true);
+  }
+  await writeFile(f.providerPath,f.original); await chmod(f.dir,0o755);
+  assert.equal((await inspect()).provider.recoveryRequired,true); await chmod(f.dir,0o700);
+  await unlink(f.providerPath); await symlink(f.statePath,f.providerPath);
+  assert.equal((await inspect()).provider.recoveryRequired,true);
 });

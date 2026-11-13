@@ -1,9 +1,10 @@
-import { readFile, realpath, lstat } from "node:fs/promises";
+import { readFile, realpath, lstat, readdir } from "node:fs/promises";
 import { isAbsolute, join, dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, UUID } from "./config.js";
-import { inspectActivation, activate, rollback } from "./activation.js";
+import { inspectActivation, inspectProviderConfiguration, activate, rollback } from "./activation.js";
 import { RouterError } from "./errors.js";
+import { parse } from "smol-toml";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const unavailable = recoveryRequired => ({ state: "unavailable", recoveryRequired, proxyReady: null, recordPhase: "unavailable" });
@@ -71,6 +72,33 @@ async function catalog(codexHome, cfg) {
     return { state: "unavailable", entries: [] };
   }
 }
+async function missingProviderSettled(configPath, browseHome) {
+  try {
+    const directory = dirname(configPath), parent = await lstat(directory);
+    if (!parent.isDirectory() || parent.uid !== process.getuid() || parent.mode & 0o077 ||
+        await realpath(directory) !== directory || await realpath(browseHome) !== browseHome) return false;
+    const recoveryEvidence = name => name === "activation.json" || name === "companion-journal.json" ||
+      /^codex-config-.*\.toml$/.test(name) || /^account-setup-checkpoint-/.test(name);
+    if ((await readdir(directory)).some(recoveryEvidence)) return false;
+    const providerPath = join(browseHome, "config.toml"), before = await lstat(providerPath);
+    if (!before.isFile() || before.uid !== process.getuid() || before.nlink !== 1 || before.mode & 0o022) return false;
+    const source = await readFile(providerPath, "utf8"), providerId = parse(source).model_provider;
+    if (typeof providerId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(providerId)) return false;
+    const provider = inspectProviderConfiguration(source, { providerId }), url = new URL(provider.url);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return false;
+    const after = await lstat(providerPath), latestParent = await lstat(directory);
+    // Setup receipts/leases belong to the native transaction guard, including its
+    // own prepared receipt during revalidation. They do not prove provider use.
+    return before.dev === after.dev && before.ino === after.ino && before.mode === after.mode &&
+      before.uid === after.uid && before.nlink === after.nlink && await readFile(providerPath, "utf8") === source &&
+      parent.dev === latestParent.dev && parent.ino === latestParent.ino && parent.mode === latestParent.mode &&
+      !(await readdir(directory)).some(recoveryEvidence) &&
+      await lstat(configPath).then(() => false, error => error.code === "ENOENT");
+  } catch {
+    // Unreadable, unsafe or incompatible evidence keeps recovery required.
+    return false;
+  }
+}
 export async function inspectCompanion({ configPath, browseHome } = {}) {
   if (configPath === null) {
     if (typeof browseHome !== "string" || !isAbsolute(browseHome)) throw new RouterError("CONFIG_INVALID");
@@ -87,7 +115,7 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
     const absent = state === "missing" && typeof browseHome === "string" && isAbsolute(browseHome) &&
       await lstat(configPath).then(() => false, error => error.code === "ENOENT") &&
       await realpath(dirname(configPath)).then(parent => parent === dirname(configPath), () => false);
-    return { configuration: { state }, provider: unavailable(true),
+    return { configuration: { state }, provider: unavailable(!(absent && await missingProviderSettled(configPath, browseHome))),
       catalog: absent ? await catalog(browseHome) : { state: "unavailable", entries: [] } };
   }
   const result = {

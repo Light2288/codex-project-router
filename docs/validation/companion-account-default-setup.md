@@ -1,7 +1,7 @@
 # Companion account and default setup validation
 
 Created: 2026-11-13
-Updated: 2026-11-13
+Updated: 2026-11-14
 
 Status: automated implementation/package verification complete. Native app consent,
 interactive setup and controlled live desktop acceptance remain pending until
@@ -16,8 +16,8 @@ from the configured outgoing default.
 
 ## Automated acceptance
 
-The fresh ordered acceptance ran from the repository: native tests **231/231**
-(173 Core, 58 App), current release build/ad-hoc signing, Node tests **811/811**,
+The fresh ordered acceptance ran from the repository: native tests **234/234**
+(176 Core, 58 App), current release build/ad-hoc signing, Node tests **812/812**,
 and exactly **3/3 package tests with zero skips**. Each command exited 0. The
 syntax check and final whitespace check passed.
 The signed artifact is an ignored local Apple-silicon app, not a distribution
@@ -78,9 +78,30 @@ visible without global suppression.
 
 ## Native and live observations
 
+The user observed the isolated synthetic catalog, setup-required/missing-default
+state and disabled Start in an attributed native window. The first native Save
+failed before a configuration, receipt, lease or Keychain item was created; the
+owned helper independently confirmed unchanged metadata/database identity.
+The real selected-missing bridge projected recovery required, while the native
+first-setup authorization required no provider recovery. Tests using a synthetic
+inspection had missed this disagreement.
+
+The causal repair retains the native recovery guard and reports no provider
+recovery only after a safe canonical private absent destination, compatible
+settled HTTPS direct provider and no provider recovery records/backups/checkpoints
+are established. Unsafe or unreadable evidence remains blocked. Native receipt
+and lease checks retain separate authority, including revalidation with the
+current operation's own prepared receipt. A new real Node-bridge/native-controller
+regression completes first creation with fake Security, real configuration commit
+and completed receipt; it also covers abandoned/unsafe receipt/lease and provider
+recovery refusal before native creation. This is automated integration evidence.
+The refreshed signed app still requires the user's actual native Save retry,
+creation/consent, reader and later-flow observations. Optional screenshot capture
+attempts failed; no screenshot evidence is claimed.
+
 | Capability | Current evidence |
 | --- | --- |
-| First configuration, metadata selection and distinct incoming/default choices | Pending native observation |
+| First configuration, metadata selection and distinct incoming/default choices | Initial browsing/setup-required/disabled Start observed; successful Save and selection pending |
 | Concealed native entry, creation consent and actual packaged-app ACL identity | Pending native observation |
 | Explicit first/default selection and add preserving current default/assignments | Pending native observation |
 | Safe stop/save/next Start Off boundary and created-but-unlinked reconciliation | Pending native observation |
