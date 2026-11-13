@@ -178,7 +178,7 @@ private final class RunningCommand {
         // Only a request begun after the uncertain child exits can reconcile that generation.
         let reconciliationGeneration = needsReconciliation && !mutationInFlight && uncertainSetupOperationID == nil ? mutationGeneration : nil
         var request: [String: Any] = ["schemaVersion": 1, "action": "inspect", "configPath": configPath?.path as Any? ?? NSNull()]
-        if configPath == nil { request["browseHome"] = browseHome.path }
+        request["browseHome"] = browseHome.path
         let result: Inspection = try await requestResult(request, mutating: false, deadline: deadline)
         guard valid(result) else { throw CompanionError.protocolFailure }
         if let reconciliationGeneration, reconciliationGeneration == mutationGeneration,

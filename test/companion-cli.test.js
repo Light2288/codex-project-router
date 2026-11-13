@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import { once } from "node:events";
-import { readFile, writeFile, realpath, access } from "node:fs/promises";
+import { readFile, writeFile, realpath, access, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { configFingerprint } from "../src/config.js";
@@ -39,7 +39,7 @@ test("CLI returns one safe bounded envelope and validates applicable parameters"
     { schemaVersion: 2, action: "inspect", configPath: null, browseHome: f.dir },
     { schemaVersion: 1, action: "inspect", configPath: null },
     { schemaVersion: 1, action: "inspect", configPath: "relative" },
-    { schemaVersion: 1, action: "inspect", configPath: f.configPath, browseHome: f.dir },
+    { schemaVersion: 1, action: "inspect", configPath: f.configPath, browseHome: "relative" },
     { schemaVersion: 1, action: "serve", configPath: f.configPath },
     { schemaVersion: 1, action: "rollback", configPath: f.configPath, expectedContext: {} },
     { schemaVersion: 1, action: "inspect", configPath: null, browseHome: f.dir, extra: "SECRET_SENTINEL" },
@@ -143,4 +143,19 @@ test("setup commit validates native parent lease and returns only saved metadata
   const committed=await run({schemaVersion:1,action:"setup_commit",configPath,expectedContext:preview.context,expectedRevision:preview.configurationRevision,operationId,change});
   assert.equal(committed.code,0); assert.equal(committed.envelope.result.setupState,"required");
   assert.doesNotMatch(committed.stdout,/OPAQUE_HELPER_SENTINEL|keychain|synthetic|https:/); assert.equal(committed.stderr,"");
+});
+
+test("CLI missing selected configuration accepts explicit browse home under existing inspect bounds", async t => {
+  const f=await fixture(t); f.configPath=await realpath(f.configPath); f.dir=await realpath(f.dir);
+  for (const project of Object.values(f.state["local-projects"])) project.name="Synthetic setup project";
+  await f.saveState(); await unlink(f.configPath);
+  const input={schemaVersion:1,action:"inspect",configPath:f.configPath,browseHome:f.dir};
+  const result=await run(input);
+  assert.equal(result.code,0); assert.equal(result.stderr,"");
+  assert.equal(result.envelope.result.configuration.state,"missing");
+  assert.equal(result.envelope.result.catalog.state,"ready");
+  assert.equal(result.envelope.result.catalog.entries.length,2);
+  assert.equal(result.envelope.result.context,undefined);
+  const overflow=await run(JSON.stringify(input)+" ".repeat(16*1024));
+  assert.equal(overflow.code,1); assert.equal(overflow.envelope.error.code,"CONFIG_INVALID");
 });

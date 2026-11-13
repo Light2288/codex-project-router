@@ -12,8 +12,10 @@ function validate(input) {
   if (process.versions.node.split(".")[0] !== "24" || !object(input) || input.schemaVersion !== 1)
     throw new RouterError("CONFIG_INVALID");
   if (input.action === "inspect") {
-    const fields = input.configPath === null ? ["schemaVersion", "action", "configPath", "browseHome"] : ["schemaVersion", "action", "configPath"];
-    if (!exact(input, fields) || (input.configPath === null ? !absolute(input.browseHome) : !absolute(input.configPath)))
+    const hasBrowseHome = Object.hasOwn(input, "browseHome");
+    const fields = hasBrowseHome ? ["schemaVersion", "action", "configPath", "browseHome"] : ["schemaVersion", "action", "configPath"];
+    if (!exact(input, fields) || (input.configPath === null ? !hasBrowseHome : !absolute(input.configPath)) ||
+      hasBrowseHome && !absolute(input.browseHome))
       throw new RouterError("CONFIG_INVALID");
   } else if (input.action === "setup_preview") {
     const fields = Object.hasOwn(input,"browseHome") ? ["schemaVersion","action","configPath","browseHome"] : ["schemaVersion","action","configPath"];

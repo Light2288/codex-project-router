@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
-import fs, { readFile, writeFile, unlink, realpath, symlink, readdir } from "node:fs/promises";
+import fs, { readFile, writeFile, unlink, realpath, symlink, readdir, chmod, mkdir } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { configFingerprint } from "../src/config.js";
@@ -271,4 +271,38 @@ test("invalid account inspection preserves catalog context and recovery without 
   await assert.rejects(runCompanionControl({ action: "activate", configPath: f.configPath, expectedContext }), { code: "ACCOUNT_SETUP_INVALID" });
   assert.equal((await runCompanionControl({ action: "rollback", configPath: f.configPath, expectedContext })).state, "direct");
   assert.equal(await readFile(f.providerPath, "utf8"), f.original);
+});
+
+test("missing selected setup destination keeps explicit normal-home catalog without inventing context", async t => {
+  const f = await setup(t);
+  await unlink(f.configPath);
+  const result = await inspectCompanion({configPath:f.configPath,browseHome:f.dir});
+  assert.deepEqual(result.configuration,{state:"missing"});
+  assert.equal(result.catalog.state,"ready");
+  assert.deepEqual(result.catalog.entries.map(e=>e.name),["Alpha","Beta"]);
+  assert.ok(result.catalog.entries.every(e=>e.routeAlias===null && e.routeState==="unmapped"));
+  assert.equal(result.context,undefined); assert.equal(result.revision,undefined);
+  assert.equal(result.provider.state,"unavailable");
+  assert.doesNotMatch(JSON.stringify(result),secret);
+  assert.equal((await inspectCompanion({configPath:f.configPath})).catalog.state,"unavailable");
+  // A dangling link is existing unsafe evidence, not an absent setup destination.
+  await symlink(f.configPath+".absent",f.configPath);
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+  await unlink(f.configPath);
+  const linkedDirectory=join(f.dir,"linked directory"); await symlink(f.dir,linkedDirectory);
+  assert.equal((await inspectCompanion({configPath:join(linkedDirectory,"absent.json"),browseHome:f.dir})).catalog.state,"unavailable");
+  for (const bytes of ["{SECRET_SENTINEL",JSON.stringify({...f.config,schemaVersion:999})]) {
+    await writeFile(f.configPath,bytes,{mode:0o600});
+    assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+  }
+  await f.saveConfig(); await chmod(f.configPath,0o644);
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome:f.dir})).catalog.state,"unavailable");
+});
+
+test("valid selected configuration keeps its own home authoritative over browse fallback", async t => {
+  const f=await setup(t), other=join(f.dir,"other home"); await mkdir(other);
+  await writeFile(join(other,".codex-global-state.json"),JSON.stringify({"local-projects":{[P3]:{id:P3,name:"Wrong fallback"}}}));
+  const result=await inspectCompanion({configPath:f.configPath,browseHome:other});
+  assert.deepEqual(result.catalog.entries,expectedEntries(false));
+  assert.deepEqual(result.context,contextFor(f));
 });

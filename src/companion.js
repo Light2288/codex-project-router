@@ -1,5 +1,5 @@
-import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { readFile, realpath, lstat } from "node:fs/promises";
+import { isAbsolute, join, dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, UUID } from "./config.js";
 import { inspectActivation, activate, rollback } from "./activation.js";
@@ -82,7 +82,13 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
     cfg = inspection.config;
   } catch (e) {
     const state = e.code === "ENOENT" ? "missing" : e.code === "CONFIG_INVALID" ? "invalid" : "unavailable";
-    return { configuration: { state }, provider: unavailable(true), catalog: { state: "unavailable", entries: [] } };
+    // Only a genuinely absent file in a canonical existing directory permits the
+    // normal-home catalog fallback. Existing unsafe evidence grants no fallback.
+    const absent = state === "missing" && typeof browseHome === "string" && isAbsolute(browseHome) &&
+      await lstat(configPath).then(() => false, error => error.code === "ENOENT") &&
+      await realpath(dirname(configPath)).then(parent => parent === dirname(configPath), () => false);
+    return { configuration: { state }, provider: unavailable(true),
+      catalog: absent ? await catalog(browseHome) : { state: "unavailable", entries: [] } };
   }
   const result = {
     configuration: { state: "valid", path: configPath,

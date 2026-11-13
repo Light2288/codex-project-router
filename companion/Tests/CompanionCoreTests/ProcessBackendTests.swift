@@ -166,6 +166,27 @@ import Darwin
         XCTAssertEqual(result.configuration.state, "missing"); XCTAssertNil(result.provider.proxyReady)
         XCTAssertNil(result.catalog.entries.first?.routeAlias)
     }
+    func testMissingSelectedDestinationPassesExplicitCatalogBrowseHome() async throws {
+        // Omitting browseHome for a saved absent path makes first-setup browsing unavailable.
+        let encoder = JSONEncoder(); encoder.outputFormatting = .withoutEscapingSlashes
+        let homeJSON = String(data: try encoder.encode(root.path), encoding: .utf8)!
+        let configJSON = String(data: try encoder.encode(config.path), encoding: .utf8)!
+        let script = """
+        #!/usr/bin/python3
+        import json, sys
+        if sys.argv[1:] == ['--version']:
+            print('v24.10.0'); sys.exit(0)
+        request = json.load(sys.stdin)
+        if request.get('browseHome') != \(homeJSON) or request.get('configPath') != \(configJSON): sys.exit(7)
+        print(json.dumps(dict(schemaVersion=1,ok=True,result=dict(configuration=dict(state='missing'),provider=dict(state='unavailable',recoveryRequired=True,proxyReady=None,recordPhase='unavailable'),catalog=dict(state='ready',entries=[dict(id='A',name='Available during setup',routeAlias=None,routeState='unmapped')])))))
+        """
+        try script.write(to: node, atomically: false, encoding: .utf8)
+        try FileManager.default.removeItem(at: config)
+        let result = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertEqual(result.configuration.state, "missing")
+        XCTAssertEqual(result.catalog.entries.first?.name, "Available during setup")
+        XCTAssertNil(result.context); XCTAssertNil(result.revision)
+    }
     func testProtocolOverflowNeverEchoesPayload() async throws {
         // Unbounded accumulation or raw child errors would expose the sentinel.
         try setMode("overflow")
