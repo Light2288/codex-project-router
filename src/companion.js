@@ -1,17 +1,44 @@
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { loadRouterConfig, UUID } from "./config.js";
+import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, UUID } from "./config.js";
 import { inspectActivation, activate, rollback } from "./activation.js";
 import { RouterError } from "./errors.js";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const unavailable = recoveryRequired => ({ state: "unavailable", recoveryRequired, proxyReady: null, recordPhase: "unavailable" });
 const activationContext = (configPath, cfg) => ({ configPath, codexHome: cfg.codexHome, providerId: cfg.providerId, listenPort: cfg.listenPort });
-async function selectedConfig(configPath) {
+async function selectedConfig(configPath, load = loadRouterConfig) {
   if (typeof configPath !== "string" || !isAbsolute(configPath) || await realpath(configPath) !== configPath)
     throw new RouterError("CONFIG_INVALID");
-  return loadRouterConfig(configPath);
+  return load(configPath);
+}
+function accountSummary(routing, id) {
+  return routing && typeof id === "string" && Object.hasOwn(routing.accounts, id)
+    ? { id, displayName: routing.accounts[id].displayName } : undefined;
+}
+function catalogEntry(id, name, routeAlias, cfg, catalogMissing = false) {
+  const entry = { id, name, routeAlias,
+    routeState: catalogMissing ? "catalog_missing" : routeAlias === null ? "unmapped" : cfg?.credentialRouting &&
+      !Object.hasOwn(cfg.credentialRouting.routeTargets, routeAlias) ? "target_missing" : "mapped" };
+  if (cfg?.schemaVersion !== 2) return entry;
+  const routing = cfg.accountRouting;
+  let account;
+  if (routeAlias === null) {
+    entry.assignmentKind = "inherited";
+    account = accountSummary(routing, routing?.defaultAccountId);
+  } else if (!routing || !Object.hasOwn(routing.routeAccounts, routeAlias)) {
+    entry.assignmentKind = "target_missing";
+    if (!catalogMissing) entry.routeState = "target_missing";
+  } else if (routing.routeAccounts[routeAlias] === null) {
+    entry.assignmentKind = "legacy_inherited";
+    account = accountSummary(routing, routing.defaultAccountId);
+  } else {
+    entry.assignmentKind = "override";
+    account = accountSummary(routing, routing.routeAccounts[routeAlias]);
+  }
+  if (account) entry.account = account;
+  return entry;
 }
 async function catalog(codexHome, cfg) {
   try {
@@ -26,9 +53,7 @@ async function catalog(codexHome, cfg) {
         throw new RouterError("STATE_UNAVAILABLE");
       identities.add(id.toLowerCase());
       const routeAlias = cfg && Object.hasOwn(cfg.projectRoutes, id) ? cfg.projectRoutes[id] : null;
-      entries.push({ id, name: project.name, routeAlias,
-        routeState: routeAlias === null ? "unmapped" : cfg.credentialRouting &&
-          !Object.hasOwn(cfg.credentialRouting.routeTargets, routeAlias) ? "target_missing" : "mapped" });
+      entries.push(catalogEntry(id, project.name, routeAlias, cfg));
     }
     if (cfg) {
       const mappings = new Map();
@@ -37,7 +62,7 @@ async function catalog(codexHome, cfg) {
         if (mappings.has(normalized) || identities.has(normalized) && !Object.hasOwn(projects, id))
           throw new RouterError("STATE_UNAVAILABLE");
         mappings.set(normalized, routeAlias);
-        if (!Object.hasOwn(projects, id)) entries.push({ id, name: "", routeAlias, routeState: "catalog_missing" });
+        if (!Object.hasOwn(projects, id)) entries.push(catalogEntry(id, "", routeAlias, cfg, true));
       }
     }
     entries.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
@@ -51,15 +76,20 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
     if (typeof browseHome !== "string" || !isAbsolute(browseHome)) throw new RouterError("CONFIG_INVALID");
     return { configuration: { state: "missing" }, provider: unavailable(false), catalog: await catalog(browseHome) };
   }
-  let cfg;
+  let cfg, inspection;
   try {
-    cfg = await selectedConfig(configPath);
+    inspection = await selectedConfig(configPath, inspectRouterConfiguration);
+    cfg = inspection.config;
   } catch (e) {
     const state = e.code === "ENOENT" ? "missing" : e.code === "CONFIG_INVALID" ? "invalid" : "unavailable";
     return { configuration: { state }, provider: unavailable(true), catalog: { state: "unavailable", entries: [] } };
   }
   const result = {
-    configuration: { state: "valid", path: configPath, mode: cfg.credentialRouting ? "credential" : "legacy" },
+    configuration: { state: "valid", path: configPath,
+      mode: cfg.schemaVersion === 2 ? "accounts" : cfg.credentialRouting ? "credential" : "legacy",
+      setupState: inspection.setupState,
+      ...(accountSummary(cfg.accountRouting, cfg.accountRouting?.defaultAccountId)
+        ? { defaultAccount: accountSummary(cfg.accountRouting, cfg.accountRouting.defaultAccountId) } : {}) },
     context: activationContext(configPath, cfg),
     provider: unavailable(true),
     catalog: await catalog(cfg.codexHome, cfg),
@@ -79,8 +109,9 @@ export async function runCompanionControl({ action, configPath, expectedContext 
   if (!["activate", "rollback"].includes(action)) throw new RouterError("CONFIG_INVALID");
   let cfg;
   try {
-    cfg = await selectedConfig(configPath);
-  } catch {
+    cfg = await selectedConfig(configPath, action === "rollback" ? loadRecoveryConfig : loadRouterConfig);
+  } catch (error) {
+    if (["ACCOUNT_SETUP_REQUIRED", "ACCOUNT_SETUP_INVALID"].includes(error.code)) throw error;
     throw new RouterError("ACTIVATION_CONFLICT");
   }
   if (!isDeepStrictEqual(expectedContext, activationContext(configPath, cfg)))

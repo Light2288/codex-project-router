@@ -1,6 +1,9 @@
 const definitions = {
   CONFIG_INVALID: [400, "Router configuration is invalid or unsupported."],
   CONFIG_UNAVAILABLE: [503, "Router configuration could not be read."],
+  ACCOUNT_SETUP_REQUIRED: [422, "Account setup must be completed before routing can start."],
+  ACCOUNT_SETUP_INVALID: [400, "Account setup is invalid or unsupported."],
+  ACCOUNT_SETUP_CONFLICT: [409, "Account setup changed; no overwrite was performed."],
   IDENTITY_INVALID: [400, "Request identity is missing or malformed."],
   IDENTITY_CONFLICT: [
     409,

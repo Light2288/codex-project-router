@@ -3,17 +3,19 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import { once } from "node:events";
-import { readFile, writeFile, stat, readdir, realpath } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, realpath, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "smol-toml";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { activate, rollback, status } from "../src/activation.js";
 import * as activation from "../src/activation.js";
 import { configFingerprint } from "../src/config.js";
 import { createProxy } from "../src/proxy.js";
-import { fixture } from "./helpers/fixtures.js";
+import { fixture, accountRouting, A1, A2 } from "./helpers/fixtures.js";
 const key = await readFile(new URL("./fixtures/tls/test-only-key.pem", import.meta.url));
 const cert = await readFile(new URL("./fixtures/tls/test-only-cert.pem", import.meta.url));
-async function setup(t, { ready = true, mismatch = false, credentialReader } = {}) {
+async function setup(t, { ready = true, mismatch = false, credentialReader, accounts = false, customDirectory = false } = {}) {
   const f = await fixture(t);
   const destinationCalls = { global: 0, project: 0 };
   if (credentialReader) {
@@ -33,6 +35,21 @@ async function setup(t, { ready = true, mismatch = false, credentialReader } = {
     }
     f.config.upstreamBaseUrl = bases.global;
     f.config.credentialRouting = credentialRouting(bases.project);
+  }
+  if (accounts) {
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    if (credentialReader) {
+      f.config.accountRouting.accounts[A1].upstreamBaseUrl = f.config.upstreamBaseUrl;
+      f.config.accountRouting.accounts[A2].upstreamBaseUrl = f.config.credentialRouting.routeTargets["route-a"].upstreamBaseUrl;
+      delete f.config.credentialRouting;
+    }
+  }
+  if (customDirectory) {
+    const dir = join(f.dir, "private-activation");
+    await mkdir(dir, { mode: 0o700 });
+    f.configPath = join(dir, "custom-router.json");
+    f.saveConfig = () => writeFile(f.configPath, JSON.stringify(f.config), { mode: 0o600 });
   }
   const server = credentialReader ? createProxy(f.config, {
     diagnostics: { write() {} },
@@ -64,7 +81,7 @@ async function setup(t, { ready = true, mismatch = false, credentialReader } = {
     original,
     destinationCalls,
     codexConfigPath,
-    recordPath: join(f.dir, "activation.json"),
+    recordPath: join(f.configPath, "..", "activation.json"),
     stopProxy: () => new Promise((r) => server.close(r)),
     localUrl: `http://127.0.0.1:${f.config.listenPort}/v1`,
   };
@@ -105,9 +122,13 @@ test("inspection revision excludes credential material in a conflicting provider
   }
   assert.equal(revisions[0], revisions[1]);
 });
-test("real proxy startup health status activation and recovery avoid credentials and destination preflight", async (t) => {
-  let credentialReads = 0;
+for (const accounts of [false, true]) test(`real proxy startup health status activation and recovery avoid credentials and destination preflight (accounts ${accounts})`, async (t) => {
+  let credentialReads = 0, helperExecutions = 0;
+  t.mock.method(childProcess, "spawn", () => { helperExecutions++; throw new Error("control paths must not execute a helper"); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   const f = await setup(t, {
+    accounts,
     credentialReader: async () => {
       credentialReads++;
       throw new Error("control paths must not retrieve credentials");
@@ -132,7 +153,8 @@ test("real proxy startup health status activation and recovery avoid credentials
   const edited = f.original.replace('"test-model"', '"changed-model"');
   await writeFile(f.codexConfigPath, edited.replace(f.config.upstreamBaseUrl, f.localUrl));
   await f.stopProxy();
-  f.config.credentialRouting.globalCredential.service = "changed-synthetic-global";
+  if (accounts) f.config.accountRouting.incomingCredential.service = "changed-synthetic-incoming";
+  else f.config.credentialRouting.globalCredential.service = "changed-synthetic-global";
   await f.saveConfig();
   assert.equal((await status(f.configPath)).recoveryRequired, true);
   assert.equal((await rollback(f.configPath)).state, "direct");
@@ -142,6 +164,7 @@ test("real proxy startup health status activation and recovery avoid credentials
   });
   assert.equal(credentialReads, 0);
   assert.deepEqual(f.destinationCalls, { global: 0, project: 0 });
+  assert.equal(helperExecutions, 0);
 });
 for (const runningEnabled of [false, true])
   test(`activation refuses opposite credential routing mode (running ${runningEnabled})`, async (t) => {
@@ -375,4 +398,49 @@ test("unknown or malformed activation state is not overwritten", async (t) => {
   );
   assert.equal(await readFile(f.recordPath, "utf8"), "{SECRET_SENTINEL");
   assert.equal(await readFile(f.codexConfigPath, "utf8"), f.original);
+});
+
+
+test("invalid account setup retains validated offline recovery", async t => {
+  for (const corrupt of [r => { r.defaultAccountId = "invalid"; }, r => { r.accounts = "SECRET_SENTINEL"; }]) {
+    const f = await setup(t, { accounts: true, customDirectory: true });
+    await activate(f.configPath);
+    const later = (await readFile(f.codexConfigPath, "utf8")).replace("test-model", "later-model").replace("SECRET_SENTINEL", "LATER_AUTH_SENTINEL") + "\n# later unrelated edit\n";
+    await writeFile(f.codexConfigPath, later);
+    corrupt(f.config.accountRouting);
+    await f.saveConfig(); await f.stopProxy();
+    const inspection = await activation.inspectActivation(f.configPath);
+    assert.equal(inspection.status.state, "active");
+    assert.equal(inspection.status.proxyReady, false);
+    f.config.accountRouting = { malformed: "SECOND_SECRET_SENTINEL" };
+    await f.saveConfig();
+    assert.equal((await activation.inspectActivation(f.configPath)).revision, inspection.revision);
+    assert.doesNotMatch(JSON.stringify(inspection), /SECRET_SENTINEL/);
+    await assert.rejects(activate(f.configPath), { code: "ACCOUNT_SETUP_INVALID" });
+    assert.deepEqual(await rollback(f.configPath), { state: "direct", changed: true, restartRequired: true });
+    assert.equal(await readFile(f.codexConfigPath, "utf8"), later.replace(f.localUrl, f.config.upstreamBaseUrl));
+    assert.equal((await status(f.configPath)).state, "direct");
+  }
+});
+
+test("account recovery rejects unsafe core context and record evidence", async t => {
+  for (const corruption of ["core", "context", "home", "provider", "port", "record", "backup", "original"]) await t.test(corruption, async t => {
+    const f = await setup(t, { accounts: true, customDirectory: true });
+    await activate(f.configPath);
+    f.config.accountRouting.accounts = "SECRET_SENTINEL";
+    if (corruption === "core") f.config.projectRoutes = { invalid: "route-a" };
+    if (corruption === "context") f.config.upstreamBaseUrl = "https://changed.example.invalid/v1";
+    if (corruption === "home") f.config.codexHome = join(f.dir, "other-home");
+    if (corruption === "provider") f.config.providerId = "other_provider";
+    if (corruption === "port") f.config.listenPort = f.config.listenPort === 65535 ? 65534 : f.config.listenPort + 1;
+    await f.saveConfig();
+    const record = JSON.parse(await readFile(f.recordPath));
+    if (corruption === "record") record.providerId = "other";
+    if (corruption === "original") record.originalBaseUrl = "https://user:SECRET_SENTINEL@invalid.example/v1";
+    if (["record", "original"].includes(corruption)) await writeFile(f.recordPath, JSON.stringify(record));
+    if (corruption === "backup") await writeFile(join(f.recordPath, "..", record.backupFile), "SECRET_SENTINEL");
+    const before = await readFile(f.codexConfigPath);
+    await assert.rejects(rollback(f.configPath), { code: "ACTIVATION_CONFLICT" });
+    assert.deepEqual(await readFile(f.codexConfigPath), before);
+  });
 });
