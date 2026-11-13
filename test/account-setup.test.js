@@ -262,3 +262,21 @@ test("a verified complete receipt permits later metadata-only default changes", 
   await f.commit(p,{kind:"set_default",defaultAccountId:account.id});
   assert.deepEqual(JSON.parse(await readFile(join(f.dir,"account-setup.json"))),prior);
 });
+
+for (const url of [
+  "https://gateway.example.invalid/api/v1/",
+  "https://GATEWAY.Example.Invalid:443/api/v1",
+]) {
+  test(`migration accepts equivalent normalized direct URL ${url}`, async t => {
+    const f=await fixtureSetup(t,"legacy");
+    f.original=f.original.replace(f.config.upstreamBaseUrl,url);
+    f.config.upstreamBaseUrl=url;await f.saveConfig();
+    await writeFile(f.providerPath,f.original);
+    const before=await readFile(f.configPath),p=await f.preview();
+    const result=await f.commit(p,migration(p));
+    assert.equal(result.setupState,"required");
+    assert.equal(JSON.parse(await readFile(f.configPath)).upstreamBaseUrl,url);
+    assert.deepEqual(await readFile(result.checkpointPath),before);
+    assert.equal(await readFile(f.providerPath,"utf8"),f.original);
+  });
+}

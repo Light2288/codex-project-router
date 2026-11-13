@@ -346,7 +346,7 @@ export async function inspectActivation(configPath, { probeProxy = true } = {}) 
     const state =
       existing && p.url === existing.record.proxyBaseUrl
         ? "active"
-        : p.url === (existing?.record.originalBaseUrl ?? c.cfg.upstreamBaseUrl)
+        : (existing ? p.url === existing.record.originalBaseUrl : URL.canParse(p.url) && normalize(p.url) === c.cfg.upstreamBaseUrl)
           ? "direct"
           : "conflict";
     const recordPhase = existing?.record.phase ?? "none";

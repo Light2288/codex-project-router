@@ -444,3 +444,27 @@ test("account recovery rejects unsafe core context and record evidence", async t
     assert.deepEqual(await readFile(f.codexConfigPath), before);
   });
 });
+
+test("direct inspection normalizes URL spelling only without recovery evidence", async t => {
+  const f=await setup(t);
+  const equivalent="https://GATEWAY.Example.Invalid:443/api/v1/";
+  const original=f.original.replace(f.config.upstreamBaseUrl,equivalent);
+  await writeFile(f.codexConfigPath,original);
+  assert.equal((await activation.inspectActivation(f.configPath,{probeProxy:false})).status.state,"direct");
+  await activate(f.configPath);
+  const record=JSON.parse(await readFile(f.recordPath));
+  assert.equal(record.originalBaseUrl,equivalent);
+  await rollback(f.configPath);
+  assert.equal(await readFile(f.codexConfigPath,"utf8"),original);
+  const before=await readFile(f.recordPath);
+  await writeFile(f.codexConfigPath,original.replace(equivalent,f.config.upstreamBaseUrl));
+  assert.equal((await activation.inspectActivation(f.configPath,{probeProxy:false})).status.state,"conflict");
+  await assert.rejects(rollback(f.configPath),{code:"ACTIVATION_CONFLICT"});
+  assert.deepEqual(await readFile(f.recordPath),before);
+});
+
+test("normalizing an unrecorded direct URL preserves malformed URL conflict handling", async t => {
+  const f=await setup(t,{ready:false});
+  await writeFile(f.codexConfigPath,f.original.replace(f.config.upstreamBaseUrl,"not-a-url"));
+  assert.equal((await activation.inspectActivation(f.configPath,{probeProxy:false})).status.state,"conflict");
+});

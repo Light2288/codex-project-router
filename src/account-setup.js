@@ -231,7 +231,7 @@ export async function commitAccountSetup(input = {}) {
       const current=await load();
       if (!isDeepStrictEqual(current.context,input.expectedContext) || current.inspection.configurationRevision!==input.expectedRevision ||
         Boolean(current.file)!==Boolean(initial.file) || initial.file && (!sameFile(initial.file.info,current.file.info) || !initial.file.bytes.equals(current.file.bytes)) ||
-        !sameFile(initial.provider.info,current.provider.info) || !initial.provider.bytes.equals(current.provider.bytes) || current.compatible.url.replace(/\/$/, "")!==current.cfg.upstreamBaseUrl) throw conflict();
+        !sameFile(initial.provider.info,current.provider.info) || !initial.provider.bytes.equals(current.provider.bytes) || new URL(current.compatible.url).href.replace(/\/$/, "")!==current.cfg.upstreamBaseUrl) throw conflict();
       await emptyPort(current.cfg.listenPort);
       if(current.file) {
         const activation=await inspectActivation(input.configPath,{probeProxy:false});
