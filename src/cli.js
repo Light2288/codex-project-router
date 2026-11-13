@@ -1,4 +1,4 @@
-import { loadRouterConfig } from "./config.js";
+import { withRouterStartupLock } from "./managed-serve.js";
 import { createProxy } from "./proxy.js";
 import { activate, rollback, status } from "./activation.js";
 import { RouterError, safeError } from "./errors.js";
@@ -29,11 +29,18 @@ async function main(args) {
     process.stdout.write(JSON.stringify(result) + "\n");
     return;
   }
-  const config = await loadRouterConfig(path),
+  let server;
+  const config = await withRouterStartupLock(path, async config => {
     server = createProxy(config);
-  await new Promise((resolve, reject) => {
-    server.once("error", () => reject(new RouterError("PROXY_NOT_READY")));
-    server.listen(config.listenPort, "127.0.0.1", resolve);
+    await new Promise((resolve, reject) => {
+      server.once("error", () => reject(new RouterError("PROXY_NOT_READY")));
+      server.listen(config.listenPort, "127.0.0.1", resolve);
+    });
+    return config;
+  }).catch(error => {
+    server?.closeAllConnections();
+    server?.close();
+    throw error;
   });
   const shutdown = () => {
     server.closeAllConnections();

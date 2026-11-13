@@ -11,7 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
 import { RouterError } from "../src/errors.js";
 import { readKeychainCredential } from "../src/credentials.js";
-import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, A1, A2, accountRouting as fixtureAccountRouting, duplicateIdentityMetadata } from "./helpers/fixtures.js";
 const key = await readFile(
   new URL("./fixtures/tls/test-only-key.pem", import.meta.url),
 );
@@ -28,7 +28,7 @@ async function listening(server, t) {
   return server.address().port;
 }
 async function setupProxy(t, handler, options = {}) {
-  const f = await fixture(t), calls = [], projectCalls = [];
+  const f = await fixture(t), calls = [], projectCalls = [], defaultCalls = [];
   const upstream = (handler, captured) => https.createServer({ key, cert }, async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -41,6 +41,9 @@ async function setupProxy(t, handler, options = {}) {
   const projectUpstream = options.projectHandler ? upstream(options.projectHandler, projectCalls) : undefined;
   const projectPort = projectUpstream ? await listening(projectUpstream, t) : undefined;
   const projectBaseUrl = projectUpstream ? `https://127.0.0.1:${projectPort}/region/v1` : globalBaseUrl;
+  const defaultUpstream = options.defaultHandler ? upstream(options.defaultHandler, defaultCalls) : undefined;
+  const defaultPort = defaultUpstream ? await listening(defaultUpstream, t) : undefined;
+  const defaultBaseUrl = defaultUpstream ? `https://127.0.0.1:${defaultPort}/default/full/v1` : globalBaseUrl;
   f.config.upstreamBaseUrl = globalBaseUrl;
   f.config.observeRequestMetadata = options.observeRequestMetadata ?? false;
   f.config.allowUnassignedThreadTitles = options.allowUnassignedThreadTitles ?? false;
@@ -48,17 +51,21 @@ async function setupProxy(t, handler, options = {}) {
     f.config.credentialRouting = typeof options.credentialRouting === "function"
       ? options.credentialRouting({ globalBaseUrl, projectBaseUrl })
       : options.credentialRouting;
+  if (options.accountRouting) {
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = options.accountRouting({ globalBaseUrl, projectBaseUrl, defaultBaseUrl });
+  }
   const logs = new PassThrough();
   let output = "";
   logs.on("data", (c) => (output += c));
   const agent = new https.Agent({ ca: cert });
-  if (options.untrustedProject) {
+  if (options.untrustedProject || options.untrustedDefault) {
     const createConnection = agent.createConnection;
     // Keep the healthy origin trusted while exercising a real TLS rejection at the selected origin.
     agent.createConnection = function (connectionOptions, ...args) {
       return createConnection.call(this, {
         ...connectionOptions,
-        ...(Number(connectionOptions.port) === projectPort ? { ca: [] } : {}),
+        ...(Number(connectionOptions.port) === (options.untrustedDefault ? defaultPort : projectPort) ? { ca: [] } : {}),
       }, ...args);
     };
   }
@@ -73,7 +80,7 @@ async function setupProxy(t, handler, options = {}) {
   const acceptedSockets = [];
   proxy.on("request", req => acceptedSockets.push(req.socket));
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, projectCalls, acceptedSockets, globalBaseUrl, projectBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, defaultCalls, acceptedSockets, globalBaseUrl, projectBaseUrl, defaultBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -1927,4 +1934,290 @@ nodeTest("managed shared references read freshly and never retry a failed select
   }
   for (const call of [...f.calls, ...f.projectCalls]) assert.deepEqual(call.bodyBytes, body);
   assertRoutingCompletions(f, [["on", "override"], ["off", "global"], ["on", "override"]]);
+});
+
+
+const incomingAccountReference = fixtureAccountRouting().incomingCredential;
+const defaultAccountReference = fixtureAccountRouting().accounts[A1].credential;
+const overrideAccountReference = fixtureAccountRouting().accounts[A2].credential;
+function accountRouting({ defaultBaseUrl, projectBaseUrl }) {
+  const routing = fixtureAccountRouting();
+  routing.incomingCredential = incomingAccountReference;
+  routing.accounts[A1] = { ...routing.accounts[A1], upstreamBaseUrl: defaultBaseUrl, credential: defaultAccountReference };
+  routing.accounts[A2] = { ...routing.accounts[A2], upstreamBaseUrl: projectBaseUrl, credential: overrideAccountReference };
+  return routing;
+}
+function accountReader(reads) {
+  return async (reference, { signal }) => {
+    assert.equal(signal.aborted, false);
+    reads.push(reference);
+    if (reference === incomingAccountReference) return "INCOMING_SENTINEL";
+    if (reference === defaultAccountReference) return "DEFAULT_SENTINEL";
+    if (reference === overrideAccountReference) return "OVERRIDE_SENTINEL";
+    throw new Error("Unexpected account reference");
+  };
+}
+function accountOptions(reads, extra = {}) {
+  return {
+    defaultHandler: async (req, res) => res.end("default"),
+    projectHandler: async (req, res) => res.end("override"),
+    accountRouting, credentialReader: accountReader(reads),
+    getProjectRoutingMode: () => "on", ...extra,
+  };
+}
+function assertAccountCall(call, base, token, path, body) {
+  assert.equal(call.url, new URL(base).pathname + path);
+  assert.equal(call.headers.host, new URL(base).host);
+  assert.equal(call.headers.authorization, `Bearer ${token}`);
+  assert.deepEqual(call.bodyBytes, body);
+}
+nodeTest("independent incoming token never reaches selected default origin", async t => {
+  let mode = "off";
+  const reads = [], agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+    getProjectRoutingMode: () => mode, allowUnassignedThreadTitles: true,
+  }));
+  delete f.config.projectRoutes[P2];
+  const body = Buffer.from(' {"previous_response_id":"keep","model":"keep","input":"π"} \n');
+  const cases = [
+    ["off", [...headers(), "Connection", "keep-alive, authorization"], "/responses?x=a%2Fb&x=2", "default"],
+    ["on", headers(), "/responses/compact?x=a%2Fb", "override"],
+    ["on", headers(T2), "/responses?inherit=1", "default"],
+    ["on", titleHeaders(CHILD), "/responses?title=1", "default"],
+  ];
+  for (const [receivedMode, raw, path, selected] of cases) {
+    mode = receivedMode;
+    assert.equal((await request(f, { agent, token: "INCOMING_SENTINEL", raw, path: "/v1" + path, body })).body, selected);
+    assertAccountCall((selected === "default" ? f.defaultCalls : f.projectCalls).at(-1),
+      selected === "default" ? f.defaultBaseUrl : f.projectBaseUrl,
+      selected === "default" ? "DEFAULT_SENTINEL" : "OVERRIDE_SENTINEL", path, body);
+  }
+  assert.equal((await request(f, { agent, token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models?raw=a%2Fb", raw: [], body: "" })).body, "default");
+  assertAccountCall(f.defaultCalls.at(-1), f.defaultBaseUrl, "DEFAULT_SENTINEL", "/models?raw=a%2Fb", Buffer.alloc(0));
+  assert.equal((await request(f, { agent, path: "/healthz", method: "GET", raw: [], authenticated: false, body: "" })).status, 200);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.defaultCalls.length, 4);
+  assert.equal(f.projectCalls.length, 1);
+  assert.ok(f.acceptedSockets.every(socket => socket === f.acceptedSockets[0]));
+  assert.deepEqual(reads, [incomingAccountReference, defaultAccountReference, incomingAccountReference, overrideAccountReference,
+    incomingAccountReference, defaultAccountReference, incomingAccountReference, defaultAccountReference,
+    incomingAccountReference, defaultAccountReference]);
+  assert.doesNotMatch(f.logs(), /INCOMING|DEFAULT|OVERRIDE|synthetic|https:/);
+});
+nodeTest("explicit old-global override survives default change", async t => {
+  const reads = [];
+  const f = await setupProxy(t, async (req, res) => res.end("old-global"), accountOptions(reads, {
+    accountRouting: urls => {
+      const routing = accountRouting(urls);
+      routing.accounts[A2].upstreamBaseUrl = urls.globalBaseUrl;
+      return routing;
+    },
+  }));
+  assert.equal((await request(f, {token: "INCOMING_SENTINEL"})).body, "old-global");
+  assert.equal((await request(f, {token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models", raw: [], body: ""})).body, "default");
+  assertAccountCall(f.calls[0], f.globalBaseUrl, "OVERRIDE_SENTINEL", "/responses", Buffer.from('{"model":"unchanged","input":"PROMPT_SENTINEL"}'));
+  assert.equal(f.projectCalls.length, 0);
+  assert.equal(f.defaultCalls.length, 1);
+});
+nodeTest("legacy inherited label is not a missing override", async t => {
+  let mode = "on";
+  const reads = [], f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, { getProjectRoutingMode: () => mode }));
+  assert.equal((await request(f, {token: "INCOMING_SENTINEL", raw: headers(T2)})).body, "default");
+  for (const target of [undefined, "ffffffff-ffff-4fff-8fff-ffffffffffff", "toString"]) {
+    if (target === undefined) delete f.config.accountRouting.routeAccounts["route-a"];
+    else f.config.accountRouting.routeAccounts["route-a"] = target;
+    const rejected = await request(f, {token: "INCOMING_SENTINEL"});
+    assert.equal(JSON.parse(rejected.body).error.code, "CREDENTIAL_UNMAPPED");
+    assert.equal(f.defaultCalls.length, 1);
+  }
+  mode = "off";
+  assert.equal((await request(f, {token: "INCOMING_SENTINEL"})).body, "default");
+  assert.equal(f.calls.length + f.projectCalls.length, 0);
+});
+nodeTest("account authentication precedes broken identity and missing account work", async t => {
+  const reads = [], f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, { observeRequestMetadata: true }));
+  await writeFile(f.statePath, "broken");
+  Object.defineProperty(f.config.accountRouting, "accounts", { get() { throw new Error("must authenticate first"); } });
+  const rejected = await request(f, { token: "WRONG_SENTINEL", raw: ["thread-id", "malformed"] });
+  assert.equal(JSON.parse(rejected.body).error.code, "AUTH_INVALID");
+  assert.deepEqual(reads, [incomingAccountReference]);
+  assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+});
+nodeTest("schema-2 standalone retains mapped-project admission", async t => {
+  const reads = [], f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, { getProjectRoutingMode: undefined }));
+  delete f.config.projectRoutes[P1];
+  const rejected = await request(f, { token: "INCOMING_SENTINEL" });
+  assert.equal(JSON.parse(rejected.body).error.code, "ROUTE_UNMAPPED");
+  assert.deepEqual(reads, [incomingAccountReference]);
+  assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+});
+nodeTest("account mode capture survives pending authentication and streaming", async t => {
+  for (const initialMode of ["off", "on"]) {
+    let mode = initialMode;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), chunk = Promise.withResolvers(), finish = Promise.withResolvers(), reads = [];
+    t.after(() => { release.resolve(); finish.resolve(); });
+    const handler = async (req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: first\n\n");
+      await finish.promise;
+      res.end("data: last\n\n");
+    };
+    const reader = accountReader(reads);
+    const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      defaultHandler: handler, projectHandler: handler, getProjectRoutingMode: () => mode,
+      credentialReader: async (reference, options) => {
+        if (reference === incomingAccountReference && reads.length === 0) { entered.resolve(); await release.promise; }
+        return reader(reference, options);
+      },
+    }));
+    const pending = request(f, {token: "INCOMING_SENTINEL", onChunk: () => chunk.resolve()});
+    await within(entered.promise, "incoming verifier was not read");
+    mode = initialMode === "off" ? "on" : "off";
+    release.resolve();
+    await within(chunk.promise, "selected stream did not begin");
+    mode = initialMode;
+    finish.resolve();
+    assert.equal((await within(pending, "stream did not complete")).body, "data: first\n\ndata: last\n\n");
+    assert.equal(f.defaultCalls.length, initialMode === "off" ? 1 : 0);
+    assert.equal(f.projectCalls.length, initialMode === "on" ? 1 : 0);
+    assert.equal(f.calls.length, 0);
+    assert.deepEqual(reads, [incomingAccountReference, initialMode === "off" ? defaultAccountReference : overrideAccountReference]);
+  }
+});
+nodeTest("account failures preserve selected status and never retry another origin", async t => {
+  for (const mode of ["off", "on"]) for (const status of [401, 402, 429, 500, 503, 307]) {
+    const reads = [];
+    const handler = async (req, res) => { res.writeHead(status, { location: "https://alternate.invalid/v1/responses" }); res.end("selected failure"); };
+    const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      defaultHandler: handler, projectHandler: handler, getProjectRoutingMode: () => mode,
+    }));
+    const result = await request(f, {token: "INCOMING_SENTINEL"});
+    assert.equal(result.status, status);
+    assert.equal(result.body, "selected failure");
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.defaultCalls.length, mode === "off" ? 1 : 0);
+    assert.equal(f.projectCalls.length, mode === "on" ? 1 : 0);
+  }
+});
+nodeTest("inaccessible selected account credentials never contact another account", async t => {
+  for (const mode of ["off", "on"]) {
+    const reads = [], reader = accountReader(reads);
+    const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      getProjectRoutingMode: () => mode,
+      credentialReader: async (reference, options) => {
+        if (reference !== incomingAccountReference) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return reader(reference, options);
+      },
+    }));
+    assert.equal(JSON.parse((await request(f, {token: "INCOMING_SENTINEL"})).body).error.code, "CREDENTIAL_UNAVAILABLE");
+    assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+  }
+});
+nodeTest("account TLS rejection and disconnect do not fall back", async t => {
+  for (const mode of ["off", "on"]) for (const failure of ["tls", "disconnect"]) {
+    const reads = [], handler = async (req, res) => req.socket.destroy();
+    const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      getProjectRoutingMode: () => mode,
+      ...(failure === "tls" ? (mode === "off" ? {untrustedDefault: true} : {untrustedProject: true}) : {defaultHandler: handler, projectHandler: handler}),
+    }));
+    assert.equal(JSON.parse((await request(f, {token: "INCOMING_SENTINEL"})).body).error.code, "UPSTREAM_FAILED");
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.defaultCalls.length, mode === "off" && failure === "disconnect" ? 1 : 0);
+    assert.equal(f.projectCalls.length, mode === "on" && failure === "disconnect" ? 1 : 0);
+  }
+});
+nodeTest("cancelled account lookups cannot forward when a late reader completes", async t => {
+  for (const held of [incomingAccountReference, defaultAccountReference, overrideAccountReference]) {
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [], abort = new AbortController();
+    t.after(() => release.resolve());
+    let lookupSignal;
+    const reader = accountReader(reads), f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      getProjectRoutingMode: () => held === overrideAccountReference ? "on" : "off",
+      credentialReader: async (reference, options) => {
+        const value = await reader(reference, options);
+        if (reference === held) { lookupSignal = options.signal; entered.resolve(); await release.promise; }
+        return value;
+      },
+    }));
+    const pending = request(f, {token: "INCOMING_SENTINEL", signal: abort.signal});
+    const rejected = assert.rejects(pending, { name: "AbortError" });
+    await within(entered.promise, "lookup did not begin");
+    abort.abort();
+    await rejected;
+    if (!lookupSignal.aborted) await within(once(lookupSignal, "abort"), "lookup was not cancelled");
+    release.resolve();
+    await delay(20);
+    assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+  }
+});
+nodeTest("account credentials rotate independently on reused connections", async t => {
+  let incomingVersion = 1, outgoingVersion = 1, mode = "off";
+  const reads = [], agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+    getProjectRoutingMode: () => mode,
+    credentialReader: async reference => { reads.push(reference); return reference === incomingAccountReference ? `INCOMING_${incomingVersion}` : `OUTGOING_${outgoingVersion}`; },
+  }));
+  assert.equal((await request(f, {agent, token: "INCOMING_1"})).body, "default");
+  outgoingVersion = 2;
+  assert.equal((await request(f, {agent, token: "INCOMING_1"})).body, "default");
+  incomingVersion = 2; mode = "on";
+  assert.equal((await request(f, {agent, token: "INCOMING_2"})).body, "override");
+  assert.deepEqual(f.defaultCalls.map(call => call.headers.authorization), ["Bearer OUTGOING_1", "Bearer OUTGOING_2"]);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer OUTGOING_2");
+  assert.equal(f.calls.length, 0);
+  assert.ok(f.acceptedSockets.every(socket => socket === f.acceptedSockets[0]));
+  assert.deepEqual(reads, [incomingAccountReference, defaultAccountReference, incomingAccountReference, defaultAccountReference,
+    incomingAccountReference, overrideAccountReference]);
+});
+
+nodeTest("missing default account fails closed even when an override is available", async t => {
+  const reads = [], f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {getProjectRoutingMode: () => "off"}));
+  delete f.config.accountRouting.accounts[A1];
+  assert.equal(JSON.parse((await request(f, {token: "INCOMING_SENTINEL"})).body).error.code, "CREDENTIAL_UNMAPPED");
+  assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+  assert.deepEqual(reads, [incomingAccountReference]);
+});
+nodeTest("selected account pair survives a held outgoing lookup", async t => {
+  for (const initialMode of ["off", "on"]) {
+    let mode = initialMode;
+    const held = initialMode === "off" ? defaultAccountReference : overrideAccountReference;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [];
+    t.after(() => release.resolve());
+    const reader = accountReader(reads), f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+      getProjectRoutingMode: () => mode,
+      credentialReader: async (reference, options) => {
+        const value = await reader(reference, options);
+        if (reference === held) { entered.resolve(); await release.promise; }
+        return value;
+      },
+    }));
+    const pending = request(f, {token: "INCOMING_SENTINEL"});
+    await within(entered.promise, "outgoing lookup was not held");
+    mode = initialMode === "off" ? "on" : "off";
+    release.resolve();
+    assert.equal((await pending).body, initialMode === "off" ? "default" : "override");
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.defaultCalls.length, initialMode === "off" ? 1 : 0);
+    assert.equal(f.projectCalls.length, initialMode === "on" ? 1 : 0);
+  }
+});
+nodeTest("incoming and outgoing shared references still retrieve independently", async t => {
+  const reads = [], values = ["caller-one", "outgoing-one", "caller-two", "outgoing-two"];
+  const f = await setupProxy(t, async (req, res) => res.end("direct"), accountOptions(reads, {
+    accountRouting: urls => {
+      const routing = accountRouting(urls);
+      routing.accounts[A1].credential = incomingAccountReference;
+      routing.accounts[A2].credential = incomingAccountReference;
+      return routing;
+    },
+    credentialReader: async reference => { reads.push(reference); return values.shift(); },
+  }));
+  assert.equal((await request(f, {token: "caller-one"})).body, "override");
+  assert.equal((await request(f, {token: "caller-two", path: "/v1/models", method: "GET", raw: [], body: ""})).body, "default");
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer outgoing-one");
+  assert.equal(f.defaultCalls[0].headers.authorization, "Bearer outgoing-two");
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(reads, Array(4).fill(incomingAccountReference));
 });

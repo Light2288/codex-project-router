@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile, lstat } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { fixture } from "./helpers/fixtures.js";
+import { fixture, accountRouting } from "./helpers/fixtures.js";
 const key = await readFile(new URL("./fixtures/tls/test-only-key.pem", import.meta.url));
 const cert = await readFile(new URL("./fixtures/tls/test-only-cert.pem", import.meta.url));
 function cli(args, nodeArgs = []) {
@@ -33,7 +33,7 @@ test("CLI usage and failures never echo supplied arguments or parse errors", asy
   assert.notEqual(invalid.code, 0);
   assert.doesNotMatch(invalid.stdout + invalid.stderr, /SENTINEL|SyntaxError/);
 });
-for (const routingEnabled of [false, true])
+for (const routingEnabled of [false, true, "accounts"])
 test(`CLI controls and startup avoid credential reads (routing ${routingEnabled})`, async (t) => {
   const f = await fixture(t);
   const destinationCalls = { global: 0, project: 0 }, bases = {};
@@ -63,6 +63,11 @@ test(`CLI controls and startup avoid credential reads (routing ${routingEnabled}
       },
     } },
   };
+  if (routingEnabled === "accounts") {
+    f.config.schemaVersion = 2;
+    delete f.config.credentialRouting;
+    f.config.accountRouting = accountRouting();
+  }
   const attemptedChild = join(f.dir, "unexpected-child-process");
   const preloadPath = join(f.dir, "deny-child-process.mjs");
   // Block the real boundary before CLI modules load; even a swallowed lookup
@@ -143,4 +148,32 @@ command = "/definitely-not-a-key-helper"
   assert.doesNotMatch(stderr, /SENTINEL/);
   assert.doesNotMatch(inspect.stdout + activation.stdout + recovery.stdout,
     /synthetic-global|synthetic-account|synthetic\.keychain-db/);
+});
+
+
+test("CLI serve rejects incomplete setup and leases before any bind", async t => {
+  for (const kind of ["setup", "stale", "required", "invalid"]) {
+    const f = await fixture(t), marker = join(f.dir, "attempted-bind"), preload = join(f.dir, "deny-listen.mjs");
+    await writeFile(preload, `import net from "node:net";
+import { writeFileSync } from "node:fs";
+net.Server.prototype.listen = () => { writeFileSync(${JSON.stringify(marker)}, "attempted"); throw new Error("unexpected listen"); };`);
+    const lockPath = join(f.dir, ".activation.lock");
+    if (kind === "required" || kind === "invalid") {
+      f.config.schemaVersion = 2;
+      f.config.accountRouting = accountRouting();
+      if (kind === "required") f.config.accountRouting.incomingCredential = null;
+      else f.config.accountRouting.extra = "invalid";
+      await f.saveConfig();
+    } else await writeFile(lockPath, JSON.stringify(kind === "setup"
+      ? {pid: process.pid, setupOperationId: "55555555-5555-4555-8555-555555555555", configPath: f.configPath}
+      : {pid: 2147483647}), {mode: 0o600});
+    const result = await cli(["serve", "--config", f.configPath], ["--import", pathToFileURL(preload).href]);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(JSON.parse(result.stderr).error.code,
+      kind === "required" ? "ACCOUNT_SETUP_REQUIRED" : kind === "invalid" ? "ACCOUNT_SETUP_INVALID" : "ACTIVATION_CONFLICT");
+    await assert.rejects(access(marker), {code: "ENOENT"});
+    if (kind === "setup" || kind === "stale") assert.equal((await lstat(lockPath)).isFile(), true);
+    else await assert.rejects(access(lockPath), {code: "ENOENT"});
+  }
 });
