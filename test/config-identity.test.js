@@ -464,3 +464,74 @@ test("missing state and cancelled lookups surface typed errors", async (t) => {
     { code: "CANCELLED" },
   );
 });
+
+test("managed membership permits inheritance without weakening catalog proof", async t => {
+  const f = await fixture(t);
+  delete f.config.projectRoutes[P1];
+  const result = await identifyProject(headers(), f.config, {requireRoute: false});
+  assert.deepEqual(result, {threadId: T1, ownerThreadId: T1, projectId: P1, source: "direct"});
+  assert.ok(Object.isFrozen(result));
+  await assert.rejects(identifyProject(headers(), f.config), {code: "ROUTE_UNMAPPED"});
+  for (const record of [{}, {id: P2}, {id: "invalid"}]) {
+    f.state["local-projects"][P1] = record;
+    await f.saveState();
+    await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false}), {code: "IDENTITY_CONFLICT"});
+  }
+});
+
+test("managed identity rejects normalized catalog and mapping ambiguity", async t => {
+  const id = "abcdefab-abcd-4abc-8abc-abcdefabcdef";
+  for (const problem of ["duplicate catalog", "case mapping", "duplicate mapping same alias", "duplicate mapping other alias"]) {
+    const f = await fixture(t);
+    f.state["local-projects"] = {[id]: {id: id.toUpperCase()}};
+    f.state["thread-project-assignments"][T1].projectId = id;
+    f.config.projectRoutes = {[id]: "route-a"};
+    if (problem === "duplicate catalog") f.state["local-projects"][id.toUpperCase()] = {id};
+    if (problem === "case mapping") delete f.config.projectRoutes[id];
+    if (problem !== "duplicate catalog") f.config.projectRoutes[id.toUpperCase()] = problem === "duplicate mapping other alias" ? "route-b" : "route-a";
+    await f.saveState();
+    await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false}), {code: "IDENTITY_CONFLICT"}, problem);
+  }
+});
+
+test("managed ancestry and projectless conflicts never become inheritance", async t => {
+  const f = await fixture(t);
+  f.edge(T1, CHILD);
+  f.config.projectRoutes = {};
+  f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P2};
+  await f.saveState();
+  await assert.rejects(identifyProject(headers(CHILD), f.config, {requireRoute: false}), {code: "IDENTITY_CONFLICT"});
+  delete f.state["thread-project-assignments"][CHILD];
+  f.state["projectless-thread-ids"].push(CHILD);
+  await f.saveState();
+  await assert.rejects(identifyProject(headers(CHILD), f.config, {requireRoute: false}), {code: "PROJECT_UNRESOLVED"});
+});
+
+test("managed title permission and membership permission remain independent", async t => {
+  for (const requireRoute of [true, false]) for (const allowUnassignedTitle of [true, false]) {
+    const f = await fixture(t);
+    f.config.allowUnassignedThreadTitles = true;
+    const options = {requireRoute, allowUnassignedTitle};
+    if (allowUnassignedTitle) assert.deepEqual(await identifyProject(titleHeaders(), f.config, options), {threadId: CHILD, source: "unassigned_title"});
+    else await assert.rejects(identifyProject(titleHeaders(), f.config, options), {code: "STATE_UNAVAILABLE"});
+    delete f.config.projectRoutes[P1];
+    if (requireRoute) await assert.rejects(identifyProject(titleHeaders(T1), f.config, options), {code: "ROUTE_UNMAPPED"});
+    else assert.equal((await identifyProject(titleHeaders(T1), f.config, options)).projectId, P1);
+  }
+});
+
+test("managed inheritance uses own mappings and preserves bounded state lookup", async t => {
+  const f = await fixture(t);
+  f.config.projectRoutes = Object.create({[P1]: "route-a"});
+  assert.equal(Object.hasOwn(await identifyProject(headers(), f.config, {requireRoute: false}), "routeAlias"), false);
+  await writeFile(f.statePath, "{");
+  const recovering = identifyProject(headers(), f.config, {requireRoute: false});
+  await delay(70);
+  await f.saveState();
+  assert.equal((await recovering).projectId, P1);
+  await unlink(f.statePath);
+  const start = Date.now();
+  await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false}), {code: "STATE_UNAVAILABLE"});
+  assert.ok(Date.now() - start < 1800);
+  await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false, signal: AbortSignal.abort()}), {code: "CANCELLED"});
+});

@@ -30,6 +30,287 @@ import XCTest
         await controller.activate()
         return controller
     }
+    func testStartPublishesOffOnlyAfterOwnedModeEvidence() async {
+        // A retained child and readiness are insufficient to invent an initial Off acknowledgement.
+        let controller = makeController()
+        XCTAssertEqual(controller.projectRoutingStatus, .notRunning)
+        await controller.refresh()
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeReadBarrier = barrier
+        let start = Task { await controller.start() }
+        await waitUntil { barrier.waiting }
+        XCTAssertNotNil(controller.ownedRouter)
+        XCTAssertNotEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertFalse(controller.canSetProjectRouting)
+        barrier.release(.success(.off)); await start.value
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertTrue(controller.canSetProjectRouting)
+        XCTAssertTrue(backend.modeReads.last === controller.ownedRouter)
+        XCTAssertTrue(backend.modeSets.isEmpty)
+    }
+    func testModeAckPreservesProviderJournalAndConfirmation() async throws {
+        // Mode acknowledgement and its later read must leave provider and response-confirmation evidence intact.
+        let files = try prepareModeEvidenceFiles()
+        let controller = await activated(); await controller.confirmRoutedResponse()
+        await controller.setProjectRouting(.on)
+        let before = try files.map { try Data(contentsOf: $0) }
+        let inspection = controller.inspection
+        let controls = backend.controls.count
+        await controller.setProjectRouting(.off)
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertFalse(controller.canStop)
+        XCTAssertFalse(controller.canQuit)
+        XCTAssertEqual(controller.inspection, inspection)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+        XCTAssertEqual(backend.controls.count, controls)
+        XCTAssertTrue(backend.modeSets.last?.1 === controller.ownedRouter)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertEqual(backend.startCount, 1)
+    }
+    func testLostModeAckPreservesRestoreAndCatalog() async throws {
+        // A lost mode reply cannot authorize a second set or poison otherwise usable recovery evidence.
+        let files = try prepareModeEvidenceFiles()
+        let controller = await activated(); await controller.confirmRoutedResponse()
+        let before = try files.map { try Data(contentsOf: $0) }
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeSetBarrier = barrier
+        let change = Task { await controller.setProjectRouting(.on) }
+        await waitUntil { barrier.waiting }
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertFalse(controller.canSetProjectRouting)
+        barrier.release(.failure(.routingModeUncertain)); await change.value
+        XCTAssertEqual(controller.projectRoutingStatus, .uncertain)
+        XCTAssertEqual(controller.routingModeError, CompanionError.routingModeUncertain.rawValue)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        XCTAssertTrue(controller.canRestoreDirect)
+        XCTAssertEqual(controller.inspection?.catalog.state, "ready")
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+        XCTAssertNil(controller.error)
+        await controller.setProjectRouting(.off)
+        XCTAssertEqual(backend.modeSets.count, 1)
+        backend.modeReadError = .timedOut
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertEqual(controller.routingModeError, CompanionError.routingModeUnavailable.rawValue)
+        XCTAssertEqual(controller.inspection?.catalog.state, "ready")
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+        XCTAssertNil(controller.error)
+        await controller.restoreDirect()
+        XCTAssertEqual(backend.controls.map(\.0), [.activate, .rollback])
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(backend.stopCount, 0)
+    }
+    func testModeReconciliationCannotPublishStaleChildOrGeneration() async {
+        // A mode query begun before exit must not attach its On result to the next owned child.
+        let controller = await started()
+        let oldChild = controller.ownedRouter
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeReadBarrier = barrier
+        let refresh = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        backend.exitChild()
+        XCTAssertEqual(controller.projectRoutingStatus, .notRunning)
+        backend.snapshot.provider.proxyReady = false
+        let replacement = Task { await controller.start() }
+        await waitUntil { controller.busy }
+        barrier.release(.success(.on)); await refresh.value; await replacement.value
+        XCTAssertFalse(controller.ownedRouter === oldChild)
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertTrue(controller.canSetProjectRouting)
+        XCTAssertEqual(backend.startCount, 2)
+        let replacementChild = controller.ownedRouter
+        let generationBarrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeReadBarrier = generationBarrier
+        let oldGeneration = Task { await controller.refreshAndWait() }
+        await waitUntil { generationBarrier.waiting }
+        let selection = Task { await controller.selectNode(URL(fileURLWithPath: "/synthetic/replacement-node")) }
+        await waitUntil { controller.busy }
+        generationBarrier.release(.success(.on)); await oldGeneration.value; await selection.value
+        XCTAssertTrue(controller.ownedRouter === replacementChild)
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+    }
+    func testOverlappingModeAndRecoveryActionsAreSerialized() async {
+        // A held mode mutation owns the action gate and the mode/inspection slot until its outcome is known.
+        let controller = await activated()
+        let modeBarrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeSetBarrier = modeBarrier
+        let change = Task { await controller.setProjectRouting(.on) }
+        await waitUntil { modeBarrier.waiting }
+        let reads = backend.modeReads.count
+        let poll = Task { await controller.refreshAndWait() }
+        await controller.restoreDirect(); await controller.activate(); await controller.stop(); await controller.requestQuit()
+        await controller.setProjectRouting(.off)
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(controller.busy)
+        XCTAssertFalse(controller.canRestoreDirect)
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertEqual(backend.controls.count, 1)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertEqual(backend.modeSets.count, 1)
+        XCTAssertEqual(backend.modeReads.count, reads)
+        modeBarrier.release(.success(.on)); await change.value; await poll.value
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.on))
+        let restoreBarrier = Barrier<ControlResult>(); backend.controlBarrier = restoreBarrier
+        let restore = Task { await controller.restoreDirect() }
+        await waitUntil { restoreBarrier.waiting }
+        let recoveryReads = backend.modeReads.count
+        await controller.refresh()
+        await controller.setProjectRouting(.off)
+        XCTAssertEqual(backend.modeReads.count, recoveryReads)
+        XCTAssertEqual(backend.modeSets.count, 1)
+        backend.snapshot.provider.state = "direct"; backend.snapshot.provider.recordPhase = "restored"
+        backend.snapshot.revision = "restored-after-mode"
+        restoreBarrier.release(.init(state: "direct", changed: true, restartRequired: true)); await restore.value
+        XCTAssertEqual(controller.desktopConfirmation, .directPending)
+        XCTAssertEqual(backend.maximumConcurrentModeCommands, 1)
+    }
+    func testOffDoesNotAuthorizeStopOrQuit() async {
+        // Off on the owned listener is still routed provider state and requires explicit direct recovery.
+        let controller = await activated()
+        await controller.setProjectRouting(.off)
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        await controller.stop(); await controller.requestQuit()
+        XCTAssertFalse(controller.canStop); XCTAssertFalse(controller.canQuit)
+        XCTAssertFalse(controller.quitRequested)
+        XCTAssertEqual(controller.inspection?.provider.state, "router")
+        XCTAssertEqual(backend.controls.map(\.0), [.activate])
+        XCTAssertEqual(backend.stopCount, 0)
+        await controller.restoreDirect(); await controller.confirmDirectResponse(); await controller.stop()
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertEqual(controller.projectRoutingStatus, .notRunning)
+    }
+    func testFreshModeQueryReconcilesLostAckWithoutDesktopChanges() async throws {
+        // Only a later query, never the requested value, resolves a lost acknowledgement.
+        let files = try prepareModeEvidenceFiles()
+        let controller = await activated(); await controller.confirmRoutedResponse()
+        let before = try files.map { try Data(contentsOf: $0) }
+        backend.modeSetError = .routingModeUncertain
+        await controller.setProjectRouting(.on)
+        XCTAssertEqual(controller.projectRoutingStatus, .uncertain)
+        backend.mode = .on
+        await controller.refreshAndWait()
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.on))
+        XCTAssertTrue(controller.canSetProjectRouting)
+        XCTAssertNil(controller.routingModeError)
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0) }, before)
+        XCTAssertEqual(backend.modeSets.count, 1)
+    }
+    func testQueuedPreSwitchModeQueryCannotReplaceAcknowledgement() async {
+        // Starting a switch invalidates an older in-flight read even when its Off reply arrives later.
+        let controller = await started()
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeReadBarrier = barrier
+        let oldPoll = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        let change = Task { await controller.setProjectRouting(.on) }
+        await waitUntil { controller.busy }
+        let queuedPoll = Task { await controller.refreshAndWait() }
+        barrier.release(.success(.off)); await oldPoll.value; await change.value; await queuedPoll.value
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.on))
+        XCTAssertEqual(backend.modeSets.count, 1)
+        XCTAssertEqual(backend.maximumConcurrentModeCommands, 1)
+    }
+    func testModeAckCannotSurviveChildExitOrContextReplacement() async {
+        // Neither an old child's acknowledgement nor a mode read can survive a changed recovery binding.
+        let controller = await started()
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeSetBarrier = barrier
+        let change = Task { await controller.setProjectRouting(.on) }
+        await waitUntil { barrier.waiting }
+        backend.exitChild()
+        barrier.release(.success(.on)); await change.value
+        XCTAssertEqual(controller.projectRoutingStatus, .notRunning)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        backend.snapshot.provider.proxyReady = false
+        await controller.start()
+        backend.snapshot.context?.codexHome = "/synthetic/replaced-home"
+        let reads = backend.modeReads.count
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        XCTAssertEqual(backend.modeReads.count, reads)
+    }
+    func testMismatchedModeAcknowledgementDoesNotPublishRequestedOrOldMode() async {
+        // An acknowledgement for a different value is unavailable evidence, not a successful switch.
+        let controller = await activated(); await controller.confirmRoutedResponse()
+        let barrier = Barrier<Result<ProjectRoutingMode, CompanionError>>(); backend.modeSetBarrier = barrier
+        let change = Task { await controller.setProjectRouting(.on) }
+        await waitUntil { barrier.waiting }
+        barrier.release(.success(.off)); await change.value
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertEqual(controller.routingModeError, CompanionError.routingModeUnavailable.rawValue)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        XCTAssertTrue(controller.canRestoreDirect)
+        XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
+        XCTAssertNil(controller.error)
+        XCTAssertEqual(backend.modeSets.count, 1)
+        XCTAssertEqual(backend.controls.map(\.0), [.activate])
+    }
+    func testModeUnavailableForExternalUnsupportedOrUnreadyListener() async {
+        // Observed readiness, unsupported pipes and a start readiness timeout cannot invent controllable Off.
+        let controller = makeController()
+        backend.snapshot.provider.proxyReady = true
+        await controller.refresh(); await controller.setProjectRouting(.on)
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertTrue(backend.modeReads.isEmpty); XCTAssertTrue(backend.modeSets.isEmpty)
+        backend.snapshot.provider.proxyReady = false
+        backend.startBecomesReady = false
+        await controller.start()
+        XCTAssertNotNil(controller.ownedRouter)
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        XCTAssertTrue(backend.modeReads.isEmpty)
+        backend.snapshot.provider.proxyReady = true
+        backend.modeReadError = .routingModeUnavailable
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertEqual(controller.routingModeError, CompanionError.routingModeUnavailable.rawValue)
+        XCTAssertTrue(controller.canRestoreDirect)
+        XCTAssertEqual(controller.inspection?.catalog.state, "ready")
+        XCTAssertFalse(controller.mutationRequiresReconciliation)
+    }
+    func testProviderUncertaintyBlocksModeButRecoveryOnlyStateDoesNotQuery() async throws {
+        // Mode controls never bypass provider-helper uncertainty or adopt a journal's historical child.
+        let controller = await started()
+        backend.mutationRequiresReconciliation = true
+        XCTAssertFalse(controller.canSetProjectRouting)
+        await controller.setProjectRouting(.on)
+        XCTAssertTrue(backend.modeSets.isEmpty)
+        let (recovery, recoveryBackend, _) = try idlePendingFixture()
+        await recovery.refresh()
+        XCTAssertEqual(recovery.projectRoutingStatus, .notRunning)
+        XCTAssertFalse(recovery.canSetProjectRouting)
+        XCTAssertTrue(recovery.canRestoreDirect)
+        XCTAssertTrue(recoveryBackend.modeReads.isEmpty)
+    }
+    func testObservedOccupiedPortKeepsModeUnavailableAfterRefresh() async {
+        // A disk inspection that cannot identify the external listener does not erase the independent port result.
+        let controller = await started()
+        backend.stopOutcome = .init(childExited: true, portState: .occupied)
+        await controller.stop()
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        backend.snapshot.provider.proxyReady = false
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+        XCTAssertFalse(controller.canSetProjectRouting)
+        XCTAssertTrue(controller.canQuit)
+        XCTAssertTrue(controller.needsManualListenerCleanup)
+    }
+    private func prepareModeEvidenceFiles() throws -> [URL] {
+        let config = root.appendingPathComponent("router.json"), home = root.appendingPathComponent("synthetic-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let provider = home.appendingPathComponent("config.toml"), activation = home.appendingPathComponent("activation.json")
+        try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "codexHome": home.path, "providerId": context.providerId,
+            "listenPort": context.listenPort, "upstreamBaseUrl": "https://synthetic.invalid/v1", "projectRoutes": [:]]).write(to: config)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+        try Data("model_provider = \"synthetic\"\n".utf8).write(to: provider)
+        try Data("{\"synthetic\":\"activation-evidence\"}".utf8).write(to: activation)
+        var fixtureContext = context; fixtureContext.configPath = config.path; fixtureContext.codexHome = home.path
+        try store.save(CompanionJournal(selectedConfigurationPath: config.path))
+        backend = ControlledBackend(context: fixtureContext)
+        return [store.directory.appendingPathComponent("state.json"), config, provider, activation]
+    }
     func testRefreshAndWaitWaitsForExistingInspection() async {
         // Returning through refreshRunning or bypassing its inspection slot would finish early or overlap reads.
         let controller = makeController(); await controller.refresh()
@@ -1266,6 +1547,15 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     var inspectBarrier: Barrier<Inspection>?
     var controlBarrier: Barrier<ControlResult>?
     var stopBarrier: Barrier<StopOutcome>?
+    var modeReadBarrier: Barrier<Result<ProjectRoutingMode, CompanionError>>?
+    var modeSetBarrier: Barrier<Result<ProjectRoutingMode, CompanionError>>?
+    var modeReadError: CompanionError?
+    var modeSetError: CompanionError?
+    var mode = ProjectRoutingMode.off
+    var modeReads: [OwnedRouter] = []
+    var modeSets: [(ProjectRoutingMode, OwnedRouter)] = []
+    var concurrentModeCommands = 0
+    var maximumConcurrentModeCommands = 0
     var mutationRequiresReconciliation = false
     var controlError: CompanionError?
     var inspectionError: CompanionError?
@@ -1304,6 +1594,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     func setNodeExecutable(_ validatedPath: URL) { executable = validatedPath }
     func start(configPath: URL) async throws -> OwnedRouter {
         startCount += 1
+        mode = .off
         let child = OwnedRouter(process: SyntheticProcess(), context: snapshot.context!)
         self.child = child
         snapshot.provider.proxyReady = startBecomesReady
@@ -1324,6 +1615,25 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
         snapshot.provider.recoveryRequired = false
         snapshot.revision = action == .activate ? "routed-1" : "restored-1"
         return ControlResult(state: action == .activate ? "active" : "direct", changed: changed, restartRequired: changed)
+    }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode {
+        modeReads.append(child)
+        concurrentModeCommands += 1; maximumConcurrentModeCommands = max(maximumConcurrentModeCommands, concurrentModeCommands)
+        defer { concurrentModeCommands -= 1 }
+        if let barrier = modeReadBarrier { modeReadBarrier = nil; return try await barrier.wait().get() }
+        if let modeReadError { throw modeReadError }
+        return mode
+    }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode {
+        modeSets.append((mode, child))
+        concurrentModeCommands += 1; maximumConcurrentModeCommands = max(maximumConcurrentModeCommands, concurrentModeCommands)
+        defer { concurrentModeCommands -= 1 }
+        if let barrier = modeSetBarrier {
+            modeSetBarrier = nil
+            let applied = try await barrier.wait().get(); self.mode = applied; return applied
+        }
+        if let modeSetError { throw modeSetError }
+        self.mode = mode; return mode
     }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         stopCount += 1

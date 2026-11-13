@@ -70,8 +70,8 @@ The `CompanionCore` library contains the wire types, `PrivateStore`, and the
 main-actor `ProcessBackend`. The `CodexProjectRouter` executable adds the native
 menu-bar item and controls window on macOS 14 or newer (Apple silicon).
 `ProcessBackend(resourcesURL:nodeExecutable:)` expects a resource directory with
-`src/companion-cli.js` and `src/cli.js`; packaging must include their production
-modules and dependencies. Paths containing spaces are passed as individual
+`src/companion-cli.js`, `src/managed-serve.js` and `src/cli.js`; packaging must
+include their production modules and dependencies. Paths containing spaces are passed as individual
 arguments to `Process`, never interpreted by a shell.
 
 Runtime discovery validates an explicit/saved executable first, then
@@ -89,9 +89,10 @@ provider operation begins leave its outcome uncertain. A live mutation keeps
 draining and is never killed or retried automatically. Further writes remain
 blocked until it exits and a fresh matching inspection reconciles the context.
 
-A router start retains the actual child `Process` and a session-local UUID.
-Matching readiness is polled for at most five seconds after launch. If the child
-is still live after that interval, the caller receives its retained handle and
+A managed router start retains the actual child `Process`, a session-local UUID
+and persistent stdin/stdout pipes. It requires a matching Ready Off protocol frame
+and matching local HTTP readiness within the five-second startup deadline. If the
+child is still live after that interval, the caller receives its retained handle and
 must inspect fresh readiness rather than assume startup succeeded. Stopping
 accepts only that exact currently live handle. Its result distinguishes child
 exit from the loopback port being empty, occupied or unknown. An occupied port
@@ -199,8 +200,8 @@ use an installed Node 24 plus the Swift/macOS toolchain on Apple silicon:
 
 ```sh
 npm run companion:test
-npm test
 npm run companion:build
+npm test
 npm run companion:package-test
 open "dist/Codex Project Router.app"
 ```
@@ -219,8 +220,11 @@ bundled. Rebuild after changing router source or dependencies.
 `companion:package-test` requires the already-built app and fails if it is absent.
 It relocates a copy, checks metadata/arm64/signature/resources, and uses the
 selected absolute real Node 24 path under a minimal GUI-like `PATH`. Its private
-synthetic configuration exercises inspection, listener startup and
-activation/rollback without a gateway call, credential lookup or desktop restart.
+synthetic configuration exercises inspection, managed Ready Off, persistent
+get/set On/Off and activation/rollback. It verifies the same child owns the listener,
+the health fingerprint and provider/router bytes remain unchanged across mode
+changes, and a local HTTPS destination receives zero connections. A standalone
+`serve` compatibility check remains. No credential lookup or desktop restart occurs.
 It also checks rejection of files inside a synthetic Git checkout and app bundle.
 An additional macOS Seatbelt check denies checkout reads (including symlink
 access), launches the relocated native executable, proves its visible window and
@@ -242,8 +246,11 @@ an installed Node 24 executable if automatic discovery fails; the GUI does not
 inherit an nvm shell setup. Neither runtime nor configuration is installed or
 created by the controls.
 
-The window shows exact selected local paths, routing mode, on-disk provider state,
-matching readiness, session ownership and manual desktop confirmation separately.
+The focused window leads with project-routing state, the existing global provider
+account and searchable project overrides. Setup, operational facts, activation and
+recovery are available in disclosures. It shows exact selected local paths, mode,
+on-disk provider state, matching readiness, session ownership and manual desktop
+confirmation separately.
 Provider errors do not hide a readable project catalog. Search filters local names
 and aliases without changing assignments or mappings; stale mapping-only projects
 and missing route targets are visibly marked. An unavailable catalog is displayed
@@ -253,8 +260,9 @@ manual refresh and action-time checks use the controller's coalescing and fresh
 context validation.
 
 Activation asks for provider-wide confirmation: every chat using that provider
-can be affected, and unmapped/unresolved model requests can block. Restart Codex
-and send a request yourself, then use the separately labeled routed or direct
+can be affected. In managed mode, an identified project without an override inherits
+the existing global provider account; unresolved or ambiguous identities can block.
+Restart Codex and send a request yourself, then use the separately labeled routed or direct
 response confirmation button. Health does not establish desktop-loaded settings,
 gateway/key acceptance, billing attribution or stream completeness. After possible
 routed use, keep an owned listener running until direct restoration and a working
@@ -332,3 +340,76 @@ This increment has no assignment editing, project hiding, account/default-route
 management, Keychain management, startup automation, bundled Node, automatic Codex
 restart, automatic prompts, or improved gateway/billing attribution. Later
 increments require their own scope and approval.
+
+## Managed project routing On/Off
+
+Choose **Start router (routing Off)** explicitly after selecting a valid private
+configuration and installed Node 24. Launch, selection, refresh and relaunch never
+start a router or restore a last-used On state. A failed or uncertain start is not
+presented as confirmed Off. Each successful managed start begins Off and retains
+its stdin/stdout control pipes for its lifetime.
+
+For initial integration, activate the selected provider once to its stable
+loopback URL, restart Codex manually, receive a working response and use the
+separate routed-response confirmation. Activation affects every chat using that
+provider. After this integration, **Turn project routing On** applies saved project
+overrides and **Turn project routing Off** suspends them for subsequent requests
+without a Codex restart or any provider URL rewrite. Saved overrides remain visible and unchanged while Off.
+Changing a mapping, credential reference or destination still requires restarting
+the listener with its changed configuration. There is no editing of those values
+in this increment.
+
+In credential mode the global pair means top-level `upstreamBaseUrl` and the
+existing incoming authorization, verified against a fresh `globalCredential` read.
+On selects an explicit project's complete destination/credential pair; an identified
+project without a saved alias inherits that global pair. Off uses that global pair
+for admitted requests and performs no project-credential lookup, even for a saved
+override whose item is unavailable. It does not bypass project identity validation,
+request admission or global authentication. A selected override with a missing
+target or failed credential blocks; there is no fallback to the global pair.
+Strict loading rejects supplied malformed/incomplete targets even Off and still
+rejects obsolete `routeCredentials`. Legacy configuration uses the caller's
+credential and has no separate account selection; standalone `serve` retains its
+historical behavior and has no managed mode channel.
+
+Each HTTP request captures mode before any asynchronous lookup. A later mode
+change affects later requests, while active streams retain their initial selection.
+No request is retried or migrated to make a switch appear successful. Gateways'
+model, payload, continuation and cross-account errors remain errors.
+
+The owned child uses bundled `managed-serve.js --config <canonical-absolute-path>
+--session <UUID>` through Node 24 with `--use-system-ca`. Its newline-delimited JSON
+control channel accepts only schema 1 `get_mode` and absolute `set_mode` commands
+with matching session/request UUIDs; a set includes `mode: "on"` or `"off"`. Ready
+reports Off and the exact configuration context. Applied-mode acknowledgements
+carry their request ID. No credential crosses this pipe and no HTTP mutation
+endpoint exists. Protocol stdout and diagnostics stderr remain separate; commands
+do not read Keychain, run authentication helpers or preflight destinations.
+
+Control timeout, malformed output, pipe loss or cancellation cannot establish a
+mode change. The app shows Uncertain or Unavailable and disables further writes.
+A fresh matching read can reconcile the mode when the channel remains usable. No mutation is
+automatically retried. Channel loss leaves the HTTP listener running at its last
+applied mode and preserves ownership/recovery obligations. An external listener
+has no owned control channel and cannot be adopted or toggled.
+
+Mode-only acknowledgements and reconciliation do not alter configuration
+fingerprint, provider URL, activation record or the restart/response-confirmation
+obligation. Readiness and a mode acknowledgement prove neither what the desktop
+loaded nor account acceptance, billing attribution or stream completeness. The
+manual desktop confirmation remains independent.
+
+Off still depends on the listener; it is not direct bypass or permission to stop.
+To recover, use **Restore direct** for the retained activation context, restart
+Codex, receive and explicitly confirm a working direct response, then stop the
+exact owned child when the guarded controls permit. Quit uses the same existing
+recovery authority and retains the proven-direct start-only exception described
+above. Custom `codexHome`, provider, config path and port remain bound to the
+selected/retained context; changing them does not retarget pending recovery.
+For unowned/external listeners, use the manual origin/port verification above.
+
+The implementation does not create account/default-route or assignment editing,
+Keychain management, automatic startup, automatic Codex restart, fallback or
+automatic model prompts. The [current validation record](../docs/validation/companion-routing-on-off.md)
+keeps native On/Off interaction, live desktop/recovery acceptance and final review
+explicitly pending until observed. Prior reports are historical evidence only.

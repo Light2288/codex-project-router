@@ -35,6 +35,7 @@ public struct Inspection: Codable, Equatable {
         self.configuration = configuration; self.context = context; self.revision = revision; self.provider = provider; self.catalog = catalog
     }
 }
+public enum ProjectRoutingMode: String, Codable, Sendable { case on, off }
 public enum ControlAction: String, Codable { case activate, rollback }
 public struct ControlResult: Codable, Equatable {
     public var state: String; public var changed: Bool; public var restartRequired: Bool
@@ -54,6 +55,8 @@ public enum CompanionError: String, Error, LocalizedError {
     case timedOut = "The router command timed out."
     case mutationUncertain = "The provider operation is uncertain. Refresh before continuing."
     case mutationBusy = "A provider operation must finish and be reconciled first."
+    case routingModeUncertain = "The routing mode is uncertain. Refresh before switching again."
+    case routingModeUnavailable = "Routing control is unavailable. Keep the router running and use direct recovery if needed."
     case startupFailed = "The router could not be started."
     case unownedChild = "The router child is not owned by this session."
     public var errorDescription: String? { rawValue }
@@ -78,6 +81,8 @@ public struct CompanionJournal: Codable, Equatable {
     func setNodeExecutable(_ validatedPath: URL)
     func start(configPath: URL) async throws -> OwnedRouter
     func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode
     func stop(_ child: OwnedRouter) async throws -> StopOutcome
 }
 public final class OwnedRouter {

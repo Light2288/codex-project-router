@@ -31,6 +31,32 @@ import CompanionCore
         return controller
     }
 
+    func testModeOnlyRefreshDoesNotReplayQuitNavigation() async throws {
+        // A routing poll may update evidence but cannot publish another explicit navigation request.
+        let controller = try await makeController(pending: true)
+        backend.routingMode = .off
+        await controller.start()
+        let navigation = QuitGuidanceNavigation()
+        var showCount = 0
+        let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
+            presentQuitAlert: { _ in .alertFirstButtonReturn }, showControls: { showCount += 1 },
+            terminate: { XCTFail("Pending recovery must not exit") })
+        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        await delegate.requestQuit()?.value
+        let originalRequestID = try XCTUnwrap(navigation.requestID)
+        let journal = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+        backend.routingMode = .on
+        await controller.refresh()
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.on))
+        XCTAssertEqual(navigation.requestID, originalRequestID)
+        let controlActionCount = backend.controls.count
+        XCTAssertEqual(controlActionCount, 0)
+        XCTAssertEqual(backend.modeSetCount, 0)
+        XCTAssertEqual(showCount, 1)
+        XCTAssertEqual(controller.desktopConfirmation, .unknown)
+        XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), journal)
+    }
+
     func testFixedAlertCopyAndCancelBinding() async throws {
         // Wrong reason selection or raw backend/context interpolation must not reach native alert content.
         let cases: [(RouterController.QuitBlockReason, String)] = [
@@ -519,6 +545,8 @@ private final class QuitSyntheticProcess: Process, @unchecked Sendable {
 @MainActor private final class QuitBackend: CompanionBackend {
     var onChildExit: ((UUID, Int32) -> Void)?
     var mutationRequiresReconciliation = false
+    var routingMode: ProjectRoutingMode?
+    private(set) var modeSetCount = 0
     var snapshot: Inspection
     var inspectionError: Error?
     var inspectBarrier: QuitBarrier<Inspection>?
@@ -548,6 +576,14 @@ private final class QuitSyntheticProcess: Process, @unchecked Sendable {
     func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult {
         controls.append(action)
         throw CompanionError.commandFailed
+    }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode {
+        guard let routingMode else { throw CompanionError.routingModeUnavailable }
+        return routingMode
+    }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode {
+        modeSetCount += 1
+        throw CompanionError.routingModeUnavailable
     }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         stopCount += 1

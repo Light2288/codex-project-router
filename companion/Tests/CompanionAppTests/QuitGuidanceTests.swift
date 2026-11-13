@@ -34,6 +34,27 @@ import CompanionCore
         XCTAssertFalse(guidance.text.contains(sentinel), file: file, line: line)
     }
 
+    func testAdvancedRevealsCurrentQuitTarget() async throws {
+        // Nesting a target in collapsed Advanced must reveal its whole path before navigation.
+        for destination in [QuitGuidance.Destination.status, .restoreDirect, .directResponse, .manualRecovery, .stopRouter, .setup] {
+            var disclosure = ControlsDisclosureState()
+            disclosure.reveal(for: destination)
+            XCTAssertTrue(disclosure.advancedExpanded)
+            XCTAssertEqual(disclosure.setupExpanded, destination == .setup)
+            XCTAssertEqual(disclosure.recoveryExpanded, destination == .manualRecovery)
+        }
+        let f = try await fixture(owned: true)
+        var disclosure = ControlsDisclosureState()
+        disclosure.reveal(for: QuitGuidance.current(for: f.controller).destination)
+        XCTAssertTrue(disclosure.advancedExpanded)
+        f.backend.snapshot.context = nil
+        await f.controller.refresh()
+        disclosure.reveal(for: QuitGuidance.current(for: f.controller).destination)
+        XCTAssertTrue(disclosure.recoveryExpanded)
+        XCTAssertEqual(f.backend.counts["control"], 0)
+        XCTAssertEqual(f.backend.counts["stop"], 0)
+    }
+
     func testOwnedConfirmationTargetsEnabledResponseCheck() async throws {
         // Treating an owned router as idle would hide its required manual response check.
         let f = try await fixture(owned: true)
@@ -248,6 +269,8 @@ private final class GuidanceSyntheticProcess: Process, @unchecked Sendable {
         counts["control", default: 0] += 1
         throw CompanionError.commandFailed
     }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode { throw CompanionError.routingModeUnavailable }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         counts["stop", default: 0] += 1
         throw CompanionError.unownedChild

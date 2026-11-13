@@ -30,6 +30,102 @@ import CompanionCore
         await controller.refresh()
         try await body(controller, backend, store)
     }
+    func testRoutingPresentationDistinguishesKnownPendingAndUnavailable() async throws {
+        // Unknown or pending evidence must never become a usable On/Off action or desktop confirmation.
+        try await withPendingDirectController { controller, backend, _ in
+            XCTAssertEqual(ControlsPresentation(controller: controller).routingState, "Router not running")
+            XCTAssertEqual(ControlsPresentation(controller: controller).routingActionTitle, "Start router (routing Off)")
+            backend.routingError = nil
+            await controller.start()
+            var display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.routingState, "Off")
+            XCTAssertEqual(display.routingActionTitle, "Turn project routing On")
+            XCTAssertEqual(display.confirmation, "Not confirmed")
+            await controller.setProjectRouting(.on)
+            display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.routingState, "On")
+            XCTAssertEqual(display.routingActionTitle, "Turn project routing Off")
+            let barrier = DisplayModeBarrier()
+            backend.modeBarrier = barrier
+            let switching = Task { await controller.setProjectRouting(.off) }
+            await barrier.waitUntilStarted()
+            display = ControlsPresentation(controller: controller, pendingRoutingMode: .off)
+            XCTAssertEqual(display.routingState, "Switching project routing Off…")
+            XCTAssertNil(display.routingActionTitle)
+            XCTAssertFalse(controller.canSetProjectRouting)
+            barrier.release()
+            await switching.value
+            for (error, state) in [(CompanionError.routingModeUnavailable, "Unavailable"), (.routingModeUncertain, "Uncertain — refresh to check")] {
+                backend.routingError = error
+                await controller.refresh()
+                display = ControlsPresentation(controller: controller)
+                XCTAssertEqual(display.routingState, state)
+                XCTAssertNil(display.routingActionTitle)
+                XCTAssertEqual(display.globalAccount, "Existing global provider account")
+                XCTAssertEqual(display.confirmation, "Not confirmed")
+            }
+        }
+        try await withController { controller, backend in
+            backend.snapshot.provider.proxyReady = true
+            await controller.refresh()
+            XCTAssertEqual(ControlsPresentation(controller: controller).routingState, "Unavailable")
+            XCTAssertNil(ControlsPresentation(controller: controller).routingActionTitle)
+            XCTAssertFalse(controller.canSetProjectRouting)
+        }
+    }
+    func testAssignmentPresentationKeepsSuspendedAndMissingOverrides() async throws {
+        // Off suspends saved overrides without erasing them; discovery never creates an assignment.
+        try await withPendingDirectController { controller, backend, store in
+            backend.snapshot.configuration.mode = "credential"
+            backend.routingError = nil
+            let savedOverride = Inspection.Entry(id: "saved", name: "Saved", routeAlias: "route-a", routeState: "mapped")
+            let missing = Inspection.Entry(id: "missing", name: "Missing", routeAlias: "route-gone", routeState: "target_missing")
+            let stale = Inspection.Entry(id: "stale", name: "Stale", routeAlias: "route-stale", routeState: "catalog_missing")
+            let discovered = Inspection.Entry(id: "new", name: "New project", routeAlias: nil, routeState: "unmapped")
+            backend.snapshot.catalog.entries = [savedOverride, missing, stale, discovered]
+            await controller.start()
+            let bytes = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+            var display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.assignment(for: savedOverride), "Override saved; inactive while Off — alias: route-a")
+            XCTAssertEqual(display.assignment(for: discovered), "Global (routing Off)")
+            XCTAssertEqual(display.projects(matching: "").map(\.routeState), ["mapped", "target_missing", "catalog_missing", "unmapped"])
+            XCTAssertEqual(display.assignment(for: missing), "Override saved; inactive while Off — alias: route-gone")
+            await controller.setProjectRouting(.on)
+            display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.assignment(for: savedOverride), "Override active — alias: route-a")
+            XCTAssertEqual(display.assignment(for: discovered), "Global (inherited)")
+            let controls = backend.controlCount, mutations = backend.modeSetCount
+            for _ in 0..<3 { _ = display.projects(matching: "new"); _ = display.assignment(for: discovered) }
+            XCTAssertNil(display.projects(matching: "new").first?.routeAlias)
+            XCTAssertEqual(backend.controlCount, controls)
+            XCTAssertEqual(backend.modeSetCount, mutations)
+            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), bytes)
+            backend.routingError = CompanionError.routingModeUncertain
+            await controller.refresh()
+            display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.assignment(for: savedOverride), "Override saved — alias: route-a (routing unconfirmed)")
+            XCTAssertEqual(display.assignment(for: discovered), "Global (inheritance policy; routing unconfirmed)")
+            backend.snapshot.catalog.state = "unavailable"
+            await controller.refresh()
+            XCTAssertTrue(display.projects(matching: "").isEmpty)
+            XCTAssertEqual(display.catalog, "Catalog unavailable. Refresh to retry.")
+        }
+    }
+    func testLegacyAliasesAreNotAccountNames() async throws {
+        // A legacy alias cannot be described as choosing an independent provider account.
+        try await withPendingDirectController { controller, backend, _ in
+            backend.routingError = nil
+            await controller.start()
+            let project = Inspection.Entry(id: "legacy", name: "Legacy", routeAlias: "route-a", routeState: "mapped")
+            for mode in [ProjectRoutingMode.off, .on] {
+                await controller.setProjectRouting(mode)
+                let display = ControlsPresentation(controller: controller)
+                XCTAssertEqual(display.globalAccount, "Existing global provider account")
+                XCTAssertEqual(display.assignment(for: project), "Global credential; saved alias: route-a")
+                XCTAssertEqual(display.confirmation, "Not confirmed")
+            }
+        }
+    }
     func testIdlePendingGuidanceDoesNotDemandConfirmationToQuit() async throws {
         // Removing the idle branch or treating display as fresh exit authority must fail.
         try await withPendingDirectController { controller, backend, store in
@@ -201,6 +297,10 @@ import CompanionCore
 @MainActor private final class DisplayBackend: CompanionBackend {
     var onChildExit: ((UUID, Int32) -> Void)?
     var mutationRequiresReconciliation = false
+    var routingMode: ProjectRoutingMode = .off
+    var routingError: Error? = CompanionError.routingModeUnavailable
+    var modeBarrier: DisplayModeBarrier?
+    private(set) var modeSetCount = 0
     private(set) var inspectCount = 0
     private(set) var startCount = 0
     private(set) var controlCount = 0
@@ -217,8 +317,32 @@ import CompanionCore
         return child
     }
     func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult { controlCount += 1; throw CompanionError.commandFailed }
+    func readRoutingMode(_ child: OwnedRouter) async throws -> ProjectRoutingMode {
+        if let routingError { throw routingError }
+        return routingMode
+    }
+    func setRoutingMode(_ mode: ProjectRoutingMode, for child: OwnedRouter) async throws -> ProjectRoutingMode {
+        modeSetCount += 1
+        if let modeBarrier { await modeBarrier.wait() }
+        if let routingError { throw routingError }
+        routingMode = mode
+        return mode
+    }
     func stop(_ child: OwnedRouter) async throws -> StopOutcome { stopCount += 1; throw CompanionError.unownedChild }
 }
 private final class DisplaySyntheticProcess: Process, @unchecked Sendable {
     override var isRunning: Bool { true }
+}
+
+@MainActor private final class DisplayModeBarrier {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var started: CheckedContinuation<Void, Never>?
+    private var waiting = false
+    func wait() async {
+        await withCheckedContinuation { continuation = $0; waiting = true; started?.resume(); started = nil }
+    }
+    func waitUntilStarted() async {
+        if !waiting { await withCheckedContinuation { started = $0 } }
+    }
+    func release() { continuation?.resume(); continuation = nil }
 }

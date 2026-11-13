@@ -66,7 +66,7 @@ function identity(raw) {
     parentId: id(meta.parent_thread_id),
   };
 }
-async function resolveOnce(ids, config) {
+async function resolveOnce(ids, config, requireRoute) {
   let db;
   try {
     const state = JSON.parse(
@@ -97,7 +97,7 @@ async function resolveOnce(ids, config) {
       if (depth >= 32 || seen.has(current))
         throw new RouterError("IDENTITY_CONFLICT");
       seen.add(current);
-      const assignment = assignments[current];
+      const assignment = Object.hasOwn(assignments, current) ? assignments[current] : undefined;
       if (projectless.includes(current))
         throw new RouterError(
           assignment ? "IDENTITY_CONFLICT" : "PROJECT_UNRESOLVED",
@@ -108,9 +108,20 @@ async function resolveOnce(ids, config) {
           assignment.projectKind !== "local" ||
           typeof assignment.projectId !== "string" ||
           !UUID.test(assignment.projectId) ||
+          !Object.hasOwn(projects, assignment.projectId) ||
           !object(projects[assignment.projectId])
         )
           throw new RouterError("PROJECT_UNRESOLVED");
+        if (!requireRoute) {
+          const project = projects[assignment.projectId],
+            normalized = assignment.projectId.toLowerCase();
+          // Inheritance must never turn a catalog identity inconsistency into
+          // an apparently absent override. Display names are not identity proof.
+          if (typeof project.id !== "string" || !UUID.test(project.id) ||
+            project.id.toLowerCase() !== normalized ||
+            Object.keys(projects).filter(id => id.toLowerCase() === normalized).length !== 1)
+            throw new RouterError("IDENTITY_CONFLICT");
+        }
         memberships.push({
           ownerThreadId: current,
           projectId: assignment.projectId,
@@ -128,16 +139,21 @@ async function resolveOnce(ids, config) {
     if (ids.sessionId && !seen.has(ids.sessionId))
       throw new RouterError("IDENTITY_CONFLICT");
     if (!memberships.length) throw new RouterError("STATE_UNAVAILABLE");
-    if (new Set(memberships.map((m) => m.projectId)).size > 1)
+    if (new Set(memberships.map((m) => requireRoute ? m.projectId : m.projectId.toLowerCase())).size > 1)
       throw new RouterError("IDENTITY_CONFLICT");
-    const { ownerThreadId, projectId } = memberships[0],
-      routeAlias = config.projectRoutes[projectId];
-    if (!routeAlias) throw new RouterError("ROUTE_UNMAPPED");
+    const { ownerThreadId, projectId } = memberships[0];
+    if (!requireRoute) {
+      const matchingKeys = Object.keys(config.projectRoutes).filter(id => id.toLowerCase() === projectId.toLowerCase());
+      if (matchingKeys.length > 1 || matchingKeys.length === 1 && matchingKeys[0] !== projectId)
+        throw new RouterError("IDENTITY_CONFLICT");
+    }
+    const routeAlias = Object.hasOwn(config.projectRoutes, projectId) ? config.projectRoutes[projectId] : undefined;
+    if (requireRoute && !routeAlias) throw new RouterError("ROUTE_UNMAPPED");
     return Object.freeze({
       threadId: ids.threadId,
       ownerThreadId,
       projectId,
-      routeAlias,
+      ...(routeAlias === undefined ? {} : { routeAlias }),
       source: ownerThreadId === ids.threadId ? "direct" : "ancestor",
     });
   } catch (e) {
@@ -146,7 +162,7 @@ async function resolveOnce(ids, config) {
     db?.close();
   }
 }
-export async function identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false } = {}) {
+export async function identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false, requireRoute = true } = {}) {
   if (signal?.aborted) throw new RouterError("CANCELLED");
   const ids = identity(rawHeaders),
     deadline = Date.now() + 1000,
@@ -155,7 +171,7 @@ export async function identifyProject(rawHeaders, config, { signal, allowUnassig
   for (;;) {
     if (signal?.aborted) throw new RouterError("CANCELLED");
     try {
-      return await resolveOnce(ids, config);
+      return await resolveOnce(ids, config, requireRoute !== false);
     } catch (e) {
       if (titleId && e instanceof RouterError && e.code === "STATE_UNAVAILABLE" && Date.now() < deadline) {
         try {
