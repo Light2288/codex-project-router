@@ -181,5 +181,54 @@ final class SetupTransactionStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.prepare(receipt))
         try store.advance(.itemCreated); try store.advance(.committing); try store.advance(.complete); try store.finishVerified()
     }
+
+    func testOversizedPreparationPreservesPriorCompletedReceipt() throws {
+        let config = URL(fileURLWithPath: context.configPath), previous = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
+        try previous.begin(context: context, operationID: receipt.operationId, receipt: receipt)
+        try previous.advance(.itemCreated); try previous.advance(.committing); try previous.advance(.complete); try previous.finishVerified()
+        let path = root.appendingPathComponent("account-setup.json"), original = try Data(contentsOf: path)
+        var before = stat(); XCTAssertEqual(lstat(path.path, &before), 0)
+        var oversizedAccount = account!; oversizedAccount.upstreamBaseUrl = "https://example.invalid/" + String(repeating: "a", count: 70_000)
+        let oversized = SetupReceipt(operationId: UUID().uuidString, account: oversizedAccount, context: context), store = SetupTransactionStore(configPath: config)
+        try store.begin(context: context, operationID: oversized.operationId, receipt: nil)
+        XCTAssertThrowsError(try store.prepare(oversized, verifiedPreviousAccount: account))
+        XCTAssertEqual(try Data(contentsOf: path), original)
+        var after = stat(); XCTAssertEqual(lstat(path.path, &after), 0); XCTAssertEqual(after.st_ino, before.st_ino)
+        XCTAssertEqual(try store.load()?.phase, .complete)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: root.path).contains { $0.hasSuffix(".tmp") })
+    }
+
+    func testReceiptBoundReservesSpaceForLongestFuturePhase() throws {
+        let config = URL(fileURLWithPath: context.configPath), store = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
+        var boundary = receipt!
+        let overhead = try JSONEncoder().encode(boundary).count
+        boundary.account.upstreamBaseUrl += String(repeating: "a", count: 64 * 1024 - 4 - overhead)
+        XCTAssertEqual(try JSONEncoder().encode(boundary).count, 64 * 1024 - 4)
+        var oneTooLarge = boundary; oneTooLarge.account.upstreamBaseUrl += "a"
+        try store.begin(context: context, operationID: boundary.operationId, receipt: nil)
+        XCTAssertThrowsError(try store.prepare(oneTooLarge))
+        XCTAssertNil(try store.load())
+        try store.prepare(boundary)
+        try store.advance(.itemCreated)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("account-setup.json")).count, 64 * 1024)
+        XCTAssertEqual(try store.load()?.phase, .itemCreated)
+        try store.advance(.committing); try store.advance(.complete); try store.finishVerified()
+        XCTAssertEqual(try SetupTransactionStore(configPath: config).load()?.phase, .complete)
+    }
+
+    func testNoncanonicalURLCannotPrepareDurableCreationIntent() throws {
+        var candidate = account!; candidate.upstreamBaseUrl = "https://EXAMPLE.invalid/api/"
+        let planned = SetupReceipt(operationId: UUID().uuidString, account: candidate, context: context)
+        let store = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
+        try store.begin(context: context, operationID: planned.operationId, receipt: nil)
+        XCTAssertThrowsError(try store.prepare(planned))
+        XCTAssertNil(try store.load())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("account-setup.json").path))
+        candidate.upstreamBaseUrl = try AccountRecord.normalizedUpstreamBaseURL(candidate.upstreamBaseUrl)
+        let normalized = SetupReceipt(operationId: planned.operationId, account: candidate, context: context)
+        try store.prepare(normalized)
+        XCTAssertEqual(try store.load()?.account.upstreamBaseUrl, "https://example.invalid/api")
+        try store.advance(.itemCreated); try store.advance(.committing); try store.advance(.complete); try store.finishVerified()
+    }
     private func mode(_ path: URL) throws -> Int { (try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as! NSNumber).intValue }
 }

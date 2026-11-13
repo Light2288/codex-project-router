@@ -1,4 +1,10 @@
 import Foundation
+import Darwin
+
+public enum AccountValidationError: Error, LocalizedError {
+    case invalidUpstreamURL
+    public var errorDescription: String? { "Enter a canonical HTTPS endpoint without credentials, a query or a fragment." }
+}
 
 public struct CredentialReference: Codable, Equatable, Hashable {
     public var keychainPath: String; public var service: String; public var account: String
@@ -9,11 +15,45 @@ public struct CredentialReference: Codable, Equatable, Hashable {
 public struct AccountRecord: Codable, Equatable {
     public var id: String; public var displayName: String; public var upstreamBaseUrl: String; public var credential: CredentialReference
     public init(id: String, displayName: String, upstreamBaseUrl: String, credential: CredentialReference) { self.id = id; self.displayName = displayName; self.upstreamBaseUrl = upstreamBaseUrl; self.credential = credential }
+    /// Normalize form input before constructing the account/receipt shared with Node.
+    public static func normalizedUpstreamBaseURL(_ value: String) throws -> String {
+        guard !value.contains("\\"), !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              value.range(of: "%(?![0-9A-Fa-f]{2})", options: .regularExpression) == nil,
+              let url = URLComponents(string: value), url.scheme?.lowercased() == "https", let rawHost = url.host, !rawHost.isEmpty, rawHost.utf8.allSatisfy({ $0 < 128 }),
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+              url.port == nil || (0...65535).contains(url.port!) else { throw AccountValidationError.invalidUpstreamURL }
+        var host = rawHost.lowercased()
+        if host.hasPrefix("["), host.hasSuffix("]") {
+            var address = in6_addr(), bytes = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+            guard String(host.dropFirst().dropLast()).withCString({ inet_pton(AF_INET6, $0, &address) }) == 1,
+                  inet_ntop(AF_INET6, &address, &bytes, socklen_t(bytes.count)) != nil else { throw AccountValidationError.invalidUpstreamURL }
+            let literal = String(cString: bytes)
+            // inet_ntop and WHATWG spell mapped IPv4 addresses differently; never guess.
+            guard !literal.contains(".") else { throw AccountValidationError.invalidUpstreamURL }
+            host = "[\(literal)]"
+        } else {
+            guard host.range(of: "^[a-z0-9._-]+$", options: .regularExpression) != nil else { throw AccountValidationError.invalidUpstreamURL }
+            let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+            let last = host.split(separator: ".").last ?? ""
+            if last.allSatisfy({ $0.isNumber }) || last.hasPrefix("0x") {
+                guard labels.count == 4, labels.allSatisfy({ label in
+                    guard let byte = UInt8(label) else { return false }; return String(byte) == label
+                }) else { throw AccountValidationError.invalidUpstreamURL }
+            }
+        }
+        var path = url.percentEncodedPath
+        // Reject parser-dependent dot traversal and repeated trailing separators; keep all other prefix bytes.
+        guard !path.hasSuffix("//"), !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
+            let segment = $0.lowercased().replacingOccurrences(of: "%2e", with: "."); return segment == "." || segment == ".."
+        }) else { throw AccountValidationError.invalidUpstreamURL }
+        if path.hasSuffix("/") { path.removeLast() }
+        let port = url.port.flatMap { $0 == 443 ? nil : ":\($0)" } ?? ""
+        return "https://\(host)\(port)\(path)"
+    }
     var isValid: Bool {
         guard UUID(uuidString: id) != nil, credential.isValid, !displayName.isEmpty, displayName.unicodeScalars.count <= 80,
               displayName == displayName.trimmingCharacters(in: .whitespacesAndNewlines), !displayName.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
-              let url = URLComponents(string: upstreamBaseUrl), url.scheme == "https", url.host?.isEmpty == false,
-              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return false }
+              (try? Self.normalizedUpstreamBaseURL(upstreamBaseUrl)) == upstreamBaseUrl else { return false }
         return true
     }
 }

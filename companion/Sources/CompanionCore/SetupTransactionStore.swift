@@ -5,6 +5,7 @@ import Darwin
 public final class SetupTransactionStore {
     public let configPath: URL
     private let receiptName = "account-setup.json", leaseName = ".activation.lock"
+    private let maximumStateBytes = 64 * 1024
     private var directoryFD: Int32 = -1, leaseFD: Int32 = -1
     private var operationID: String?, context: ActivationContext?, currentReceipt: SetupReceipt?
     private var receiptIdentity: stat?, phase: SetupReceipt.Phase?
@@ -132,7 +133,7 @@ public final class SetupTransactionStore {
             let n = read(fd, &buffer, buffer.count)
             if n < 0 { if errno == EINTR { continue }; throw CompanionError.privateState }
             if n == 0 { break }
-            guard result.count + n <= 64 * 1024 else { throw CompanionError.privateState }; result.append(buffer, count: n)
+            guard result.count + n <= maximumStateBytes else { throw CompanionError.privateState }; result.append(buffer, count: n)
         }
         return result
     }
@@ -162,11 +163,15 @@ public final class SetupTransactionStore {
     }
     private func writeReceipt(_ receipt: SetupReceipt) throws {
         try validateLease(); try validateReceiptIdentity()
+        let bytes = try JSONEncoder().encode(receipt)
+        var longestPhase = receipt; longestPhase.phase = .itemCreated
+        // Preparation must remain readable after creation, when the phase name grows.
+        guard bytes.count <= maximumStateBytes, try JSONEncoder().encode(longestPhase).count <= maximumStateBytes else { throw CompanionError.privateState }
         let name = ".account-setup-\(UUID().uuidString).tmp"
         let fd = openat(directoryFD, name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw CompanionError.privateState }
         defer { close(fd); unlinkat(directoryFD, name, 0) }
-        try checkFile(fd); try writeAll(try JSONEncoder().encode(receipt), fd: fd)
+        try checkFile(fd); try writeAll(bytes, fd: fd)
         guard fsync(fd) == 0 else { throw CompanionError.privateState }
         try validateLease(); try validateReceiptIdentity()
         guard renameat(directoryFD, name, directoryFD, receiptName) == 0, fsync(directoryFD) == 0 else { throw CompanionError.privateState }
