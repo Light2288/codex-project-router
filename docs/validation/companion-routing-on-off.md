@@ -1,11 +1,14 @@
 # Companion project routing On/Off validation
 
 Created: 2026-11-12
-Updated: 2026-11-12
+Updated: 2026-11-13
 
-Status: fresh automated packaging acceptance passed. Native/live acceptance,
-actual private recovery and the final sequential specification/quality review
-remain pending for Task 8. This report does not establish release completion.
+Status: automated packaging acceptance and the user-assisted live sequence are
+recorded with their transport qualifications. Final direct recovery is complete
+and independently verified. The additional isolated lost-acknowledgement check
+observed Unavailable and automatic read reconciliation; its transient Uncertain
+state was not observed. Fixture cleanup is verified; final sequential
+specification/quality review is pending; this is not yet a release-completion claim.
 
 Scope: the approved `companion-routing-on-off` increment. The approved
 [specification](../superpowers/specs/2026-11-12-companion-routing-on-off.md) and
@@ -100,23 +103,281 @@ plus reusable synthetic router/upstream ports. Local documentation links were
 checked. Documentation-only evidence updates after this run do not change the
 signed artifact or tested source.
 
-## Pending acceptance and evidence limits
+## Isolated native observations — 2026-11-12–13
 
-- Native interaction with the current signed build: explicit Start Off, truthful
-  On/Off and uncertainty display, searchable override/inheritance rows, responsive
-  layout, disclosures, keyboard/accessibility behavior and existing recovery/Quit
-  flows. Automated visible-window presence is not this interaction evidence.
-- Live desktop acceptance with existing approved private configuration: one-time
-  integration and independent restart/response confirmation, On override behavior,
-  Off global behavior, later On behavior and the approved active-stream switch
-  case. Record every required case as observed pass, observed failure or not run.
-- Actual private recovery: restore exact prior provider/router settings and optional
-  property presence, preserve unrelated edits, restart as required, independently
-  verify a direct response, then verify exact owned-child exit and port state.
-  Actual endpoints, credentials/references, mappings, checkpoints and raw runtime
-  evidence stay outside Git.
+The parent used relocated copies of the same current signed app, owner-only
+synthetic HOME/CFFIXED_USER_HOME and synthetic configuration/catalog state.
+Seatbelt denied checkout and real Codex/router private paths and non-loopback
+outbound traffic. Negative checkout/Node source reads, an actual on-screen native
+window and the exact synthetic instance lock were independently established.
+Accessibility automation was unavailable; the interactions below are explicit
+human observations, combined with separate process/file checks. No model request,
+real credential retrieval or real provider change occurred in these fixtures.
+
+| Case | Recorded observation |
+| --- | --- |
+| Routing and assignments | The user performed Start and On, then confirmed On/action Off, the active `route-a` override and global inheritance. After switching Off, the user confirmed Off/action On, the saved inactive override and global routing-Off assignment. Initial Off was not separately reported before On. |
+| Warnings and search | Missing-target and stale-mapping warnings remained visible through searches while Off. |
+| Automatic discovery | The first attempt was unobserved because the user accidentally pressed Refresh. A distinct row added afterward appeared automatically without Refresh, with the expected global routing-Off assignment. The first attempt is not counted as an automatic-discovery pass. |
+| Unavailable catalog | After only the fixture catalog was made invalid, explicit Refresh showed catalog unavailable, removed the previous row and retained known Off. The exact saved synthetic catalog was then restored. |
+| Unavailable mode | Pausing only the positively attributed synthetic child produced Unavailable with no On/Off button while the restored catalog row remained visible with routing unconfirmed. Resuming the same child restored known Off automatically before manual Refresh was needed. This is paused-child/readiness evidence, not a native lost-set-acknowledgement test. |
+| Direct-only Stop | The user explicitly stopped the never-activated synthetic router. The header became Router not running/action Start Off; independent checks found no tracked child or listener and unchanged provider/router/journal bytes. |
+| Open/scrolled Quit guidance | In the corrected fixture described below, Quit showed an alert and its primary action revealed expanded Advanced/manual recovery and highlighted guidance from a scrolled project list with Advanced collapsed. |
+| Polling and repeated requests | Waiting about six seconds after scrolling left the view in place. Another explicit Quit/primary request returned to the highlighted guidance. |
+| Minimized and closed windows | With Advanced collapsed before each case, the user physically minimized or red-closed Controls, then used menu-bar Quit/primary. Both returned the window with expanded, highlighted recovery guidance. No parent UI inspection or activation occurred during this handoff. |
+| Keyboard | A fresh guidance request followed by Return performed no visible operation and played the macOS alert sound. After Tab, typing without clicking a field populated Projects search, identifying its recipient; the initial focus indicator was not visible to the user. All-controls keyboard navigation was disabled and left unchanged. No separate VoiceOver observation is claimed. |
+| Cancellation | Keep Running and Escape each preserved the genuinely minimized state; both also preserved the red-closed state. The user explicitly confirmed both cases without parent UI inspection/activation during the handoff. |
+| Ordinary reopen and exit | Normal Open controls removed the previous Quit-guidance outline. After restoring only the original valid pending fixture journal, normal Quit exited without an alert. Independent checks observed native exit 0 with no signal, no child/listener, and exact original provider/router/pending-journal bytes. |
+
+The initial blocked-Quit setup was incorrect: it had no pending recovery
+obligation after direct-only Stop. Corrupting its saved journal therefore did not
+exercise the pending-recovery exit guard, and the user observed ordinary idle
+Quit with no alert. The exact synthetic app exit and unchanged provider/router
+files were verified; that native exit code was not captured. This attempt is
+retained as a fixture failure, not a passing navigation check or a product fix.
+
+Read-only tracing identified the normal idle-permission branch. A fresh confined
+fixture initialized a valid `direct_confirmation` pending context before its
+journal was deliberately invalidated after initialization. The corrected
+navigation/cancellation checks above then passed. Both fixtures' invalid evidence
+was retained privately before restoring their original journals. All tracked
+processes exited, the synthetic ports were independently empty, and both fixture
+drivers completed cleanup. Product source and the signed build were unchanged.
+
+
+### Lost mode replies and fresh reconciliation — 2026-11-13
+
+A separate relocated signed fixture retained the same source/private-path and
+non-loopback confinement, negative source-read controls, visible native window
+and attributed synthetic instance lock. Its temporary runtime intercepted only
+the managed entry's outgoing On mode replies, including read replies; the HTTP
+listener remained responsive throughout. No provider activation, response
+confirmation, real account request or real configuration change occurred.
+
+The ten-second instruction asked for Uncertain, but the user instead reported
+Unavailable with the orange warning: “Routing control is unavailable. Keep the
+router running and use direct recovery if needed”. The existing controller path
+and regression test explicitly distinguish a lost-set acknowledgement from a
+later failed read: the latter publishes Unavailable. The transient Uncertain
+label was not observed and is not counted as a native pass. This was an overly
+narrow observation instruction, not evidence of a known On/Off label or a
+product correction.
+
+After releasing only the fixture's withheld replies, the user confirmed automatic
+On/action Off and the active route-a assignment without clicking a mode control
+or Refresh. Independent checks proved the same native/managed-child identities,
+the same child owning the responsive listener, and unchanged provider/router/
+journal bytes across reconciliation. The observed recovery used fresh read
+evidence; it does not imply an automatic mutation retry. The user then performed direct-only Stop and normal Quit. Independent checks
+found the exact native/managed processes absent, the synthetic port empty and
+provider/router/journal bytes unchanged. Only the positively attributed fixture
+driver was terminated afterward; no application or listener was signalled.
+
+## Live setup observations — 2026-11-13
+
+The compatible existing private credential-routing configuration was selected
+through the native file picker. The user confirmed Valid/Credential routing and
+reported that selection moved the scroll position from Advanced/Setup into the
+middle of the project list. This usability observation remains open for final
+review; no product fix or claim of stable scroll during selection is made.
+Independent private inspection confirmed the selected context, direct/restored
+provider, no pending desktop check, no owned child or listener, unchanged router
+and provider bytes, and the expected journal selection change. Original private
+checkpoints remain preserved. The user then explicitly started the router and confirmed initial Off/action On.
+Independent checks attributed one managed listener to the retained native child,
+with matching readiness and unchanged router/provider bytes. The user activated through the provider-wide native notice and confirmed Router
+on disk and routed-response confirmation pending, leaving routing Off. Private
+checks verified the same sole owned listener, only the provider URL changed, the
+activation record beside the selected configuration and an exact original-provider
+backup. Router bytes are unchanged. Original and activated checkpoints are kept
+separately outside Git. The first private semantic check falsely failed because
+cloning parsed TOML discarded its table prototypes; a synthetic reproduction
+confirmed that harness error. Fresh parsing and exact reverse-literal text
+comparison passed without a settings or product change. The initial manual restart failed as described below; the later repeat supplied
+the live observations.
+
+### Interrupted first live restart
+
+The user reported that closing Codex also closed the companion. Independent
+inspection found the original companion absent and its instance lock free, while
+the original, positively attributed managed router still owned the listener.
+Provider settings remained active, with routed-response confirmation pending;
+router configuration bytes were unchanged. No successful desktop restart or
+working routed-response acceptance is recorded for this attempt.
+
+The parent had launched the native app under its Codex command-session driver,
+rather than through macOS LaunchServices. That setup did not establish an
+independent application lifetime; the exact termination mechanism and native
+exit status were unobserved. This is retained as failed acceptance/setup evidence,
+without attributing a proven product defect. A signed recovery app was then
+opened through macOS; it acquired its own private instance lock and retained the
+pending journal. It does not own or adopt the surviving listener. The user then invoked Restore direct and confirmed Direct/direct-response
+confirmation pending. Private inspection verified byte-exact original provider
+and both router files, a restored activation record in the selected directory,
+and the separate macOS-launched recovery app holding its instance lock. The
+original validation child remains listening through the required recovery restart.
+The user then reported the recovery restart and that the companion stayed open.
+Independent process identity and lock checks confirmed that the same macOS-launched
+app survived, with original provider/router bytes and direct/restored status.
+The original validation child had exited during the second restart: its recorded
+PIDs were absent and the selected port independently empty. No signal or adoption
+was used. The user confirmed a working post-restart reply and used the native direct-response
+confirmation; a fresh private check found no durable pending check. First-attempt
+recovery is complete. The original failed startup attempt and unobserved
+termination mechanism remain qualified.
+
+### Diagnostic capture for the repeat
+
+The native app normally drains/discards diagnostics. To obtain the approved live
+per-request mode/selection/transport evidence, the parent prepared an owner-only
+temporary launcher outside Git. It execs the same installed Node 24, preserving
+arguments and protocol stdout, and redirects only this signed bundle's managed
+stderr to a private file. Version checks and ordinary CLI helpers retain their
+normal streams. This is acceptance instrumentation; product code is unchanged.
+The runtime selection will be restored during final cleanup. The user selected
+the launcher through native Setup and explicitly started; Off/action On/no error
+were confirmed. Independent checks attributed the new listener to the same
+macOS-launched companion, verified the exact installed Node executable and private
+stderr descriptor, and found unchanged original provider/router bytes. A path
+spelling check required canonical filesystem comparison; it did not require a
+product or settings correction.
+
+The synthetic launcher check passed exact Node/version, Ready Off, acknowledged
+On/Off, health, child exit and port absence without model, credential or provider
+operations. Draft checks exposed a wrong runtime version, a noncanonical synthetic
+path and a wrong health path; their failed outputs are retained privately and
+corrected by the final fixture. They are harness failures, not product fixes.
+
+### Repeat activation and restart
+
+The user activated and manually restarted Codex, reporting initial Off and that
+the companion stayed open. Independent exact process/start/lock checks established
+the same native app and same new owned listener across that restart. Narrow
+provider-literal and semantic comparisons passed; the selected-directory activation
+backup matches the original provider, both router files are unchanged, and a
+separate active checkpoint was saved. Routed-response confirmation was initially pending and was separately completed
+as recorded below.
+
+The private diagnostics recorded this controller chat selecting Off/global and
+an initiating `499/CANCELLED` outcome. That result is retained; restart/UI success
+does not relabel it as HTTP 200 or establish complete stream delivery. It is not
+the required mapped-project same-chat sequence, whose observations follow below.
+
+### First disposable-chat request while Off
+
+The user reported the exact visible reply `OFF-1`. Private identity evidence
+uniquely attributed the new disposable chat to the selected mapped project, whose
+explicit paired target differs from global. Its first request captured Off/global
+and completed HTTP 200 without a diagnostic error. The same native app and owned
+listener remained, and active non-journal checkpoint files were unchanged. That
+private thread identity is retained for the On and return-Off follow-ups.
+
+The user's two answer fields both described `OFF-1`; neither confirmed the
+companion's separate routed-response label. A subsequent companion-only question was explicitly answered yes: the user
+clicked/read User confirmed routed response. Initial integration and its separate
+manual response confirmation are therefore observed.
+The successful disposable request does not relabel the separate controller
+`499/CANCELLED` events or establish independent billing attribution.
+
+### Same-chat switch to On
+
+Without a Codex restart, the user explicitly observed header On and the visible
+reply `ON-2` in the same disposable chat. Private thread/request evidence confirms
+On/override selection for its existing paired target, the same app/owned listener,
+and unchanged active non-journal files. This request ended `499/CANCELLED` despite
+the visible reply. HTTP 200 and complete stream delivery are not claimed for it;
+no gateway rejection, repair, fallback or retry was observed/performed. The
+return-Off and closed-Controls new-project observations follow below.
+
+### New project while On
+
+The user created the requested disposable project and reported `INHERITED-3`
+without an error. Private before/after identity evidence established that the
+project was absent from the prior catalog and had no saved override. Its request
+captured On/global and completed HTTP 200 without a diagnostic error. The same
+native app and owned listener remained. A non-activating CoreGraphics observation
+afterward found no on-screen Controls for that exact app. The user subsequently confirmed Controls stayed red-closed until the reply, the
+row appeared as Global (inherited) on normal reopen before manual Refresh, and
+manual Refresh retained it under Current local project catalog. Normal reopen
+itself triggers inspection; no hidden-poll timing claim is made.
+
+Creating the project changed only the unrelated top-level project settings in
+Codex TOML. The selected provider table/URL and all other active non-journal
+checkpoint files remained unchanged; router configuration bytes are original.
+Whole-file provider equality to the activation checkpoint is therefore false.
+Recovery must preserve these project settings and qualify whole-file comparisons.
+No account, mapping or provider rewrite was used to achieve inheritance. Background
+polling may have inspected the catalog before the model request; this live check
+does not prove absence of hidden inspection, which remains synthetic evidence.
+
+### Same-chat return to Off
+
+The user observed header Off and `OFF-4` in the original `OFF-1`/`ON-2` chat.
+Its request captured Off/global and completed HTTP 200 without a diagnostic error.
+The exact same native app, owned child and listener remained throughout the
+recorded sequence. Provider bytes were unchanged by the Off switch; provider
+URL/table, router files and activation files remained stable across mode changes,
+with the separate unrelated project-settings addition preserved.
+
+The observed sequence is Off/global/200 → On/override/499 with visible `ON-2` →
+Off/global/200 in one chat. No gateway rejection, continuation repair, fallback or
+router retry was observed. The user subsequently explicitly selected that Codex stayed open with no restart
+during the switches.
+A private pre-restore checkpoint
+includes the newly added project settings, without replacing original snapshots.
+
+### Final direct restoration and cleanup
+
+The user explicitly confirmed no restart during the mode sequence, then invoked
+Restore direct and observed Direct/direct-response confirmation pending. Exact
+reverse-literal and semantic comparisons against the latest pre-restore bytes
+prove only the provider URL changed. The original selected-provider table and
+router files are restored; new project settings and all other unrelated settings
+are preserved. Whole provider-file equality to the original checkpoint is not
+claimed. The same owned listener remains live until the required final manual
+restart and working-direct-response confirmation, followed by guarded Stop. The
+user subsequently reported the final direct restart and that the companion
+stayed open. Exact independent checks confirmed the same app and listener,
+direct/restored context, unchanged restored provider/new project settings, original
+router files and the still-pending direct-response check.
+
+The user subsequently confirmed that the final post-restart reply arrived
+normally, clicked the direct-response confirmation, used Stop owned router and
+observed Router not running, then Quit exited normally. Independent checks found
+the exact tracked child absent, the real selected port empty, the real companion
+instance lock unheld and both selected/normal contexts direct/restored with no
+pending desktop check. No external listener was adopted or signalled.
+
+With the real app/listener absent and recovery confirmed, completed journal,
+activation record and generated backups were archived privately before restoring
+the exact original journal and selected-directory activation record. Original
+optional-property presence, runtime selection, router configuration bytes, file
+modes and pre-existing named backups were restored. The two new completed backup
+files remain alongside the selected configuration as well as in the private
+archive; recovery evidence was not discarded. A fresh independent recheck passed.
+The original selected-provider table was restored exactly and the final provider
+text equals the verified direct-restored text, preserving the new project settings
+and all unrelated edits. Whole-file equality to the original provider checkpoint
+is intentionally not claimed. The temporary diagnostic runtime is no longer
+selected; private checkpoints, raw diagnostics and recovery evidence remain
+outside Git. No actual credentials were printed or committed.
+
+## Remaining verification and evidence limits
+
 - Final whole-branch sequential specification then quality review, including
   disposition of remaining evidence limitations, is pending.
+
+The transient lost-set Uncertain label remains unobserved; Unavailable and
+automatic same-child read reconciliation were observed as described above.
+The native observations do not establish VoiceOver behavior or every
+sizing/runtime/error combination. The keyboard observation is qualified above.
+The live run establishes the specific visible same-chat sequence and symbolic
+request selections recorded here, including the On request's 499/CANCELLED
+transport outcome. It does not establish complete delivery for that request,
+independent gateway account/billing attribution or a general guarantee of
+cross-account/instance continuation. No broader compatibility, credit-exhaustion
+or live stress matrix is claimed. Synthetic barriers supply the in-flight timing
+and exact credential-selection evidence.
 
 The Task 3 blocked-output test counts reads rather than measuring actual retained
 input bytes. Its passing result must not be described as a direct retained-byte
