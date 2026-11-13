@@ -8,11 +8,11 @@
 
 **Created:** 2026-11-12
 
-**Updated:** 2026-11-12
+**Updated:** 2026-11-13
 
 **Approval:** The user explicitly approved this saved specification with **specification approved** in this chat. That approval authorizes Stage 3 implementation planning only; a separate plan approval is still required before implementation. The provenance and Stage 2 handoff below describe the original drafting state.
 
-**Plan:** `docs/superpowers/plans/2026-11-12-companion-routing-on-off.md` — separately approved with **plan confirmed, subagent driven confirmed**; implementation in progress.
+**Plan:** `docs/superpowers/plans/2026-11-12-companion-routing-on-off.md` — separately approved with **plan confirmed, subagent driven confirmed**; implementation and qualified verification complete. See `docs/validation/companion-routing-on-off.md`.
 
 **Provenance:** The user's next-companion-increment handoff in this chat; read-only repository, operational and historical-evidence inspection; the native clarification answer **Use global now (Recommended)** for identified projects without overrides while On; and the subsequently presented Stage 1 scope/design proposal. The user explicitly approved that proposal with **scope/design confirmed**. This authorizes this DRAFT specification only. It does not approve this specification, authorize an implementation plan, or authorize implementation.
 
@@ -192,4 +192,11 @@ No material product clarification remains unresolved before this DRAFT. The nati
 
 **Builder completeness check:** A fresh read-only reviewer returned **nothing important left**. This checks whether the specification can support planning; it is not specification approval or final implementation review. No additional product decision or scope change was requested.
 
-**Current stage:** Stage 4 — specification and plan separately approved; subagent-driven implementation authorized by **plan confirmed, subagent driven confirmed**. No push, merge or later increment is authorized.
+**Current stage:** Stage 4 complete — implemented after separate scope/design,
+specification and plan approvals using the authorized subagent-driven method.
+Automated/native acceptance, the qualified live sequence, exact direct recovery,
+independent task reviews and the sole final sequential specification/quality gate
+are complete. Two Minor UI limitations and the live 499/CANCELLED qualification
+remain explicit in `docs/validation/companion-routing-on-off.md`. Work is committed
+locally on `feat/companion-routing-on-off`; stop before later increments, push or
+merge.

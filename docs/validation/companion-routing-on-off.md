@@ -3,12 +3,12 @@
 Created: 2026-11-12
 Updated: 2026-11-13
 
-Status: automated acceptance, qualified live observations and exact direct
-recovery are recorded. The first final specification review requested two
-additional native observations; the focused remediation below now records them.
-All synthetic fixtures are cleaned up, and the user's original Keyboard
-navigation setting is restored. The scoped specification follow-up and final
-quality review remain pending; increment completion is not yet claimed.
+Status: complete for the approved increment, with qualified live transport
+results and two accepted minor UI limitations. Automated/native acceptance,
+exact direct recovery and the final sequential specification/quality gate are
+complete. All synthetic fixtures are cleaned up and the original Keyboard
+navigation setting is restored. Work remains local; no push, merge or later
+increment has begun.
 
 Scope: the approved `companion-routing-on-off` increment. The approved
 [specification](../superpowers/specs/2026-11-12-companion-routing-on-off.md) and
@@ -83,7 +83,8 @@ interaction or live account acceptance is inferred.
 These commands ran in the order below on 2026-11-12. The current signed app was
 built before both final Node/package runs, so neither used the earlier artifact.
 Full outputs and actual command exits were inspected; the complete logs and
-command/exit/time manifest remain in the ignored task workspace during execution.
+command/exit/time manifest were retained in the ignored task workspace during
+execution and archived outside Git at closeout.
 
 | Command | Exit | Fresh observed result |
 | --- | --- | --- |
@@ -443,10 +444,38 @@ is intentionally not claimed. The temporary diagnostic runtime is no longer
 selected; private checkpoints, raw diagnostics and recovery evidence remain
 outside Git. No actual credentials were printed or committed.
 
-## Remaining verification and evidence limits
+## Final sequential review and dispositions — 2026-11-13
 
-- Final whole-branch sequential specification then quality review, including
-  disposition of remaining evidence limitations, is pending.
+The sole integrated final gate covered implementation base `3235363` through
+reviewed HEAD `c98f4e5`. The original specification verdict was MISSING for two
+native-evidence observations. One evidence-remediation wave and the permitted
+scoped specification follow-up resolved both findings with SPEC REVIEW: PASS.
+The quality stage then consumed the unchanged immutable package and the complete
+fresh PASS report; identities and the package digest matched at both stages.
+Its verdict was QUALITY REVIEW: PASS WITH MINOR FINDINGS, with zero Important
+findings and two Minor findings. No second fix wave or duplicate final reviewer
+was used. The original MISSING report, follow-up PASS, quality report, packages,
+command logs and ledger are preserved in an owner-only archive outside Git.
+
+| Item | Final disposition |
+| --- | --- |
+| Transient Uncertain and required keyboard reachability | Closed by the actual qualified native observations above and the scoped specification PASS. |
+| Q1: configuration selection can move the viewport from Setup into Projects | Accepted as a Minor limitation for this increment. The selected context remains correct; scroll back to inspect Setup. A focused correction remains provisional follow-up work. |
+| Q2: ordinary Tab focus can leave the visible viewport | Accepted as a Minor limitation. Page Up/Page Down is the observed keyboard-only way to reveal the focus outline; automatic reveal and VoiceOver behavior are unproven. A focused correction remains provisional. |
+| Task 3 retained-byte evidence | The read counter is explicitly qualified below. Production guards and ordering/overflow tests were reviewed; direct peak-retention measurement is not claimed. The evidence-overstatement concern is closed; additional instrumentation is optional. |
+| Early blocked-Quit expansion of Advanced | No separate quality finding. Error-driven panel expansion precedes the primary action; the separately targeted scroll/focus path and the human timing qualification remain distinct. |
+
+No product/test source changed after the applicable signed build and full
+acceptance run at `976b594`; fresh Git comparisons established that identity
+through the final reviewed commit. Later closeout changes affect only this
+report and the approved pair's lifecycle/checklists. Required recovery and
+native cleanup are complete, with no required human check pending. The local
+branch is `feat/companion-routing-on-off`; `main` remains at the implementation
+base. Account/default setup, assignment editing and all other deferred increments
+retain their own scope and approval stages. No push or merge is authorized or
+performed.
+
+## Evidence limits
 
 The earlier lost-set attempt missed the transient Uncertain label. Both texts
 were later observed during the focused remediation above. Native keyboard
@@ -465,8 +494,8 @@ and exact credential-selection evidence.
 
 The Task 3 blocked-output test counts reads rather than measuring actual retained
 input bytes. Its passing result must not be described as a direct retained-byte
-measurement; production retention guards have task review, with this test-evidence
-limitation reserved for final-review disposition. Synthetic routing and transport
+measurement; production retention guards have task and final quality review,
+with the qualification-based disposition recorded above. Synthetic routing and transport
 evidence does not establish gateway account/billing attribution or complete live
 stream delivery. No real private-state read, credential lookup, provider mutation,
 Codex restart or live model request was performed for Task 7.
