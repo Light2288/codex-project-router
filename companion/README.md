@@ -288,7 +288,17 @@ open "dist/Codex Project Router.app"
 CodexProjectRouter` and `swift build --package-path companion -c release
 --show-bin-path`, then assembles and ad-hoc signs the ignored local app. This is a
 local build, without distribution notarization or an installer. Move the entire
-app wherever convenient, including a path with spaces. It loads its router only
+app wherever convenient, including a path with spaces. The canonical local
+output is `dist/Codex Project Router.app`; open that copy after rebuilding.
+Quit an in-use copy through its normal guarded Quit flow before replacing its
+bundle. Closing controls alone leaves the companion running.
+
+Current macOS uses the compiled native icon catalog; an ICNS fallback is also
+bundled, with macOS 14.0 retained as the deployment minimum. Ordinary builds copy
+the committed icon resources. To change them, follow the
+[branding generation instructions](../assets/branding/README.md).
+
+The app loads its router only
 from `Contents/Resources/router`; no checkout location or selected Node path is
 embedded. The explicit resource allowlist contains the router ESM manifest and
 production source modules plus the installed pinned `smol-toml` manifest, `dist`
