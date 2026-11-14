@@ -5,9 +5,10 @@ Updated: 2026-11-14
 
 Status: automated verification, isolated native setup, the bounded live
 account/default observations and operational recovery below are complete.
-Task 8 task review, the sole final sequential specification/quality review and
-local closeout remain pending. Historical results do not establish this
-increment's acceptance.
+Task 8 task review is complete through `888ccd9`: specification compliant,
+quality Approved; intentional Security deprecations classified Minor. The sole
+final sequential specification/quality gate and local closeout remain pending.
+Historical results do not establish this increment's acceptance.
 
 Scope: the approved account/default setup increment, governed by its
 [specification](../superpowers/specs/2026-11-13-companion-account-default-setup.md)
@@ -118,7 +119,8 @@ claimed.
 | Missing/inaccessible selected item and upstream failure remain failures | Automated synthetic coverage; live unresolved STATE_UNAVAILABLE 503 and cancellation outcomes retained. No actual inaccessible-item or credit-failure observation is claimed |
 | Exact direct restoration, manual restart/response confirmation | Completed final Restore direct, manual restart, fresh working direct reply, actual direct-response button, guarded Stop and normal Quit. Original active-provider definition and owned normal router settings restored; unrelated settings preserved |
 | Native fixture cleanup | Owned disposable Keychain/root removed; default Keychain unchanged. Final recorded native/Node/logger processes absent and independent port check empty; context records settled and journal restored |
-| Task 8 task review; final sequential specification and quality review | Both pending; final gate has not started |
+| Task 8 task review | Complete through `888ccd9`: specification compliant, quality Approved; intentional Security deprecations Minor |
+| Sole final sequential specification/quality gate and local closeout | Pending; final quality stage has not been dispatched |
 
 On 2026-11-14, a distinct current keyboard check used the same signed app opened
 through LaunchServices while stopped/Direct, with original normal selection,
@@ -269,8 +271,8 @@ restore changed only owned selection/runtime/pending fields and their original
 optional-property presence. The final parsed journal equals its original; no
 provider or catalog write was used for that restoration. Raw final snapshots and
 full outcomes remain parent-private outside Git. No further live operation is
-needed for this evidence handoff. Task 8 task review, final sequential review and
-local closeout remain pending.
+needed for this evidence handoff. Task 8 task review is complete as recorded
+above; the sole final sequential gate and local closeout remain pending.
 
 Before that successful import, the native form presented an empty list with
 identical privately compared filter values. Standalone probes compiled for both the app's deployment target

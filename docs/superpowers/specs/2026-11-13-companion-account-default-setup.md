@@ -10,7 +10,7 @@
 
 **Updated:** 2026-11-14
 
-**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review, the sole final sequential specification/quality review and local closeout remain pending. Approved requirements/design are unchanged.
+**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review is complete through `888ccd9`: specification compliant, quality Approved; intentional Security deprecations classified Minor. The sole final sequential specification/quality gate and local closeout remain pending. Approved requirements/design are unchanged.
 
 **Storage:** Saved in the existing checkout; commit with the separately approved plan on the implementation branch.
 
@@ -182,4 +182,4 @@ Deferred work remains account editing/deletion, live assignment editing, hiding/
 
 **Execution endpoint:** Deliver only this account/default increment, complete verification/review and operational recovery, commit locally, report evidence and limitations, then stop before subsequent increments, push or merge.
 
-**Current stage: Stage 4 — implementation authorized.** The specification was approved by the message reproducing it; the separately presented implementation plan was subsequently approved with `plan approved`. The user then selected Subagent-driven execution. Both artifacts are saved; push and merge remain unauthorized.
+**Current stage: Stage 4 — implementation authorized.** The specification was approved by the message reproducing it; the separately presented implementation plan was subsequently approved with `plan approved`. The user then selected Subagent-driven execution. Both artifacts are saved; push and merge remain unauthorized. Task 8 task review is complete (specification compliant, quality Approved; intentional Security deprecations Minor). The sole final sequential gate and local closeout remain pending.

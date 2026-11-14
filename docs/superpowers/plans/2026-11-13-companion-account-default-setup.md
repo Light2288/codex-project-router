@@ -18,7 +18,7 @@
 
 **Updated:** 2026-11-14
 
-**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review, the sole final sequential specification/quality review and local closeout remain pending. Approved requirements/design are unchanged.
+**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review is complete through `888ccd9`: specification compliant, quality Approved; intentional Security deprecations classified Minor. The sole final sequential specification/quality gate and local closeout remain pending. Approved requirements/design are unchanged.
 
 **Execution tier:** full
 
@@ -285,4 +285,4 @@ No unresolved product clarification remains after the four native answers and sc
 
 **Execution endpoint:** Only this account/default setup increment, with verification/review, exact operational recovery, local commits and a truthful result/limitations report. Stop before subsequent increments, push or merge.
 
-**Current stage:** Stage 4 — implementation authorized. The user separately approved the specification through the message reproducing it, approved this separate plan with `plan approved`, and selected Subagent-driven execution through the native control. Both approved artifacts are saved. Execution follows the existing-checkout Git workflow; push and merge remain unauthorized.
+**Current stage:** Stage 4 — implementation authorized. The user separately approved the specification through the message reproducing it, approved this separate plan with `plan approved`, and selected Subagent-driven execution through the native control. Both approved artifacts are saved. Execution follows the existing-checkout Git workflow; push and merge remain unauthorized. Task 8 task review is complete (specification compliant, quality Approved; intentional Security deprecations Minor). The sole final sequential gate and local closeout remain pending.
