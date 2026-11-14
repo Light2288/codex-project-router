@@ -152,6 +152,25 @@ separate historical work.
 
 ## Final review
 
-The integrated specification-then-quality review is pending final acceptance.
-Review identity and results will be recorded after the gate. Both governing
-artifacts currently record Stage 4 and their separate approvals.
+The single integrated review passed in order:
+
+- **SPEC REVIEW: PASS** — AC-01–AC-08 met, scope preserved, and verification
+  limitations accurately labeled. No missing or extra work was found.
+- **QUALITY REVIEW: PASS** — no findings. Lifecycle, guarded termination,
+  policy retry/failure handling, tests, documentation, and verification isolation
+  were reviewed. No concrete quality/security/data-integrity/production-risk
+  defect was supported.
+
+Both reviewers recomputed and echoed the same identities. Quality also verified
+all 10 changed-file hashes and the complete increment diff. The package hash was
+checked unchanged afterward. Neither reviewer edited files or reran tests. No
+fix pass or deferred minor was needed.
+
+- `GATE_RUN_ID`: `76bad021-54f6-49a4-b6df-57640c6a6365`
+- `REVIEWED_STATE_ID`: `9eb46613-e016-4b17-a84e-cd064ff8ef6a`
+- `PACKAGE_SHA256`: `2b8f1d04eb7badadeddc9e566a3d240c17de1b751d4e93f8685ff2de177b9867`
+- Reviewed implementation/documentation commit: `5339140`.
+
+Subsequent changes only record this outcome and completed lifecycle/checklist
+metadata. The work is kept on the local implementation branch; no push, merge,
+or installation is part of this endpoint.

@@ -134,9 +134,9 @@ XCTAssertFalse(controller.quitRequested)
 
 - [x] **Write the concise validation record.** Include approval references, baseline/implementation commits, RED-to-GREEN proof, commands/exits/counts, rejected-policy diagnostic behavior, native matrix observations, unchanged configuration/listener evidence, signing/relocation, and limitations. Verify documentation link targets and inspect the focused documentation diff. Do not claim live gateway/billing or installed-app validation.
 
-- [ ] **Run the sole final integrated review.** Invoke `personal-workflows:code-review` exactly once: one immutable package with this approved spec/plan, the complete increment diff from the preserved branding baseline, observed evidence, relevant unchanged lifecycle context, unique identities/hash, and ledger rulings. Confirm both artifacts record Stage 4 and their separate approvals before package creation. Dispatch specification review first and quality review only after fresh specification PASS; the adapter owns routing and stop rules. Follow the enclosing native-execution fix-loop limit for findings and retain the package on a blocked review. Do not silently include resolution of the older branding review in this scope.
+- [x] **Run the sole final integrated review.** Invoke `personal-workflows:code-review` exactly once: one immutable package with this approved spec/plan, the complete increment diff from the preserved branding baseline, observed evidence, relevant unchanged lifecycle context, unique identities/hash, and ledger rulings. Confirm both artifacts record Stage 4 and their separate approvals before package creation. Dispatch specification review first and quality review only after fresh specification PASS; the adapter owns routing and stop rules. Follow the enclosing native-execution fix-loop limit for findings and retain the package on a blocked review. Do not silently include resolution of the older branding review in this scope.
 
-- [ ] **Commit and close out after the review outcome permits it.** Record final review results/identities, complete this increment's task checklist and current-stage metadata consistently, and locally commit documentation/evidence. Run `git diff --check` and inspect `git status --short --branch`; expected: no whitespace errors and a clean implementation branch. Preserve the branch and checkout without pushing, merging, installing, or opening the real companion. Report observed results/limits and stop.
+- [x] **Commit and close out after the review outcome permits it.** Record final review results/identities, complete this increment's task checklist and current-stage metadata consistently, and locally commit documentation/evidence. Run `git diff --check` and inspect `git status --short --branch`; expected: no whitespace errors and a clean implementation branch. Preserve the branch and checkout without pushing, merging, installing, or opening the real companion. Report observed results/limits and stop.
 
 ## Criterion coverage and self-review
 
@@ -162,6 +162,9 @@ observation; this is one coherent delivery increment.
 documentation, evidence, and permitted final-review resolutions; report the
 result and limits, then stop before installation, push/merge, or later work.
 
-**Current stage:** Stage 4 — implementation authorized by the second “approved,”
-following separate presentation and approval of the specification and this plan.
-Both artifacts are saved. Preserve their basenames and approved scope.
+**Current stage:** Stage 4 — implementation complete. Separate specification
+and plan approvals were recorded before product edits. Conditional Dock presence,
+verification, documentation, and the integrated specification/quality review are
+complete; see the [validation record](../../validation/companion-dock-presence.md).
+The approved endpoint is reached: keep local commits and the existing checkout,
+with no installation, push, merge, or later increment begun.

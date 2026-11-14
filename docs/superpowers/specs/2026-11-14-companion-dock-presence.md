@@ -115,7 +115,9 @@ Leave this artifact uncommitted until the implementation branch is established.
 its necessary integration, documentation, verification, and final review; report
 the result and limits, then stop before installation or any later increment.
 
-**Current stage:** Stage 4 — implementation authorized. The first “approved”
-followed the separately presented specification; the second “approved” followed
-the separately presented [implementation plan](../plans/2026-11-14-companion-dock-presence.md).
-Both approved artifacts are saved; their scope is unchanged.
+**Current stage:** Stage 4 — implementation complete. Separate specification
+and plan approvals were recorded before product edits. Conditional Dock presence,
+verification, documentation, and the integrated specification/quality review are
+complete; see the [validation record](../../validation/companion-dock-presence.md).
+The approved endpoint is reached: keep local commits and the existing checkout,
+with no installation, push, merge, or later increment begun.
