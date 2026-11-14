@@ -144,6 +144,27 @@ struct AccountSetupPresentation {
     }
 }
 
+struct AccountMetadataLookupPresentation {
+    enum State { case notStarted, inProgress, completed(Int), failed }
+    var state: State = .notStarted
+    var exactKeychain = false
+    var serviceFiltered = false
+    var accountFiltered = false
+    var message: String {
+        let outcome: String
+        switch state {
+        case .notStarted: return "No metadata lookup yet."
+        case .inProgress: outcome = "Metadata lookup started; waiting for the result."
+        case .completed(let count): outcome = "Metadata lookup completed: \(count) \(count == 1 ? "match" : "matches")."
+        case .failed: outcome = "Metadata lookup failed. Review the error below."
+        }
+        let keychain = exactKeychain ? "exact Keychain" : "user search list"
+        let service = serviceFiltered ? "service filter supplied" : "any service"
+        let account = accountFiltered ? "account filter supplied" : "any account"
+        return "\(outcome)\nScope: \(keychain); \(service); \(account)."
+    }
+}
+
 @MainActor struct AccountSetupView: View {
     let router: RouterController
     let setup: AccountSetupController
@@ -159,6 +180,7 @@ struct AccountSetupPresentation {
     @State private var accountFilter = ""
     @State private var keychainFilter = ""
     @State private var metadataBusy = false
+    @State private var metadataLookup = AccountMetadataLookupPresentation()
     @State private var metadataTarget = "incoming"
     private var display: AccountSetupPresentation {
         .init(state: setup.state, routerCanSave: router.canBeginAccountSetup, createdItem: setup.observedCreatedItem != nil || setup.pendingReceipt?.phase == .itemCreated || setup.pendingReceipt?.phase == .committing)
@@ -319,6 +341,9 @@ struct AccountSetupPresentation {
                 TextField("Account filter (optional)", text: $accountFilter)
                 TextField("Exact file-backed Keychain path (optional)", text: $keychainFilter)
                 Button("List matching item metadata") { listMetadata() }.disabled(metadataBusy)
+                Text(metadataLookup.message).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Entries supplied to Matching item: \(metadata.count)").font(.caption).foregroundStyle(.secondary)
                 if metadataBusy { ProgressView().controlSize(.small) }
                 Picker("Matching item", selection: $selectedMetadata) {
                     Text("Select an exact item…").tag(Optional<CredentialReference>.none)
@@ -367,10 +392,17 @@ struct AccountSetupPresentation {
     private func listMetadata() {
         metadataBusy = true; localError = nil; selectedMetadata = nil; metadata = []
         let service = serviceFilter.isEmpty ? nil : serviceFilter, account = accountFilter.isEmpty ? nil : accountFilter, path = keychainFilter.isEmpty ? nil : keychainFilter
+        metadataLookup = .init(state: .inProgress, exactKeychain: path != nil, serviceFiltered: service != nil, accountFiltered: account != nil)
         Task {
             defer { metadataBusy = false }
-            do { metadata = try await setup.listCredentials(service: service, account: account, keychainPath: path) }
-            catch { localError = safe(error) }
+            do {
+                let found = try await setup.listCredentials(service: service, account: account, keychainPath: path)
+                metadata = found
+                metadataLookup.state = .completed(found.count)
+            } catch {
+                metadataLookup.state = .failed
+                localError = safe(error)
+            }
         }
     }
     private func useMetadata(_ current: AccountSetupForm) {

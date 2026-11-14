@@ -74,6 +74,33 @@ import CompanionCore
         XCTAssertTrue(presentation.guidance.contains("Stop")); XCTAssertTrue(presentation.guidance.contains("recovery"))
         XCTAssertEqual(AccountSetupForm.bindingPreview(preview(), entries: [.init(id: "a", name: "Visible", routeAlias: nil, routeState: "unmapped")]), [])
     }
+    func testMetadataLookupDistinguishesNoLookupWaitingZeroMatchesAndFailure() {
+        var lookup = AccountMetadataLookupPresentation()
+        let initial = lookup.message
+        lookup.state = .inProgress
+        let waiting = lookup.message
+        lookup.state = .completed(0)
+        let empty = lookup.message
+        lookup.state = .failed
+        let failed = lookup.message
+        XCTAssertEqual(Set([initial, waiting, empty, failed]).count, 4)
+        XCTAssertTrue(initial.contains("No metadata lookup"))
+        XCTAssertTrue(waiting.contains("started"))
+        XCTAssertTrue(empty.contains("0 matches"))
+        XCTAssertTrue(failed.contains("failed"))
+    }
+    func testMetadataLookupReportsCompletedCountAndCapturedScope() {
+        var lookup = AccountMetadataLookupPresentation(state: .completed(1), exactKeychain: true, serviceFiltered: true, accountFiltered: false)
+        XCTAssertTrue(lookup.message.contains("1 match"))
+        XCTAssertTrue(lookup.message.contains("exact Keychain"))
+        XCTAssertTrue(lookup.message.contains("service filter supplied"))
+        XCTAssertTrue(lookup.message.contains("any account"))
+        lookup = .init(state: .completed(2), exactKeychain: false, serviceFiltered: false, accountFiltered: true)
+        XCTAssertTrue(lookup.message.contains("2 matches"))
+        XCTAssertTrue(lookup.message.contains("user search list"))
+        XCTAssertTrue(lookup.message.contains("any service"))
+        XCTAssertTrue(lookup.message.contains("account filter supplied"))
+    }
     func testCreatedButUnlinkedStateDoesNotOfferBlindRetry() {
         for state in [AccountSetupController.State.uncertain, .recoveryRequired] {
             let presentation = AccountSetupPresentation(state: state, routerCanSave: true, createdItem: true)
