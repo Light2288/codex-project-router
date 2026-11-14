@@ -148,6 +148,21 @@ defect. Earlier historical review records were not rewritten.
 
 ## Final review
 
-Implementation and acceptance are complete. The integrated sequential
-specification/quality review is pending; no final completion claim is made here
-until that review is recorded.
+The sole integrated review passed in order:
+
+- **SPEC REVIEW: PASS** — AC-01–AC-08 supported; no missing or extra work.
+- **QUALITY REVIEW: PASS** — no findings. Expected/current/spec-PASS identities
+  matched, the package was unchanged, and all 16 changed-file hashes matched.
+
+Both reviewers were read-only and did not rerun tests. No fix pass or deferred
+minor was needed. The image evidence and verification limits were reviewed.
+
+- `GATE_RUN_ID`: `96f2072d-2f95-4458-aaef-ca1329ae554c`
+- `REVIEWED_STATE_ID`: `26eee140-5d75-42da-be6f-a4924a1a4a53`
+- `PACKAGE_SHA256`: `0503cd2a0b03b201ed314ab41f493dd4e94584967b3ac943018aec4e7f3fbe74`
+- Reviewed implementation/documentation HEAD: `6f107c18ce7509c616d51cc18ab220ad7e54d352`
+
+Subsequent changes only record review outcomes and completed lifecycle/checklist
+metadata. The approved endpoint is reached: one verified canonical bundle,
+local commits, and the existing checkout preserved, without installation,
+push, merge, or another increment.

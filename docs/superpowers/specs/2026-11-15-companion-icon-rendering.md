@@ -131,7 +131,10 @@ one current canonical app bundle, necessary documentation and regression
 coverage, native visual verification, and final review; report the result and
 limitations, then stop before installation, push, merge, or another increment.
 
-**Current stage:** Stage 4 — implementation authorized. The user separately
-approved the presented specification, then the presented implementation plan
-with a subsequent “approved.” Both artifacts were saved before product edits.
-Implementation, verification, and final review are in progress.
+**Current stage:** Stage 4 — implementation complete. Separate specification
+and plan approvals were recorded before product edits. Native icon packaging,
+canonical bundle consolidation, verification, documentation, and sequential
+specification/quality review are complete; see the
+[validation record](../../validation/companion-icon-rendering.md). The approved
+endpoint is reached: local commits and the existing checkout remain, with no
+installation, push, merge, or later increment begun.
