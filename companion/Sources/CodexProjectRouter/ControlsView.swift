@@ -172,6 +172,11 @@ struct ControlsDisclosureState {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
+                Image("CompanionIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 36, height: 36)
+                    .accessibilityHidden(true)
                 Text("Codex Project Router").font(.title2.bold())
                 Spacer()
                 if controller.busy { ProgressView().controlSize(.small) }

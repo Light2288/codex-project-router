@@ -54,14 +54,14 @@
 
 **Interfaces:** Keep the existing `assembleCompanion({binaryPath, routerRoot, outputPath})` signature. Add no public API or configuration fields.
 
-- [ ] Extend package tests to require an app icon declaration, the exact branding resources, decodable image representations, preserved transparency, and resource availability after relocation. Update the synthetic builder fixture to provide its required branding inputs.
-- [ ] Run `npm run companion:package-test`. Confirm the new assertions fail because branding resources/declarations are absent; distinguish any unrelated environment failure.
-- [ ] Copy the supplied originals into the repository and record their source filenames and SHA-256 hashes.
-- [ ] Add reproducible native generation for `AppIcon.icns`, `CompanionIcon.png`, and `MenuBarIconTemplate.tiff`. Generate standard normal/Retina app representations. For the menu symbol, crop to its alpha bounds and fit it proportionally within a **26 × 18-point** canvas with balanced transparent margins and 1×/2× representations. Commit derived resources so ordinary builds need no artwork-generation step.
-- [ ] Extend assembly with an explicit resource list and declare the `.icns` in bundle metadata. Missing resources must produce a contextual build failure; package verification must reject undecodable resources.
-- [ ] Replace the SF Symbol with the bundled template image, retaining the accessible app name and existing menu actions. Add the navy image beside the controls title at 36 points, hidden from accessibility as decorative. Use ordinary bundle loading without absolute source paths.
-- [ ] Run `npm run companion:test`, `npm run companion:build`, and `npm run companion:package-test`. Expect zero failures and no package-test skips. Inspect light/dark size previews and the header layout; record observations separately from automated results.
-- [ ] Commit the branding integration.
+- [x] Extend package tests to require an app icon declaration, the exact branding resources, decodable image representations, preserved transparency, and resource availability after relocation. Update the synthetic builder fixture to provide its required branding inputs.
+- [x] Run `npm run companion:package-test`. Confirm the new assertions fail because branding resources/declarations are absent; distinguish any unrelated environment failure.
+- [x] Copy the supplied originals into the repository and record their source filenames and SHA-256 hashes.
+- [x] Add reproducible native generation for `AppIcon.icns`, `CompanionIcon.png`, and `MenuBarIconTemplate.tiff`. Generate standard normal/Retina app representations. For the menu symbol, crop to its alpha bounds and fit it proportionally within a **26 × 18-point** canvas with balanced transparent margins and 1×/2× representations. Commit derived resources so ordinary builds need no artwork-generation step.
+- [x] Extend assembly with an explicit resource list and declare the `.icns` in bundle metadata. Missing resources must produce a contextual build failure; package verification must reject undecodable resources.
+- [x] Replace the SF Symbol with the bundled template image, retaining the accessible app name and existing menu actions. Add the navy image beside the controls title at 36 points, hidden from accessibility as decorative. Use ordinary bundle loading without absolute source paths.
+- [x] Run `npm run companion:test`, `npm run companion:build`, and `npm run companion:package-test`. Expect zero failures and no package-test skips. Inspect light/dark size previews and the header layout; record observations separately from automated results.
+- [x] Commit the branding integration.
 
 ## Task 2: Restructure README and preserve operating guidance [size: M | risk: none | mechanical: false | clear_pattern: true | objectively_verifiable: false | concerns: none]
 

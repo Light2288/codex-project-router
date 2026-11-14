@@ -13,6 +13,8 @@ import { once } from 'node:events';
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
+const brandingNames = ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff'];
+const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
 const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
@@ -292,6 +294,10 @@ test('assembly copies the explicit production allowlist and rejects dependency d
   await assembleCompanion({binaryPath:binary,routerRoot:router,outputPath:output});
   const resources = join(output,'Contents/Resources/router');
   assert.deepEqual(await tree(resources), ['node_modules/smol-toml/LICENSE','node_modules/smol-toml/dist/index.js','node_modules/smol-toml/package.json','package.json',...sourceNames.map(n=>'src/'+n)].sort());
+  assert.deepEqual((await readdir(join(output,'Contents/Resources'))).sort(), ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff','router']);
+  assert.equal((await run('/usr/bin/swift',[brandingProbe,output],{timeout:30_000})).stdout,'branding-package-pass\n');
+  await writeFile(join(output,'Contents/Resources/CompanionIcon.png'),'invalid image');
+  await assert.rejects(run('/usr/bin/swift',[brandingProbe,output],{timeout:30_000}), /Cannot decode CompanionIcon.png/);
   assert.equal((await stat(join(output,'Contents/MacOS/CodexProjectRouter'))).mode & 0o111,0o111);
   assert.equal(JSON.parse(await readFile(join(resources,'package.json'))).type,'module');
   await writeFile(join(dep,'package.json'),JSON.stringify({name:'smol-toml',version:'9.9.9'}));
@@ -305,7 +311,8 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   await cp(builtApp,app,{recursive:true});
   const router = join(app,'Contents/Resources/router');
   const files = await tree(router);
-  assert.deepEqual(await tree(app), ['Contents/Info.plist','Contents/MacOS/CodexProjectRouter','Contents/_CodeSignature/CodeResources',...files.map(p=>'Contents/Resources/router/'+p)].sort());
+  assert.deepEqual(await tree(app), ['Contents/Info.plist','Contents/MacOS/CodexProjectRouter','Contents/_CodeSignature/CodeResources',...brandingNames.map(p=>'Contents/Resources/'+p),...files.map(p=>'Contents/Resources/router/'+p)].sort());
+  assert.equal((await run('/usr/bin/swift',[brandingProbe,app],{timeout:30_000})).stdout,'branding-package-pass\n');
   const executable = await readFile(join(app,'Contents/MacOS/CodexProjectRouter'));
   assert.equal(executable.includes(Buffer.from(root)),false,'release binary must not embed a checkout path');
   assert.equal(executable.includes(Buffer.from(process.execPath)),false,'release binary must not embed a selected Node path');
@@ -327,6 +334,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   await mkdir(join(buildRoot,'fixture bin'),{recursive:true});
   await cp(join(root,'scripts/build-companion.mjs'),join(buildRoot,'scripts/build-companion.mjs'));
   await cp(join(app,'Contents/Info.plist'),join(buildRoot,'companion/Resources/Info.plist'));
+  for (const name of brandingNames) await cp(join(app,'Contents/Resources',name),join(buildRoot,'companion/Resources',name));
   for (const name of ['package.json','src','node_modules']) await cp(join(router,name),join(buildRoot,name),{recursive:true});
   const commandLog=join(buildRoot,'swift-arguments.jsonl');
   const fixtureSwift=join(buildRoot,'fixture bin/swift');
@@ -340,6 +348,8 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     ['build','--package-path','companion','-c','release','--show-bin-path'],
   ]);
   await run('/usr/bin/codesign',['--verify','--deep','--strict',join(buildRoot,'dist/Codex Project Router.app')]);
+  await rm(join(buildRoot,'companion/Resources/MenuBarIconTemplate.tiff'));
+  await assert.rejects(run(node,[join(buildRoot,'scripts/build-companion.mjs')],{cwd:dir,env:{PATH:join(buildRoot,'fixture bin')+':/usr/bin:/bin',HOME:dir,TMPDIR:tmpdir()}}), /branding resource MenuBarIconTemplate.tiff/);
   const home=join(dir,'private codex'); await mkdir(home,{mode:0o700});
   const env={HOME:home,CFFIXED_USER_HOME:home,PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'};
   const cli=join(router,'src/companion-cli.js');
@@ -457,6 +467,11 @@ test('native relocated app and bundled controls work with checkout reads denied 
   await assert.rejects(confined(node,['--input-type=module','-e',`await import(${JSON.stringify(leakedSource)})`]),
     error => error.code === 1 && /ERR_MODULE_NOT_FOUND/.test(error.stderr));
   t.diagnostic('Seatbelt denied checkout package reads (lexical/resolved and symlink); Node source read returned EPERM and source import returned ERR_MODULE_NOT_FOUND.');
+
+  const confinedProbe = join(dir,'branding-probe.swift');
+  await cp(brandingProbe,confinedProbe);
+  assert.equal((await confined('/usr/bin/swift',[confinedProbe,app],{timeout:30_000})).stdout,'branding-package-pass\n');
+  t.diagnostic('Native image decoding and template resolution passed with checkout reads denied.');
 
   const port = await lifecycle.port(), upstream = await lifecycle.upstream();
   const id = '22222222-2222-4222-8222-222222222222';

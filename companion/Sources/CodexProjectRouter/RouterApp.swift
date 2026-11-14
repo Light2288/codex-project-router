@@ -5,11 +5,15 @@ import CompanionCore
 @main struct RouterApp: App {
     @NSApplicationDelegateAdaptor(RouterAppDelegate.self) private var delegate
     var body: some Scene {
-        MenuBarExtra("Codex Project Router", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra {
             Button("Open controls…") { delegate.openControls() }.keyboardShortcut("o")
             Button("Refresh") { Task { await delegate.controller.refresh() } }
             Divider()
             Button("Quit Codex Project Router") { delegate.requestQuit() }.keyboardShortcut("q")
+        } label: {
+            Image("MenuBarIconTemplate")
+                .renderingMode(.template)
+                .accessibilityLabel("Codex Project Router")
         }
     }
 }

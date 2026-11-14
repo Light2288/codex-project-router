@@ -35,6 +35,13 @@ export async function assembleCompanion({binaryPath,routerRoot,outputPath}) {
   await copyRegular(binaryPath,join(contents,'MacOS/CodexProjectRouter'));
   await chmod(join(contents,'MacOS/CodexProjectRouter'),0o755);
   await copyRegular(join(root,'companion/Resources/Info.plist'),join(contents,'Info.plist'));
+  for (const name of ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff']) {
+    try {
+      await copyRegular(join(root,'companion/Resources',name),join(contents,'Resources',name));
+    } catch (cause) {
+      throw new Error(`Cannot package branding resource ${name}. Check companion/Resources or regenerate icons.`, {cause});
+    }
+  }
   await writeFile(join(router,'package.json'),JSON.stringify({name:'codex-project-router',version:'0.1.0',private:true,type:'module',engines:{node:'>=24 <25'},dependencies:{'smol-toml':'1.9.1'}},null,2)+'\n');
   for (const name of sources) await copyRegular(join(routerRoot,'src',name),join(router,'src',name));
   const installed = join(router,'node_modules/smol-toml');
