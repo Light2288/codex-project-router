@@ -1,9 +1,13 @@
 # Companion Dock presence validation
 
-**Date:** 2026-11-14  
-**Specification:** [Approved scope](../superpowers/specs/2026-11-14-companion-dock-presence.md)  
-**Plan:** [Separately approved plan](../superpowers/plans/2026-11-14-companion-dock-presence.md)  
-**Branch:** `feat/companion-dock-presence`  
+**Date:** 2026-11-14
+
+**Specification:** [Approved scope](../superpowers/specs/2026-11-14-companion-dock-presence.md)
+
+**Plan:** [Separately approved plan](../superpowers/plans/2026-11-14-companion-dock-presence.md)
+
+**Branch:** `feat/companion-dock-presence`
+
 **Baseline:** `2c209656821a1017bf38f87880cce1c8bd600c69`
 
 The user confirmed the proposed behavior with “ok, implement this,” approved the
@@ -121,7 +125,10 @@ checks, relocated execution, checkout-read denial, and the native visible-window
 and regular-policy assertion. Its synthetic lifecycle, disposable Keychain,
 owned-child/process-group shutdown, and port-reuse checks passed. The existing
 Security API deprecation diagnostics remain; no new compiler warnings were
-introduced. Documentation checks passed 54 local link/image/anchor targets.
+introduced. Documentation checks passed 54 local link/image/anchor targets. A staging
+whitespace check caught Markdown hard-break spaces in this new record; they
+were normalized before reviewer dispatch, and the full increment diff was
+checked again.
 
 A separate uninstalled build is preserved as
 `dist/Codex Project Router Dock Preview.app`, leaving the existing running
