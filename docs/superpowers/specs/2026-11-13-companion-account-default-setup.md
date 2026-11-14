@@ -8,7 +8,9 @@
 
 **Created:** 2026-11-13
 
-**Updated:** 2026-11-13
+**Updated:** 2026-11-14
+
+**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review, the sole final sequential specification/quality review and local closeout remain pending. Approved requirements/design are unchanged.
 
 **Storage:** Saved in the existing checkout; commit with the separately approved plan on the implementation branch.
 
