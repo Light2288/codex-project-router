@@ -149,14 +149,15 @@ export function createProxy(
         }
         let authorization = req.headers.authorization,
           upstreamBaseUrl = config.upstreamBaseUrl;
-        if (config.credentialRouting) {
-          const globalCredential = await credentialReader(
-            config.credentialRouting.globalCredential,
+        const accounts = config.accountRouting;
+        if (accounts || config.credentialRouting) {
+          const incomingCredential = await credentialReader(
+            accounts ? accounts.incomingCredential : config.credentialRouting.globalCredential,
             { signal: controller.signal },
           );
           if (controller.signal.aborted || res.destroyed || completed) return;
           const callerToken = Buffer.from(authorization.slice(7)),
-            expectedToken = Buffer.from(globalCredential);
+            expectedToken = Buffer.from(incomingCredential);
           if (
             callerToken.length !== expectedToken.length ||
             !timingSafeEqual(callerToken, expectedToken)
@@ -173,8 +174,25 @@ export function createProxy(
               })
             : { source: "catalog" };
         if (controller.signal.aborted || res.destroyed || completed) return;
-        const selectOverride = config.credentialRouting &&
+        let selectOverride = Boolean(accounts || config.credentialRouting) &&
           resolution.routeAlias !== undefined && routingMode !== "off";
+        let selectedAccount;
+        if (accounts) {
+          let accountId = accounts.defaultAccountId;
+          if (selectOverride) {
+            if (!Object.hasOwn(accounts.routeAccounts, resolution.routeAlias))
+              throw new RouterError("CREDENTIAL_UNMAPPED");
+            const binding = accounts.routeAccounts[resolution.routeAlias];
+            // A null imported label deliberately inherits; absence is an error.
+            if (binding === null) selectOverride = false;
+            else accountId = binding;
+          }
+          if (!Object.hasOwn(accounts.accounts, accountId))
+            throw new RouterError("CREDENTIAL_UNMAPPED");
+          selectedAccount = accounts.accounts[accountId];
+          if (!selectedAccount?.credential || typeof selectedAccount.upstreamBaseUrl !== "string")
+            throw new RouterError("CREDENTIAL_UNMAPPED");
+        }
         if (routingMode !== undefined) {
           routeSelection = selectOverride ? "override" : "global";
           if (!selectOverride) {
@@ -182,7 +200,15 @@ export function createProxy(
             resolution = membership;
           }
         }
-        if (selectOverride) {
+        if (selectedAccount) {
+          upstreamBaseUrl = selectedAccount.upstreamBaseUrl;
+          // Verify the caller and retrieve the selected outgoing key separately,
+          // even when the roles share one Keychain reference.
+          const selectedCredential = await credentialReader(selectedAccount.credential,
+            { signal: controller.signal });
+          if (controller.signal.aborted || res.destroyed || completed) return;
+          authorization = `Bearer ${selectedCredential}`;
+        } else if (selectOverride) {
           const targets = config.credentialRouting.routeTargets;
           if (!Object.hasOwn(targets, resolution.routeAlias))
             throw new RouterError("CREDENTIAL_UNMAPPED");
@@ -201,7 +227,7 @@ export function createProxy(
         record("started");
         if (controller.signal.aborted || res.destroyed || completed) return;
         const headers = endToEnd(req.headers);
-        if (config.credentialRouting) headers.authorization = authorization;
+        if (accounts || config.credentialRouting) headers.authorization = authorization;
         headers.host = url.host;
         if (controller.signal.aborted || res.destroyed || completed) return;
         outgoing = https.request(

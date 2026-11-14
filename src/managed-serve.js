@@ -1,5 +1,5 @@
-import { realpath } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { realpath, lstat, open, unlink } from "node:fs/promises";
+import { isAbsolute, resolve, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadRouterConfig, UUID } from "./config.js";
 import { createProxy } from "./proxy.js";
@@ -25,6 +25,44 @@ function commandFrom(frame, sessionId) {
     (command.action === "set_mode" && !["on", "off"].includes(command.mode))
   ) throw new RouterError("CONFIG_INVALID");
   return command;
+}
+
+// Setup consent/commit and startup use the same exclusive lease. Hold it until
+// bind completes so a setup writer cannot trust an empty port during startup.
+export async function withRouterStartupLock(configPath, start) {
+  let actualPath;
+  try { actualPath = await realpath(configPath); }
+  catch { throw new RouterError("CONFIG_UNAVAILABLE"); }
+  const directory = dirname(actualPath), lockPath = join(directory, ".activation.lock");
+  let handle;
+  try {
+    const directoryInfo = await lstat(directory);
+    if (!directoryInfo.isDirectory() || directoryInfo.uid !== process.getuid() || directoryInfo.mode & 0o077)
+      throw new RouterError("STORAGE_FAILED");
+    handle = await open(lockPath, "wx", 0o600);
+  } catch (error) {
+    if (error instanceof RouterError) throw error;
+    throw new RouterError(error.code === "EEXIST" ? "ACTIVATION_CONFLICT" : "STORAGE_FAILED");
+  }
+  try {
+    const owned = await handle.stat();
+    await handle.writeFile(JSON.stringify({ pid: process.pid }));
+    try {
+      return await start(await loadRouterConfig(actualPath));
+    } finally {
+      let current;
+      try { current = await lstat(lockPath); }
+      catch { throw new RouterError("ACTIVATION_CONFLICT"); }
+      if (!current.isFile() || current.uid !== process.getuid() || current.mode & 0o077 ||
+        current.nlink !== 1 || current.dev !== owned.dev || current.ino !== owned.ino)
+        throw new RouterError("ACTIVATION_CONFLICT");
+      await unlink(lockPath);
+    }
+  } catch (error) {
+    throw error instanceof RouterError ? error : new RouterError("STORAGE_FAILED");
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function startManagedRouter({
@@ -150,15 +188,17 @@ export async function startManagedRouter({
     try { actualPath = await realpath(configPath); }
     catch { throw new RouterError("CONFIG_UNAVAILABLE"); }
     if (actualPath !== configPath) throw new RouterError("CONFIG_INVALID");
-    const config = await loadRouterConfig(actualPath);
-    server = createProxy(config, { diagnostics: managedDiagnostics, getProjectRoutingMode: () => mode });
-    await new Promise((resolveListen, reject) => {
-      const onError = () => reject(new RouterError("PROXY_NOT_READY"));
-      server.once("error", onError);
-      server.listen(config.listenPort, "127.0.0.1", () => {
-        server.removeListener("error", onError);
-        resolveListen();
+    const config = await withRouterStartupLock(actualPath, async config => {
+      server = createProxy(config, { diagnostics: managedDiagnostics, getProjectRoutingMode: () => mode });
+      await new Promise((resolveListen, reject) => {
+        const onError = () => reject(new RouterError("PROXY_NOT_READY"));
+        server.once("error", onError);
+        server.listen(config.listenPort, "127.0.0.1", () => {
+          server.removeListener("error", onError);
+          resolveListen();
+        });
       });
+      return config;
     });
     const shutdown = () => {
       closeControl();
@@ -182,6 +222,7 @@ export async function startManagedRouter({
     return { server, closeControl };
   } catch (error) {
     closeControl();
+    server?.closeAllConnections();
     server?.close();
     throw safeError(error);
   }

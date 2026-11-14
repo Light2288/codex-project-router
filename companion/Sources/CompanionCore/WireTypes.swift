@@ -10,10 +10,17 @@ public struct ActivationContext: Codable, Equatable {
         self.providerId = providerId; self.listenPort = listenPort
     }
 }
+public struct AccountSummary: Codable, Equatable {
+    public var id: String; public var displayName: String
+    public init(id: String, displayName: String) { self.id = id; self.displayName = displayName }
+}
 public struct Inspection: Codable, Equatable {
     public struct Configuration: Codable, Equatable {
         public var state: String; public var path: String?; public var mode: String?
-        public init(state: String, path: String? = nil, mode: String? = nil) { self.state = state; self.path = path; self.mode = mode }
+        public var setupState: String?; public var defaultAccount: AccountSummary?
+        public init(state: String, path: String? = nil, mode: String? = nil, setupState: String? = nil, defaultAccount: AccountSummary? = nil) {
+            self.state = state; self.path = path; self.mode = mode; self.setupState = setupState; self.defaultAccount = defaultAccount
+        }
     }
     public struct Provider: Codable, Equatable {
         public var state: String; public var recoveryRequired: Bool; public var proxyReady: Bool?; public var recordPhase: String
@@ -23,7 +30,10 @@ public struct Inspection: Codable, Equatable {
     }
     public struct Entry: Codable, Equatable {
         public var id: String; public var name: String; public var routeAlias: String?; public var routeState: String
-        public init(id: String, name: String, routeAlias: String?, routeState: String) { self.id = id; self.name = name; self.routeAlias = routeAlias; self.routeState = routeState }
+        public var account: AccountSummary?; public var assignmentKind: String?
+        public init(id: String, name: String, routeAlias: String?, routeState: String, account: AccountSummary? = nil, assignmentKind: String? = nil) {
+            self.id = id; self.name = name; self.routeAlias = routeAlias; self.routeState = routeState; self.account = account; self.assignmentKind = assignmentKind
+        }
     }
     public struct Catalog: Codable, Equatable {
         public var state: String; public var entries: [Entry]

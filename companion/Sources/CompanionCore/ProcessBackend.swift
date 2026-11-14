@@ -28,19 +28,80 @@ private final class BoundedCapture {
     }
     func discard() { lock.lock(); bytes.removeAll(keepingCapacity: false); lock.unlock() }
 }
+// The child can delay reading beyond the deadline. Keep delivery nonblocking and retained
+// through uncertainty; completion includes both full delivery and the final stdin close.
+private final class CommandInput {
+    private let queue = DispatchQueue(label: "companion.command-input")
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private var bytes: Data
+    private var offset = 0
+    private var writer: DispatchSourceWrite?
+    private var closing = false
+    private var ended = false, failed = false
+    init(handle: FileHandle, bytes: Data) { self.handle = handle; self.bytes = bytes }
+    var snapshot: (ended: Bool, failed: Bool) {
+        lock.lock(); defer { lock.unlock() }; return (ended, failed)
+    }
+    func start() {
+        queue.async { [self] in
+            let flags = fcntl(handle.fileDescriptor, F_GETFL)
+            guard flags >= 0, fcntl(handle.fileDescriptor, F_SETFL, flags | O_NONBLOCK) == 0,
+                  fcntl(handle.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { finish(failed: true); return }
+            guard !bytes.isEmpty else { finish(failed: false); return }
+            let source = DispatchSource.makeWriteSource(fileDescriptor: handle.fileDescriptor, queue: queue)
+            source.setEventHandler { [weak self] in self?.writeAvailable() }
+            writer = source; source.resume()
+        }
+    }
+    private func writeAvailable() {
+        guard !closing else { return }
+        // Bound work per event as well as retained input; every write is nonblocking.
+        for _ in 0..<4 {
+            let count = bytes.withUnsafeBytes { buffer in
+                Darwin.write(handle.fileDescriptor, buffer.baseAddress!.advanced(by: offset), min(4096, buffer.count - offset))
+            }
+            if count > 0 {
+                offset += count
+                if offset == bytes.count { finish(failed: false); return }
+            } else if count < 0 && errno == EINTR { continue }
+            else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { return }
+            else { finish(failed: true); return }
+        }
+    }
+    private func finish(failed: Bool) {
+        guard !closing else { return }
+        closing = true; bytes.removeAll(keepingCapacity: false)
+        if let writer {
+            writer.setCancelHandler { [self] in closeInput(failed: failed) }
+            writer.cancel(); self.writer = nil
+        } else { closeInput(failed: failed) }
+    }
+    private func closeInput(failed: Bool) {
+        var failed = failed
+        do { try handle.close() } catch { failed = true }
+        lock.lock(); self.failed = failed; ended = true; lock.unlock()
+    }
+}
 private final class RunningCommand {
     let process: Process
-    var inputFailed = false
+    private let input: CommandInput
+    var inputFailed: Bool { input.snapshot.failed }
     let stdout = BoundedCapture(limit: 1024 * 1024)
     let stderr = BoundedCapture(limit: 16 * 1024)
-    init(process: Process) { self.process = process }
-    var drained: Bool { stdout.snapshot.eof && stderr.snapshot.eof }
+    init(process: Process, input: FileHandle, bytes: Data?) {
+        self.process = process; self.input = CommandInput(handle: input, bytes: bytes ?? Data())
+    }
+    func startInput() { input.start() }
+    var drained: Bool { input.snapshot.ended && stdout.snapshot.eof && stderr.snapshot.eof }
     var overflow: Bool { stdout.snapshot.overflow || stderr.snapshot.overflow }
     func discard() { stdout.discard(); stderr.discard() }
 }
 
-@MainActor public final class ProcessBackend: CompanionBackend {
+@MainActor public final class ProcessBackend: CompanionBackend, AccountSetupBackend {
     public var mutationRequiresReconciliation: Bool { mutationInFlight || needsReconciliation }
+    public private(set) var uncertainSetupOperationID: String?
+    public var setupHelperIsRunning: Bool { uncertainSetupOperationID != nil && mutationInFlight }
     public var onChildExit: ((UUID, Int32) -> Void)?
     private let resourcesURL: URL
     private var nodeExecutable: URL?
@@ -115,9 +176,9 @@ private final class RunningCommand {
     }
     private func inspect(configPath: URL?, browseHome: URL, deadline: Date) async throws -> Inspection {
         // Only a request begun after the uncertain child exits can reconcile that generation.
-        let reconciliationGeneration = needsReconciliation && !mutationInFlight ? mutationGeneration : nil
+        let reconciliationGeneration = needsReconciliation && !mutationInFlight && uncertainSetupOperationID == nil ? mutationGeneration : nil
         var request: [String: Any] = ["schemaVersion": 1, "action": "inspect", "configPath": configPath?.path as Any? ?? NSNull()]
-        if configPath == nil { request["browseHome"] = browseHome.path }
+        request["browseHome"] = browseHome.path
         let result: Inspection = try await requestResult(request, mutating: false, deadline: deadline)
         guard valid(result) else { throw CompanionError.protocolFailure }
         if let reconciliationGeneration, reconciliationGeneration == mutationGeneration,
@@ -128,6 +189,11 @@ private final class RunningCommand {
         return result
     }
     public func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult {
+        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
+        if action == .activate {
+            let inspection = try await inspect(configPath: configPath, browseHome: URL(fileURLWithPath: expectedContext.codexHome))
+            guard inspection.context == expectedContext, inspection.configuration.setupState == "ready" else { throw CompanionError.mutationBusy }
+        }
         guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
         mutationInFlight = true
         mutationGeneration = UUID()
@@ -148,6 +214,58 @@ private final class RunningCommand {
             throw error
         }
     }
+    public func previewSetup(configPath: URL, browseHome: URL) async throws -> SetupPreview {
+        let result: SetupPreview = try await requestResult(["schemaVersion": 1, "action": "setup_preview", "configPath": configPath.path, "browseHome": browseHome.path], mutating: false)
+        guard valid(result), result.context.configPath == configPath.path else { throw CompanionError.protocolFailure }
+        return result
+    }
+    public func commitSetup(_ change: SetupChange, context: ActivationContext, revision: String, operationID: String) async throws -> SetupCommitResult {
+        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
+        guard UUID(uuidString: operationID) != nil, validRevision(revision) else { throw CompanionError.protocolFailure }
+        let encodedContext = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
+        let encodedChange = try JSONSerialization.jsonObject(with: JSONEncoder().encode(change))
+        mutationInFlight = true; mutationGeneration = UUID(); uncertainSetupOperationID = operationID
+        defer { if mutationProcess == nil { mutationInFlight = false } }
+        do {
+            let result: SetupCommitResult = try await requestResult(["schemaVersion": 1, "action": "setup_commit", "configPath": context.configPath,
+                "expectedContext": encodedContext, "expectedRevision": revision, "operationId": operationID, "change": encodedChange], mutating: true)
+            guard result.context == context, result.operationId == operationID, ["ready", "required"].contains(result.setupState),
+                  validRevision(result.configurationRevision), result.changed,
+                  result.checkpointPath == nil || result.checkpointPath!.hasPrefix("/") else { needsReconciliation = true; throw CompanionError.mutationUncertain }
+            uncertainSetupOperationID = nil
+            return result
+        } catch {
+            if needsReconciliation { throw CompanionError.mutationUncertain }
+            uncertainSetupOperationID = nil; throw error
+        }
+    }
+    public func probeSetupPort(_ context: ActivationContext) async -> StopOutcome.PortState { await probe(port: context.listenPort) }
+    public func finishSetupReconciliation(operationID: String) throws {
+        guard uncertainSetupOperationID == operationID, !mutationInFlight, mutationProcess == nil, needsReconciliation else { throw CompanionError.mutationBusy }
+        uncertainSetupOperationID = nil; needsReconciliation = false
+    }
+    private func validRevision(_ value: String) -> Bool { value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil }
+    private func valid(_ value: SetupPreview) -> Bool {
+        func account(_ a: SetupPreview.Account) -> Bool {
+            UUID(uuidString: a.id) != nil && !a.displayName.isEmpty && a.displayName.unicodeScalars.count <= 80 &&
+                a.displayName == a.displayName.trimmingCharacters(in: .whitespacesAndNewlines) &&
+                !a.displayName.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } &&
+                (try? AccountRecord.normalizedUpstreamBaseURL(a.upstreamBaseUrl)) == a.upstreamBaseUrl &&
+                (a.credential == nil || a.credential!.isValid)
+        }
+        return validContext(value.context) && validRevision(value.configurationRevision) &&
+            ["ready", "required", "migration_required"].contains(value.setupState) && ["missing", "legacy", "enabled", "accounts"].contains(value.sourceKind) &&
+            value.accounts.allSatisfy(account) && account(value.originalDirect) && Set(value.accounts.map(\.id)).count == value.accounts.count &&
+            (value.incomingCredential == nil || value.incomingCredential!.isValid) &&
+            (value.defaultAccountId == nil || value.accounts.contains { $0.id == value.defaultAccountId }) &&
+            value.routeAccounts.values.allSatisfy { $0 == nil || UUID(uuidString: $0!) != nil } &&
+            (value.incomingHint == nil || (!value.incomingHint!.service.isEmpty && !value.incomingHint!.account.isEmpty &&
+                (value.incomingHint!.keychainPath == nil || value.incomingHint!.keychainPath!.hasPrefix("/"))))
+    }
+    private func validContext(_ context: ActivationContext) -> Bool {
+        [context.configPath, context.codexHome].allSatisfy { $0.hasPrefix("/") && !$0.contains("\0") } && (1...65535).contains(context.listenPort) &&
+            context.providerId.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil
+    }
     private func resource(_ name: String) throws -> URL {
         let path = resourcesURL.appendingPathComponent("src/\(name)")
         var isDirectory: ObjCBool = false
@@ -161,7 +279,8 @@ private final class RunningCommand {
         let executable = try await runtime(deadline: deadline)
         let input: Data
         do { input = try JSONSerialization.data(withJSONObject: request) } catch { throw CompanionError.protocolFailure }
-        guard input.count <= 16 * 1024 else { throw CompanionError.protocolFailure }
+        let inputLimit = (request["action"] as? String)?.hasPrefix("setup_") == true ? 1024 * 1024 : 16 * 1024
+        guard input.count <= inputLimit else { throw CompanionError.protocolFailure }
         try requireTime(before: deadline)
         let command = try launch(executable: executable, arguments: ["--use-system-ca", script.path], input: input)
         if mutating { mutationProcess = command }
@@ -181,7 +300,7 @@ private final class RunningCommand {
         process.environment = childEnvironment
         let stdout = Pipe(), stderr = Pipe(), stdin = Pipe()
         process.standardOutput = stdout; process.standardError = stderr; process.standardInput = stdin
-        let command = RunningCommand(process: process)
+        let command = RunningCommand(process: process, input: stdin.fileHandleForWriting, bytes: input)
         command.stdout.attach(stdout.fileHandleForReading); command.stderr.attach(stderr.fileHandleForReading)
         do { try process.run() }
         catch {
@@ -189,13 +308,7 @@ private final class RunningCommand {
             stderr.fileHandleForReading.readabilityHandler = nil
             throw CompanionError.commandFailed
         }
-        do {
-            if let input { try stdin.fileHandleForWriting.write(contentsOf: input) }
-            try stdin.fileHandleForWriting.close()
-        } catch {
-            // Even failed stdin delivery can follow a partial provider write. The caller retains it.
-            command.inputFailed = true
-        }
+        command.startInput()
         return command
     }
     private var childEnvironment: [String: String] {
@@ -269,7 +382,7 @@ private final class RunningCommand {
     }
     public func start(configPath: URL) async throws -> OwnedRouter {
         let before = try await inspect(configPath: configPath, browseHome: configPath.deletingLastPathComponent())
-        guard let context = before.context, before.configuration.state == "valid", !owned.values.contains(where: { $0.child.context == context && $0.child.process.isRunning }) else { throw CompanionError.startupFailed }
+        guard let context = before.context, before.configuration.state == "valid", before.configuration.setupState == "ready", !owned.values.contains(where: { $0.child.context == context && $0.child.process.isRunning }) else { throw CompanionError.startupFailed }
         let script = try resource("managed-serve.js")
         let executable = try await runtime(deadline: Date().addingTimeInterval(5))
         let child = try launchManaged(executable: executable, script: script, context: context)
@@ -326,13 +439,22 @@ private final class RunningCommand {
         }
     }
 
+    private func validSummary(_ value: AccountSummary?) -> Bool {
+        guard let value else { return true }
+        return UUID(uuidString: value.id) != nil && !value.displayName.isEmpty && value.displayName.unicodeScalars.count <= 80 &&
+            value.displayName == value.displayName.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            !value.displayName.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
     private func valid(_ inspection: Inspection) -> Bool {
         guard ["missing", "valid", "invalid", "unavailable"].contains(inspection.configuration.state),
-              inspection.configuration.mode == nil || ["legacy", "credential"].contains(inspection.configuration.mode!),
+              inspection.configuration.mode == nil || ["legacy", "credential", "accounts"].contains(inspection.configuration.mode!),
               ["direct", "router", "conflict", "unavailable"].contains(inspection.provider.state),
               ["none", "prepared", "active", "restored", "unavailable"].contains(inspection.provider.recordPhase),
               ["ready", "unavailable"].contains(inspection.catalog.state),
-              inspection.catalog.entries.allSatisfy({ ["mapped", "unmapped", "target_missing", "catalog_missing"].contains($0.routeState) }) else { return false }
+              inspection.catalog.entries.allSatisfy({ ["mapped", "unmapped", "target_missing", "catalog_missing"].contains($0.routeState) &&
+                  ($0.assignmentKind == nil || ["override", "inherited", "legacy_inherited", "target_missing"].contains($0.assignmentKind!)) && validSummary($0.account) }),
+              inspection.configuration.setupState == nil || ["ready", "required", "migration_required", "invalid"].contains(inspection.configuration.setupState!),
+              validSummary(inspection.configuration.defaultAccount) else { return false }
         if let context = inspection.context {
             guard context.configPath.hasPrefix("/"), context.codexHome.hasPrefix("/"), (1...65535).contains(context.listenPort),
                   context.providerId.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else { return false }

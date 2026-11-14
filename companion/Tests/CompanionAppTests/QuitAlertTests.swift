@@ -555,7 +555,7 @@ private final class QuitSyntheticProcess: Process, @unchecked Sendable {
     private(set) var stopCount = 0
     private(set) var controls: [ControlAction] = []
     init(context: ActivationContext) {
-        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "legacy"),
+        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"),
             context: context, revision: "SYNTHETIC_PRIVATE_SENTINEL",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "none"),
             catalog: .init(state: "ready", entries: []))

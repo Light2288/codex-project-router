@@ -246,7 +246,7 @@ private final class GuidanceSyntheticProcess: Process, @unchecked Sendable {
     var startBarrier: GuidanceStartBarrier?
     private(set) var counts = ["inspect": 0, "control": 0, "start": 0, "stop": 0]
     init(context: ActivationContext) {
-        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "legacy"),
+        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"),
             context: context, revision: "SYNTHETIC_PRIVATE_SENTINEL",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "restored"),
             catalog: .init(state: "ready", entries: []))

@@ -1574,7 +1574,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     var child: OwnedRouter?
     var stopOutcome = StopOutcome(childExited: true, portState: .empty)
     init(context: ActivationContext) {
-        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "legacy"), context: context, revision: "direct-1",
+        snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"), context: context, revision: "direct-1",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "none"), catalog: .init(state: "ready", entries: []))
     }
     func inspect(configPath: URL?, browseHome: URL) async throws -> Inspection {

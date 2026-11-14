@@ -4,9 +4,10 @@ import { writeFile, unlink, mkdir, copyFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import * as configuration from "../src/config.js";
 import { loadRouterConfig, configFingerprint } from "../src/config.js";
 import { identifyProject } from "../src/identity.js";
-import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata } from "./helpers/fixtures.js";
+import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, duplicateIdentityMetadata, accountRouting, A1, A2 } from "./helpers/fixtures.js";
 import { DatabaseSync } from "node:sqlite";
 
 const credentialReference = () => ({
@@ -319,7 +320,7 @@ for (const [field, value] of [
   ["upstreamBaseUrl", "http://example.invalid"],
   ["upstreamBaseUrl", "https://secret@example.invalid"],
   ["listenPort", 0],
-  ["schemaVersion", 2],
+  ["schemaVersion", 3],
   ["projectRoutes", { [P1]: "alias\nINJECT" }],
 ]) {
   test(`rejects unsafe configuration ${field} ${JSON.stringify(value)}`, async (t) => {
@@ -534,4 +535,127 @@ test("managed inheritance uses own mappings and preserves bounded state lookup",
   await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false}), {code: "STATE_UNAVAILABLE"});
   assert.ok(Date.now() - start < 1800);
   await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false, signal: AbortSignal.abort()}), {code: "CANCELLED"});
+});
+
+
+test("account schema separates incoming default and direct identities", async t => {
+  const f = await fixture(t);
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  await f.saveConfig();
+  const cfg = await loadRouterConfig(f.configPath);
+  assert.equal(cfg.upstreamBaseUrl, "https://gateway.example.invalid/api/v1");
+  assert.equal(cfg.accountRouting.accounts[A1].upstreamBaseUrl, "https://default.example.invalid/api/region/v1");
+  assert.equal(cfg.accountRouting.accounts[A2].upstreamBaseUrl, "https://project.example.invalid/full/prefix/v1");
+  assert.notDeepEqual(cfg.accountRouting.incomingCredential, cfg.accountRouting.accounts[A1].credential);
+  assert.equal(Object.hasOwn(cfg, "credentialRouting"), false);
+  for (const value of [cfg, cfg.accountRouting, cfg.accountRouting.incomingCredential,
+    cfg.accountRouting.accounts, cfg.accountRouting.accounts[A1], cfg.accountRouting.accounts[A1].credential, cfg.accountRouting.routeAccounts])
+    assert.ok(Object.isFrozen(value));
+  const inspection = await configuration.inspectRouterConfiguration(f.configPath);
+  assert.equal(inspection.setupState, "ready");
+  assert.match(inspection.configurationRevision, /^[a-f0-9]{64}$/);
+  await writeFile(f.configPath, JSON.stringify(f.config, null, 2));
+  assert.notEqual((await configuration.inspectRouterConfiguration(f.configPath)).configurationRevision, inspection.configurationRevision);
+  f.config.accountRouting.accounts[A1].displayName = "😀".repeat(80);
+  await f.saveConfig();
+  assert.equal((await loadRouterConfig(f.configPath)).accountRouting.accounts[A1].displayName, "😀".repeat(80));
+  const recovery = await configuration.loadRecoveryConfig(f.configPath);
+  assert.equal(Object.hasOwn(recovery, "accountRouting"), false);
+  assert.equal(Object.hasOwn(recovery, "credentialRouting"), false);
+  assert.equal(recovery.upstreamBaseUrl, cfg.upstreamBaseUrl);
+});
+
+test("legacy inheritance differs from missing override", async t => {
+  const f = await fixture(t);
+  assert.equal((await configuration.inspectRouterConfiguration(f.configPath)).setupState, "migration_required");
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  f.config.accountRouting.routeAccounts = { "route-a": null, constructor: A1, toString: A2 };
+  await f.saveConfig();
+  const cfg = await loadRouterConfig(f.configPath);
+  assert.equal(cfg.accountRouting.routeAccounts["route-a"], null);
+  assert.equal(Object.hasOwn(cfg.accountRouting.routeAccounts, "route-b"), false);
+  assert.equal(Object.hasOwn(cfg.accountRouting.routeAccounts, "constructor"), true);
+  assert.equal(cfg.accountRouting.routeAccounts.constructor, A1);
+  for (const patch of [{ incomingCredential: null }, { defaultAccountId: null }, { accounts: {}, defaultAccountId: null, routeAccounts: {} }]) {
+    f.config.accountRouting = { ...accountRouting(), ...patch };
+    await f.saveConfig();
+    assert.equal((await configuration.inspectRouterConfiguration(f.configPath)).setupState, "required");
+    await assert.rejects(loadRouterConfig(f.configPath), { code: "ACCOUNT_SETUP_REQUIRED" });
+  }
+});
+
+test("account validation rejects malformed metadata without leaking values", async t => {
+  const f = await fixture(t);
+  f.config.schemaVersion = 2;
+  const mutations = [
+    () => null, () => ({}),
+    r => { delete r.incomingCredential; return r; },
+    r => { delete r.defaultAccountId; return r; },
+    r => ({ ...r, credentialRouting: {} }),
+    r => ({ ...r, incomingCredential: { ...r.incomingCredential, extra: "SECRET_SENTINEL" } }),
+    r => ({ ...r, incomingCredential: { ...r.incomingCredential, keychainPath: "relative" } }),
+    r => ({ ...r, incomingCredential: { ...r.incomingCredential, service: "SECRET_SENTINEL\n" } }),
+    r => ({ ...r, defaultAccountId: A1.toUpperCase() }),
+    r => ({ ...r, defaultAccountId: "ffffffff-ffff-4fff-8fff-ffffffffffff" }),
+    r => ({ ...r, accounts: { ...r.accounts, [A1.toUpperCase()]: r.accounts[A1] } }),
+    r => ({ ...r, accounts: { ...r.accounts, invalid: r.accounts[A1] } }),
+    r => ({ ...r, routeAccounts: { "route-a": "ffffffff-ffff-4fff-8fff-ffffffffffff" } }),
+    r => ({ ...r, routeAccounts: { "route-a": false } }),
+    r => ({ ...r, routeAccounts: { "invalid.alias": null } }),
+    ...["", "  ", " untrimmed", "untrimmed ", "a".repeat(81), "SECRET_SENTINEL\n", "\u0085"].map(displayName => r => {
+      r.accounts[A1].displayName = displayName; return r;
+    }),
+    r => { r.accounts[A2].displayName = "DEFAULT ACCOUNT"; return r; },
+    r => { r.accounts[A1].extra = "SECRET_SENTINEL"; return r; },
+    r => { r.accounts[A1].credential = null; return r; },
+    r => { r.accounts[A1].upstreamBaseUrl = "https://user:SECRET_SENTINEL@invalid.example/v1"; return r; },
+    r => { r.accounts[A1].upstreamBaseUrl = "https://invalid.example/v1?SECRET_SENTINEL"; return r; },
+  ];
+  for (const [index, mutate] of mutations.entries()) await t.test(`invalid account metadata ${index}`, async () => {
+    f.config.accountRouting = mutate(accountRouting());
+    await f.saveConfig();
+    const inspection = await configuration.inspectRouterConfiguration(f.configPath);
+    assert.equal(inspection.setupState, "invalid");
+    assert.equal(inspection.configurationRevision, null);
+    assert.equal(Object.hasOwn(inspection.config, "accountRouting"), false);
+    await assert.rejects(loadRouterConfig(f.configPath), e => e.code === "ACCOUNT_SETUP_INVALID" && !e.message.includes("SENTINEL"));
+    assert.equal((await configuration.loadRecoveryConfig(f.configPath)).providerId, "test_gateway");
+  });
+  f.config.accountRouting = accountRouting();
+  for (const invalid of [{ ...f.config, schemaVersion: 99 }, { ...f.config, extra: "SECRET_SENTINEL" }, { ...f.config, credentialRouting: credentialRouting() }]) {
+    await writeFile(f.configPath, JSON.stringify(invalid));
+    await assert.rejects(configuration.loadRecoveryConfig(f.configPath), { code: "CONFIG_INVALID" });
+  }
+  await writeFile(f.configPath, "{SECRET_SENTINEL");
+  await assert.rejects(configuration.loadRecoveryConfig(f.configPath), { code: "CONFIG_UNAVAILABLE" });
+});
+
+test("account fingerprints preserve historical compatibility", async t => {
+  const f = await fixture(t);
+  assert.equal(configFingerprint({ ...f.config, codexHome: "/Users/example/.codex" }), "e9cc34013d43cefc6db257f4cc9b78301221267c20638afa165e9caa574111fc");
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  await f.saveConfig();
+  const cfg = await loadRouterConfig(f.configPath), fingerprint = configFingerprint(cfg);
+  const reordered = structuredClone(f.config);
+  reordered.accountRouting.accounts = Object.fromEntries(Object.entries(reordered.accountRouting.accounts).reverse());
+  reordered.accountRouting.routeAccounts = Object.fromEntries(Object.entries(reordered.accountRouting.routeAccounts).reverse());
+  reordered.accountRouting.accounts[A1].upstreamBaseUrl = "https://DEFAULT.example.invalid:443/api/./region/v1/";
+  await writeFile(f.configPath, JSON.stringify(reordered));
+  assert.equal(configFingerprint(await loadRouterConfig(f.configPath)), fingerprint);
+  for (const change of [
+    r => { r.defaultAccountId = A2; },
+    r => { r.incomingCredential.service += "changed"; },
+    r => { r.accounts[A1].displayName += " changed"; },
+    r => { r.accounts[A1].credential.account += "changed"; },
+    r => { r.accounts[A1].upstreamBaseUrl += "/changed"; },
+    r => { r.routeAccounts["route-a"] = A1; },
+    r => { delete r.routeAccounts["route-b"]; },
+  ]) {
+    const changed = structuredClone(cfg); change(changed.accountRouting);
+    assert.notEqual(configFingerprint(changed), fingerprint);
+  }
+  assert.notEqual(configuration.operationalFingerprint(await configuration.loadRecoveryConfig(f.configPath)), fingerprint);
 });

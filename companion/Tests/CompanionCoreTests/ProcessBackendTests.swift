@@ -30,6 +30,127 @@ import Darwin
         if let data = try? String(contentsOf: resources.appendingPathComponent("src/pid")), let pid = Int32(data), kill(pid, 0) == 0 { kill(pid, SIGKILL) }
         try FileManager.default.removeItem(at: root)
     }
+    private func largeSetupChange(_ preview: SetupPreview) -> SetupChange {
+        .migrate(accounts: (0..<1000).map { AccountRecord(id: UUID().uuidString, displayName: "Synthetic \($0)", upstreamBaseUrl: "https://example.invalid/api", credential: preview.incomingCredential!) }, incomingCredential: preview.incomingCredential, defaultAccountId: preview.defaultAccountId)
+    }
+    func testLargeSetupInputLeavesMainActorResponsiveWhileHelperDelaysReading() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview)
+        let encoded = try JSONEncoder().encode(change)
+        XCTAssertGreaterThan(encoded.count, 65_536); XCTAssertLessThan(encoded.count, 1024 * 1024)
+        try setMode("stdinDelayed")
+        let started = Date()
+        let request = Task { try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: UUID().uuidString) }
+        try await waitForFixture("stdin-paused")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1, "Stdin delivery blocked MainActor before its first UI heartbeat")
+        let result = try await request.value
+        XCTAssertTrue(result.changed)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        let delivered = try Data(contentsOf: resources.appendingPathComponent("src/setup-request"))
+        XCTAssertGreaterThan(delivered.count, 65_536)
+    }
+    func testLargeSetupInputTimeoutRetainsWritingHelperUntilNaturalExit() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        try setMode("stdinTimeout")
+        let started = Date()
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Stalled reader accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5.8)
+        let pid = try fixturePID()
+        XCTAssertEqual(kill(pid, 0), 0); XCTAssertTrue(backend.setupHelperIsRunning)
+        XCTAssertThrowsError(try backend.finishSetupReconciliation(operationID: op))
+        try await waitForExit(pid)
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+        XCTAssertEqual(backend.uncertainSetupOperationID, op)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+    }
+    func testLargeSetupInputCancellationRetainsDeliveryWithoutRetry() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        try setMode("stdinCancelled")
+        let started = Date()
+        let request = Task { try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op) }
+        try await waitForFixture("stdin-paused")
+        let pid = try fixturePID()
+        request.cancel()
+        do { _ = try await request.value; XCTFail("Cancelled input accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+        XCTAssertEqual(kill(pid, 0), 0); XCTAssertTrue(backend.setupHelperIsRunning)
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: UUID().uuidString); XCTFail("Cancelled input retried") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
+        try releaseFixture("release-stdin"); try await waitForExit(pid)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+    }
+    func testEarlyStdinClosureRejectsPlausibleSuccessAfterIncompleteDelivery() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), change = largeSetupChange(preview), op = UUID().uuidString
+        let response = SetupCommitResult(context: preview.context, operationId: op, setupState: "ready", configurationRevision: String(repeating: "b", count: 64), checkpointPath: nil, changed: true)
+        try JSONEncoder().encode(response).write(to: resources.appendingPathComponent("src/stdin-response"))
+        try setMode("stdinEarlyExit")
+        do { _ = try await backend.commitSetup(change, context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Incomplete delivery accepted as success") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        try await waitForExit(try fixturePID())
+        XCTAssertTrue(backend.mutationRequiresReconciliation); XCTAssertFalse(backend.setupHelperIsRunning)
+        XCTAssertEqual(backend.uncertainSetupOperationID, op)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/setup-request").path))
+    }
+    func testSetupBridgeUsesMetadataOnlyLargerInputAndValidatesReturnedStates() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root)
+        XCTAssertEqual(preview.sourceKind, "accounts")
+        let accounts = (0..<150).map { AccountRecord(id: UUID().uuidString, displayName: "Synthetic \($0)", upstreamBaseUrl: "https://example.invalid/api", credential: preview.incomingCredential!) }
+        let op = UUID().uuidString
+        let result = try await backend.commitSetup(.migrate(accounts: accounts, incomingCredential: preview.incomingCredential, defaultAccountId: accounts[0].id), context: preview.context, revision: preview.configurationRevision, operationID: op)
+        XCTAssertEqual(result.operationId, op)
+        let bytes = try Data(contentsOf: resources.appendingPathComponent("src/setup-request"))
+        XCTAssertGreaterThan(bytes.count, 16 * 1024); XCTAssertLessThan(bytes.count, 1024 * 1024)
+        XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("secret"))
+        for mode in ["setupUnknownState", "setupWrongContext", "wireUnknownSetup", "wireUnknownAssignment"] {
+            try setMode(mode)
+            do {
+                if mode.hasPrefix("wire") { _ = try await backend.inspect(configPath: config, browseHome: root) }
+                else { _ = try await backend.previewSetup(configPath: config, browseHome: root) }
+                XCTFail("Unsupported setup evidence accepted: \(mode)")
+            } catch { XCTAssertEqual(error as? CompanionError, .protocolFailure) }
+        }
+    }
+    func testSetupTimeoutRetainsExactHelperUntilExit() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), op = UUID().uuidString
+        try setMode("mutationStall")
+        do { _ = try await backend.commitSetup(.setDefault(defaultAccountId: preview.defaultAccountId), context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Timed out setup accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        let pid = try fixturePID()
+        XCTAssertEqual(kill(pid, 0), 0); XCTAssertTrue(backend.setupHelperIsRunning)
+        XCTAssertThrowsError(try backend.finishSetupReconciliation(operationID: op))
+        try await waitForExit(pid)
+        try setMode("valid")
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+        XCTAssertEqual(backend.uncertainSetupOperationID, op)
+    }
+    func testSetupLostReplyCannotBeClearedByDirectInspection() async throws {
+        let preview = try await backend.previewSetup(configPath: config, browseHome: root), op = UUID().uuidString
+        try setMode("setupLostReply")
+        do { _ = try await backend.commitSetup(.setDefault(defaultAccountId: preview.defaultAccountId), context: preview.context, revision: preview.configurationRevision, operationID: op); XCTFail("Lost reply accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
+        XCTAssertFalse(backend.setupHelperIsRunning); XCTAssertTrue(backend.mutationRequiresReconciliation)
+        try setMode("valid")
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.mutationRequiresReconciliation); XCTAssertEqual(backend.uncertainSetupOperationID, op)
+        XCTAssertThrowsError(try backend.finishSetupReconciliation(operationID: UUID().uuidString))
+        try backend.finishSetupReconciliation(operationID: op)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+    }
+    func testBackendRejectsIncompleteAndLegacyManagedActionsButPreservesRecovery() async throws {
+        for mode in ["setupRequired", "legacySetup"] {
+            try setMode(mode)
+            let value = try await backend.inspect(configPath: config, browseHome: root), context = try XCTUnwrap(value.context)
+            do { _ = try await backend.start(configPath: config); XCTFail("Incomplete setup started") }
+            catch { XCTAssertEqual(error as? CompanionError, .startupFailed) }
+            do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Incomplete setup activated") }
+            catch { XCTAssertEqual(error as? CompanionError, .mutationBusy) }
+            let result = try await backend.control(action: .rollback, configPath: config, expectedContext: context)
+            XCTAssertEqual(result.state, "direct")
+        }
+    }
     func testNodeSelectionIgnoresGuiPath() async throws {
         // Using PATH or accepting the wrong major would select an unvalidated runtime.
         let previousPath = ProcessInfo.processInfo.environment["PATH"]
@@ -44,6 +165,27 @@ import Darwin
         let result = try await backend.inspect(configPath: nil, browseHome: root)
         XCTAssertEqual(result.configuration.state, "missing"); XCTAssertNil(result.provider.proxyReady)
         XCTAssertNil(result.catalog.entries.first?.routeAlias)
+    }
+    func testMissingSelectedDestinationPassesExplicitCatalogBrowseHome() async throws {
+        // Omitting browseHome for a saved absent path makes first-setup browsing unavailable.
+        let encoder = JSONEncoder(); encoder.outputFormatting = .withoutEscapingSlashes
+        let homeJSON = String(data: try encoder.encode(root.path), encoding: .utf8)!
+        let configJSON = String(data: try encoder.encode(config.path), encoding: .utf8)!
+        let script = """
+        #!/usr/bin/python3
+        import json, sys
+        if sys.argv[1:] == ['--version']:
+            print('v24.10.0'); sys.exit(0)
+        request = json.load(sys.stdin)
+        if request.get('browseHome') != \(homeJSON) or request.get('configPath') != \(configJSON): sys.exit(7)
+        print(json.dumps(dict(schemaVersion=1,ok=True,result=dict(configuration=dict(state='missing'),provider=dict(state='unavailable',recoveryRequired=True,proxyReady=None,recordPhase='unavailable'),catalog=dict(state='ready',entries=[dict(id='A',name='Available during setup',routeAlias=None,routeState='unmapped')])))))
+        """
+        try script.write(to: node, atomically: false, encoding: .utf8)
+        try FileManager.default.removeItem(at: config)
+        let result = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertEqual(result.configuration.state, "missing")
+        XCTAssertEqual(result.catalog.entries.first?.name, "Available during setup")
+        XCTAssertNil(result.context); XCTAssertNil(result.revision)
     }
     func testProtocolOverflowNeverEchoesPayload() async throws {
         // Unbounded accumulation or raw child errors would expose the sentinel.
@@ -120,7 +262,7 @@ import Darwin
         // Nonzero exit can follow a provider write; plausible stdout must not authorize another write.
         let inspection = try await backend.inspect(configPath: config, browseHome: root)
         let context = try XCTUnwrap(inspection.context)
-        try setMode("exitFailure")
+        try setMode("mutationExitFailure")
         do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Failed mutation accepted") }
         catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
         try setMode("valid")
@@ -209,7 +351,7 @@ import Darwin
         // A reconciliation request for one mutation cannot clear a later mutation's uncertainty.
         let initial = try await backend.inspect(configPath: config, browseHome: root)
         let context = try XCTUnwrap(initial.context)
-        try setMode("exitFailure")
+        try setMode("mutationExitFailure")
         do { _ = try await backend.control(action: .activate, configPath: config, expectedContext: context); XCTFail("Failed mutation accepted") }
         catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
         try setMode("delayedInspection")
@@ -218,7 +360,7 @@ import Darwin
         try await waitForFixture("snapshot-captured")
         try setMode("valid")
         _ = try await backend.inspect(configPath: config, browseHome: root)
-        try setMode("exitFailure")
+        try setMode("mutationExitFailure")
         do { _ = try await backend.control(action: .rollback, configPath: config, expectedContext: context); XCTFail("Failed mutation accepted") }
         catch { XCTAssertEqual(error as? CompanionError, .mutationUncertain) }
         try releaseFixture("release-snapshot")

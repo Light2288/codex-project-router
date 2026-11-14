@@ -5,10 +5,10 @@ import https from "node:https";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { PassThrough, Writable } from "node:stream";
-import { access, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, readFile, realpath, writeFile, open, lstat, rename, chmod, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { fixture } from "./helpers/fixtures.js";
+import { fixture, accountRouting } from "./helpers/fixtures.js";
 
 const sessionId = "44444444-4444-4444-8444-444444444444";
 const test = (name, body) => nodeTest(name, { timeout: 15000 }, body);
@@ -362,7 +362,8 @@ test("broken stderr preserves managed mode and HTTP listener", async t => {
 });
 
 // Loading the real entry and changing modes must never invoke credentials, auth helpers, or upstreams.
-test("managed startup performs no credential or upstream lookup", async t => {
+for (const schemaVersion of [1, 2])
+test(`managed startup performs no credential or upstream lookup (schema ${schemaVersion})`, async t => {
   const f = await prepare(t);
   const key = await readFile(new URL("./fixtures/tls/test-only-key.pem", import.meta.url));
   const cert = await readFile(new URL("./fixtures/tls/test-only-cert.pem", import.meta.url));
@@ -378,6 +379,11 @@ test("managed startup performs no credential or upstream lookup", async t => {
   f.config.credentialRouting = { globalCredential: reference, routeTargets: {
     "route-a": { upstreamBaseUrl: f.config.upstreamBaseUrl, credential: reference },
   } };
+  if (schemaVersion === 2) {
+    f.config.schemaVersion = 2;
+    delete f.config.credentialRouting;
+    f.config.accountRouting = accountRouting();
+  }
   await f.saveConfig();
   await writeFile(join(f.dir, "config.toml"), '[model_providers.test_gateway.auth]\ncommand = "/definitely-not-a-key-helper"\n');
   const marker = join(f.dir, "unexpected-child-process");
@@ -440,4 +446,72 @@ test("managed entry rejects malformed configuration and listen failures without 
   assert.equal(stdout, "");
   assert.equal(JSON.parse(stderr).error.code, "CONFIG_UNAVAILABLE");
   assert.doesNotMatch(stderr, /SECRET_SENTINEL|SyntaxError/);
+});
+
+
+// A startup and native consent/commit share exactly one exclusive lock boundary.
+test("startup lease excludes setup through load and bind", async t => {
+  const { withRouterStartupLock } = await import("../src/managed-serve.js");
+  assert.equal(typeof withRouterStartupLock, "function");
+  const f = await prepare(t), lockPath = join(f.dir, ".activation.lock");
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  const pending = withRouterStartupLock(f.configPath, async config => {
+    assert.equal(config.listenPort, f.config.listenPort);
+    entered.resolve();
+    await release.promise;
+  });
+  await entered.promise;
+  await assert.rejects(open(lockPath, "wx", 0o600), { code: "EEXIST" });
+  await assert.rejects(withRouterStartupLock(f.configPath, () => assert.fail("competing bind")), { code: "ACTIVATION_CONFLICT" });
+  assert.equal((await lstat(lockPath)).mode & 0o077, 0);
+  release.resolve();
+  await pending;
+  await assert.rejects(access(lockPath), { code: "ENOENT" });
+});
+test("startup does not remove replaced or unsafe locks", async t => {
+  const { withRouterStartupLock } = await import("../src/managed-serve.js");
+  assert.equal(typeof withRouterStartupLock, "function");
+  for (const kind of ["replacement", "permissions", "symlink"]) {
+    const f = await prepare(t), lockPath = join(f.dir, ".activation.lock"), preserved = join(f.dir, "held-startup-lock");
+    await assert.rejects(withRouterStartupLock(f.configPath, async () => {
+      if (kind === "permissions") await chmod(lockPath, 0o644);
+      else {
+        await rename(lockPath, preserved);
+        if (kind === "symlink") await symlink(preserved, lockPath);
+        else await writeFile(lockPath, "replacement", {mode: 0o600});
+      }
+    }), { code: "ACTIVATION_CONFLICT" });
+    if (kind === "replacement") assert.equal(await readFile(lockPath, "utf8"), "replacement");
+    else if (kind === "permissions") assert.equal((await lstat(lockPath)).mode & 0o077, 0o044);
+    else assert.equal((await lstat(lockPath)).isSymbolicLink(), true);
+  }
+});
+test("managed startup rejects setup state and every existing lock before binding", async t => {
+  const { startManagedRouter } = await import("../src/managed-serve.js");
+  for (const kind of ["setup", "stale", "malformed", "unsafe", "directory", "symlink", "required", "invalid"]) {
+    const f = await prepare(t), lockPath = join(f.dir, ".activation.lock");
+    if (kind === "required" || kind === "invalid") {
+      f.config.schemaVersion = 2;
+      f.config.accountRouting = accountRouting();
+      if (kind === "required") f.config.accountRouting.defaultAccountId = null;
+      else f.config.accountRouting.extra = "invalid";
+      await f.saveConfig();
+    } else if (kind === "directory") await mkdir(lockPath, {mode: 0o700});
+    else if (kind === "symlink") await symlink(f.configPath, lockPath);
+    else await writeFile(lockPath, kind === "malformed" ? "{" : JSON.stringify(kind === "setup"
+      ? { pid: process.pid, setupOperationId: requestIds[0], configPath: await realpath(f.configPath) }
+      : {pid: 2147483647}), {mode: kind === "unsafe" ? 0o644 : 0o600});
+    const input = new PassThrough(), output = new PassThrough();
+    let ready = "";
+    output.on("data", chunk => ready += chunk);
+    let unexpectedlyStarted;
+    await assert.rejects(async () => {
+      unexpectedlyStarted = await startManagedRouter({configPath: await realpath(f.configPath), sessionId, input, output, diagnostics: new PassThrough()});
+      unexpectedlyStarted.server.closeAllConnections();
+      await new Promise(resolve => unexpectedlyStarted.server.close(resolve));
+    }, {code: kind === "required" ? "ACCOUNT_SETUP_REQUIRED" : kind === "invalid" ? "ACCOUNT_SETUP_INVALID" : "ACTIVATION_CONFLICT"});
+    assert.equal(ready, "");
+    if (!["required", "invalid"].includes(kind)) await lstat(lockPath);
+  }
 });

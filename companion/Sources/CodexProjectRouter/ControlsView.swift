@@ -25,8 +25,35 @@ import CompanionCore
         default: return nil
         }
     }
-    var globalAccount: String { "Existing global provider account" }
+    var globalAccount: String {
+        guard controller.inspection?.configuration.mode == "accounts" else { return "Existing global provider account" }
+        guard let account = controller.inspection?.configuration.defaultAccount else { return "No default account designated" }
+        return "Default account: \(account.displayName)"
+    }
+    var accountSetupGuidance: String? {
+        switch controller.inspection?.configuration.setupState {
+        case "migration_required": return "Import this configuration to choose named accounts, an incoming credential and an explicit default. Saved project bindings will be preserved."
+        case "required": return "Account setup is incomplete. Choose an incoming credential and designate a default before Start."
+        case "invalid": return "Account setup is invalid. Preserve direct recovery evidence and select a valid configuration."
+        default: return controller.selectedConfiguration == nil || controller.inspection?.configuration.state == "missing" ? "Create a private account configuration from the compatible direct provider, or select an existing configuration to import." : nil
+        }
+    }
     func assignment(for project: Inspection.Entry) -> String {
+        if controller.inspection?.configuration.mode == "accounts" {
+            if project.assignmentKind == "target_missing" { return "Missing target — alias: \(project.routeAlias ?? "unavailable")" }
+            let name = project.account?.displayName ?? controller.inspection?.configuration.defaultAccount?.displayName ?? "No default designated"
+            if project.assignmentKind == "legacy_inherited", let alias = project.routeAlias {
+                return "\(name) — Inherited label: \(alias)"
+            }
+            if project.assignmentKind == "override" {
+                switch controller.projectRoutingStatus {
+                case .known(.on) where pendingRoutingMode == nil: return "Override active — \(name)"
+                case .known(.off) where pendingRoutingMode == nil: return "Override saved — \(name) (inactive while Off)"
+                default: return "Override saved — \(name) (routing unconfirmed)"
+                }
+            }
+            return "Default (inherited) — \(name)"
+        }
         if let alias = project.routeAlias {
             if controller.inspection?.configuration.mode == "legacy" { return "Global credential; saved alias: \(alias)" }
             if controller.inspection?.configuration.mode == "credential", pendingRoutingMode == nil {
@@ -48,6 +75,7 @@ import CompanionCore
         return "Global (inheritance policy; routing unconfirmed)"
     }
     var configuration: String {
+        if let guidance = accountSetupGuidance, controller.inspection?.configuration.setupState != nil { return guidance }
         switch controller.inspection?.configuration.state {
         case "valid": return "Valid"
         case "invalid": return "Invalid configuration. Select a valid private file."
@@ -107,7 +135,7 @@ import CompanionCore
         guard controller.inspection?.catalog.state == "ready" else { return [] }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return (controller.inspection?.catalog.entries ?? []).filter {
-            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || ($0.routeAlias?.localizedCaseInsensitiveContains(query) ?? false)
+            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || ($0.routeAlias?.localizedCaseInsensitiveContains(query) ?? false) || ($0.account?.displayName.localizedCaseInsensitiveContains(query) ?? false)
         }
     }
     static func refreshInterval(windowVisible: Bool) -> UInt64 { windowVisible ? 2 : 5 }
@@ -127,6 +155,8 @@ struct ControlsDisclosureState {
 @MainActor struct ControlsView: View {
     let controller: RouterController
     let navigation: QuitGuidanceNavigation
+    var accountSetup: AccountSetupController? = nil
+    @State private var accountSheet: AccountSetupIntent?
     @State private var search = ""
     @State private var showActivationNotice = false
     @State private var disclosures = ControlsDisclosureState()
@@ -190,11 +220,14 @@ struct ControlsDisclosureState {
             }
         }
         .padding(20).frame(minWidth: 720, minHeight: 640)
+        .sheet(item: $accountSheet) { intent in
+            if let accountSetup { AccountSetupView(router: controller, setup: accountSetup, intent: intent) }
+        }
         .alert("Activate routing for every chat using this provider?", isPresented: $showActivationNotice) {
             Button("Cancel", role: .cancel) {}
             Button("Activate") { Task { await controller.activate() } }
         } message: {
-            Text("This changes the provider-wide setting. Identified projects without an override inherit the existing global provider account; unresolved project identity may block a request. Restart Codex manually after this initial activation and confirm a working routed response. The listener is still required while project routing is Off. Keep it running until direct recovery is confirmed.")
+            Text("This changes the provider-wide setting. Identified projects without an override inherit the configured default account; unresolved project identity may block a request. Restart Codex manually after this initial activation and confirm a working routed response. The listener is still required while project routing is Off. Keep it running until direct recovery is confirmed.")
         }
     }
     private var routingSection: some View {
@@ -222,6 +255,23 @@ struct ControlsDisclosureState {
                     .disabled(controller.ownedRouter == nil ? !controller.canStart : !controller.canSetProjectRouting)
                 }
                 Text(display.globalAccount).font(.headline)
+                if accountSetup != nil {
+                    HStack {
+                        if controller.inspection?.configuration.mode == "accounts" {
+                            Button("Choose default…") { accountSheet = .setDefault }
+                            Button("Add account…") { accountSheet = .add }
+                        } else if controller.selectedConfiguration != nil, controller.inspection?.configuration.state != "missing" {
+                            Button("Preview import…") { accountSheet = .importConfiguration }
+                        } else {
+                            Button("Create private configuration…") { selectDestination() }.disabled(!controller.canSelectConfiguration)
+                        }
+                        Button("Select existing / import…") { selectFile(node: false, importAfterSelection: true) }.disabled(!controller.canSelectConfiguration)
+                    }
+                    if let guidance = display.accountSetupGuidance { Text(guidance).foregroundStyle(.orange) }
+                    if controller.inspection?.configuration.mode == "accounts" {
+                        Text("Configured account selection; credential access and upstream responses are unverified.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 if controller.inspection?.configuration.mode == "legacy" {
                     Text("Uses the caller's existing credential; aliases do not select separate accounts.")
                 }
@@ -271,7 +321,7 @@ struct ControlsDisclosureState {
             GroupBox("Independent operational facts") {
                 VStack(alignment: .leading, spacing: 8) {
                     Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
-                        fact("Configuration kind", controller.inspection?.configuration.mode == "credential" ? "Credential routing" : controller.inspection?.configuration.mode == "legacy" ? "Legacy routing" : "Unknown")
+                        fact("Configuration kind", controller.inspection?.configuration.mode == "accounts" ? "Account routing" : controller.inspection?.configuration.mode == "credential" ? "Credential routing" : controller.inspection?.configuration.mode == "legacy" ? "Legacy routing" : "Unknown")
                         fact("On disk", display.disk)
                         fact("Matching readiness", display.readiness)
                         fact("Process ownership", display.ownership)
@@ -383,7 +433,22 @@ struct ControlsDisclosureState {
     private func fact(_ label: String, _ value: String) -> some View {
         GridRow { Text(label).foregroundStyle(.secondary); Text(value).textSelection(.enabled) }
     }
-    private func selectFile(node: Bool) {
+    private func selectDestination() {
+        let panel = NSSavePanel()
+        panel.title = "Choose a new private router configuration destination"
+        panel.nameFieldStringValue = "config.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.message = "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration."
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                await controller.selectConfiguration(url)
+                if controller.selectedConfiguration == url.resolvingSymlinksInPath() { accountSheet = .add }
+            }
+        }
+    }
+    private func selectFile(node: Bool, importAfterSelection: Bool = false) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.title = node ? "Select an installed Node 24 executable" : "Select existing private router configuration"
@@ -391,7 +456,13 @@ struct ControlsDisclosureState {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in
-                if node { await controller.selectNode(url) } else { await controller.selectConfiguration(url) }
+                if node { await controller.selectNode(url) }
+                else {
+                    await controller.selectConfiguration(url)
+                    if importAfterSelection, controller.selectedConfiguration == url.resolvingSymlinksInPath() {
+                        accountSheet = controller.inspection?.configuration.mode == "accounts" ? .setDefault : .importConfiguration
+                    }
+                }
             }
         }
     }

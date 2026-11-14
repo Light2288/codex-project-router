@@ -22,7 +22,7 @@ import CompanionCore
         try store.save(CompanionJournal(selectedConfigurationPath: context.configPath,
             pending: .init(context: context, phase: .directConfirmation)))
         let backend = DisplayBackend()
-        backend.snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "legacy"),
+        backend.snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"),
             context: context, revision: "synthetic-presentation-revision",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "restored"),
             catalog: .init(state: "ready", entries: []))
@@ -61,7 +61,7 @@ import CompanionCore
                 display = ControlsPresentation(controller: controller)
                 XCTAssertEqual(display.routingState, state)
                 XCTAssertNil(display.routingActionTitle)
-                XCTAssertEqual(display.globalAccount, "Existing global provider account")
+                XCTAssertEqual(display.globalAccount, "No default account designated")
                 XCTAssertEqual(display.confirmation, "Not confirmed")
             }
         }
@@ -111,11 +111,34 @@ import CompanionCore
             XCTAssertEqual(display.catalog, "Catalog unavailable. Refresh to retry.")
         }
     }
+    func testAccountPresentationPreservesQuitGuidance() async throws {
+        // Account names and inherited labels must coexist with all existing recovery destinations.
+        try await withPendingDirectController { controller, backend, _ in
+            backend.snapshot.configuration.defaultAccount = .init(id: "default", displayName: "Personal")
+            await controller.refresh()
+            let before = QuitGuidance.current(for: controller)
+            let display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.globalAccount, "Default account: Personal")
+            let inherited = Inspection.Entry(id: "a", name: "A", routeAlias: "old-label", routeState: "mapped", account: .init(id: "default", displayName: "Personal"), assignmentKind: "legacy_inherited")
+            let explicit = Inspection.Entry(id: "b", name: "B", routeAlias: "work", routeState: "mapped", account: .init(id: "work", displayName: "Work"), assignmentKind: "override")
+            XCTAssertTrue(display.assignment(for: inherited).contains("Inherited label: old-label"))
+            XCTAssertFalse(display.assignment(for: inherited).contains("Override"))
+            XCTAssertTrue(display.assignment(for: explicit).contains("Work"))
+            XCTAssertTrue(display.assignment(for: explicit).contains("saved"))
+            XCTAssertEqual(QuitGuidance.current(for: controller), before)
+            XCTAssertEqual(display.projects(matching: "").count, 0)
+            XCTAssertNil(controller.ownedRouter)
+            XCTAssertEqual(backend.startCount, 0); XCTAssertEqual(backend.controlCount, 0)
+        }
+    }
     func testLegacyAliasesAreNotAccountNames() async throws {
         // A legacy alias cannot be described as choosing an independent provider account.
         try await withPendingDirectController { controller, backend, _ in
             backend.routingError = nil
             await controller.start()
+            backend.snapshot.configuration.mode = "legacy"
+            backend.snapshot.configuration.setupState = "migration_required"
+            await controller.refresh()
             let project = Inspection.Entry(id: "legacy", name: "Legacy", routeAlias: "route-a", routeState: "mapped")
             for mode in [ProjectRoutingMode.off, .on] {
                 await controller.setProjectRouting(mode)

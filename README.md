@@ -1,6 +1,6 @@
 # Codex Project Router
 
-Experimental local proxy for automatic project identification in Codex desktop. With optional credential routing enabled, Responses and compaction requests can use a project's explicitly configured HTTPS destination and Keychain credential. The native companion starts project routing Off; On applies saved overrides, while identified projects without an override inherit the existing global provider account. Without credential routing, admitted requests retain the caller's existing credential.
+Experimental local proxy for automatic project identification in Codex desktop. The native companion creates or imports named accounts, saves an explicit default, and starts project routing Off. Off uses that default account's HTTPS destination and Keychain credential; On applies saved project overrides, while identified projects without an override inherit the default. The incoming desktop credential is verified separately. Schema-1 standalone configurations remain supported.
 
 The router relies on observed internal request headers and local desktop state. Check the [validation report](docs/validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](docs/validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. They remain blocked by default. The optional narrow title policy below allows qualifying initial-title requests without project attribution; see its [validation report](docs/validation/unassigned-title-request-policy.md) for current evidence.
 
@@ -18,15 +18,73 @@ The standalone Node CLI needs no build step or global installation. The optional
 
 ## Private configuration
 
-Create a user-owned directory with mode `700` outside the checkout, normally `~/.codex-project-router`. Create `config.json` there with mode `600`, using [the synthetic example](examples/router.example.json) as the shape. Preserve any existing private configuration.
+Create a user-owned directory with mode `700` outside the checkout, normally `~/.codex-project-router`. Create `config.json` there with mode `600`, using [the schema-2 synthetic example](examples/router.accounts.example.json) as the shape, or create/import it through the companion below. Preserve any existing private configuration.
 
 Set `codexHome`, `providerId`, and `upstreamBaseUrl` to the existing provider setup. Preserve the complete upstream API prefix. Put desktop project IDs and non-secret route aliases in `projectRoutes`; include the controller project's ID so this chat can continue during validation. Alias values are short letters/digits/underscore/hyphen labels. They never contain keys.
 
-Configuration requires `schemaVersion: 1`; the port defaults to `8787`. The listener is fixed to `127.0.0.1`. An explicit config path is required by every command. Restart the foreground proxy after changing its configuration.
+New companion configurations use `schemaVersion: 2`; schema 1 remains supported by the standalone CLI. The port defaults to `8787`. The listener is fixed to `127.0.0.1`. An explicit config path is required by every command. Restart the foreground proxy after changing its configuration.
 
 Keep actual endpoints, project mappings, Keychain references, configuration backups, and private run evidence outside Git. The router rejects a configuration stored inside its checkout. It never runs the desktop authentication helper. Configuration loading, startup, health, status, activation and rollback retrieve no credentials and send no destination-preflight requests, including when credential routing is enabled. Local readiness probes remain permitted.
 
-## Optional project credential routing
+## Account and default setup
+
+The companion's **Create private configuration…** selects an absent JSON file in
+an explicitly private directory. **Select existing / import…** and **Preview
+import…** inspect an existing file before saving. Browsing and preview never start
+routing. Keep the existing compatible desktop provider and its authentication
+helper; setup does not rewrite desktop authentication.
+
+An account pairs a display name, complete HTTPS API endpoint and exact file-backed
+Keychain reference. Select an existing item using its metadata, or choose **Enter
+new key…** and type into the concealed native field. Advanced contains the
+**Destination file-backed Keychain path**, including an explicit path outside the
+search list. New items use the predetermined service/account shown there. Creation
+is add-only: existing items cannot be replaced, updated or deleted by the companion.
+No entered key enters command arguments, JSON configuration, control messages or
+logs. File-backed Security/ACL API deprecation warnings are an intentional
+compatibility cost of the fixed `/usr/bin/security` reader; they are not suppressed.
+Data Protection/iCloud-only items are unsupported. Supply a canonical HTTPS
+endpoint, using ASCII/punycode hostnames and the complete API prefix.
+
+Choose the **Default account** explicitly, even for the first account. Incoming
+credential confirmation in Advanced is a separate choice: it must identify the
+item matching the token the desktop already sends, while the outgoing default can
+use a different item and HTTPS origin. Never infer one role from the other. A
+saved configuration without both roles stays incomplete and cannot Start. The
+configured default label and matching readiness do not prove that Keychain access,
+the gateway, the account or billing attribution works; access is checked on an
+actual request.
+
+**Add account…** preserves the current default and project assignments, including
+when adding the first account to an empty file. **Choose default…** requires its
+own Save action. A schema-1 import preserves every complete endpoint/reference
+pair, including unused targets and explicit targets equal to the old global pair.
+Legacy labels import as explicit inheritance; unresolved enabled aliases remain
+missing targets. Import preserves mapping keys, optional-property absence, the
+original direct URL and a private byte-exact checkpoint. The new companion requires
+migration before Start; schema-1 standalone serving keeps its historical behavior.
+
+Forms can be browsed while routing runs. Save requires safe direct recovery,
+confirmation where required, no owned listener and an empty selected port. Off
+alone does not authorize Save, Stop or Quit. Stop safely, save, then explicitly
+Start; each new managed start loads the saved configuration in Off. There is no
+running reload or pending configuration save. **Restore direct** returns to the
+preserved desktop connection, which can differ from the router default. Incomplete
+or invalid accounts block routing while validated original-direct recovery remains
+available; unsafe core configuration or recovery records still block.
+
+A native add can succeed before configuration linking fails. Retain the private
+`account-setup.json` receipt and use **Check operation outcome**; do not recreate
+or automatically delete the item. Exact metadata and saved state reconcile the
+predetermined identity without retrieving its secret. An uncertain helper keeps
+writes and dismissal blocked until it exits and its result is checked. Existing
+or stale `.activation.lock` evidence is never adopted, signalled or removed
+automatically; independently inspect its origin and resolve it locally, preserving
+receipts/checkpoints and recovery evidence. Account editing/deletion and assignment
+editing remain deferred. See the [current validation record](docs/validation/companion-account-default-setup.md)
+for observed evidence and pending native/live acceptance.
+
+## Schema-1 project credential routing compatibility
 
 Omit `credentialRouting` to retain legacy behavior and its readiness fingerprint with zero Keychain calls. Its presence enables routing under the existing `schemaVersion: 1`; `false`, `null`, incomplete objects and unknown fields are invalid. Use the separate [synthetic enabled example](examples/router.credentials.example.json); the [legacy example](examples/router.example.json) remains available.
 
@@ -41,7 +99,7 @@ To migrate the earlier unmerged `routeCredentials` format, restore direct operat
 1. Privately checkpoint the direct provider URL and the exact prior router settings, including which optional properties were absent. Keep the existing desktop authentication command in place.
 2. Open macOS **Keychain Access**, select the intended keychain, and use **File → New Password Item** to create a generic password item. Set **Keychain Item Name** to the configured `service`, **Account Name** to `account`, and enter the key in the password field locally. Do not paste keys into this chat, terminal commands, files in the checkout, or reports.
 3. Provision a global item holding the exact token supplied by the desktop authentication helper. Provision separate A/B items holding distinct project API keys, and explicitly configure the controller target to reuse the global item and global destination when intended. Example names such as `example-global-service` / `example-global-account` and `example-project-a-service` / `example-project-a-account` are synthetic labels. Actual values and paths stay in private configuration.
-4. Verify each selected item's service/account and its containing keychain locally. Copy only those references into private router configuration, using the full absolute keychain path, for example the synthetic `/Users/example/Library/Keychains/login.keychain-db`. Avoid ambiguous duplicate items. The router reads only the exact referenced generic password; it does not provision, edit, delete or explicitly unlock items. Keychain access policy may require user interaction; a denied or locked item can make lookup fail.
+4. Verify each selected item's service/account and its containing keychain locally. Copy only those references into private router configuration, using the full absolute keychain path, for example the synthetic `/Users/example/Library/Keychains/login.keychain-db`. Avoid ambiguous duplicate items. The standalone reader reads only the exact referenced generic password; the companion adds new items only through the separate setup flow. Neither edits, deletes or explicitly unlocks existing items. Keychain access policy may require user interaction; a denied or locked item can make lookup fail.
 5. Restart the foreground proxy after changing mappings, destinations or references, check `status`, then use the activation procedure below. Matching readiness confirms configuration/listener agreement; it does not preflight Keychain access, destination connectivity or gateway acceptance.
 
 When credential routing is configured, each admitted non-health request retrieves the global item and verifies the incoming bearer token before metadata observation, identity resolution or project-key retrieval. The scheme is case-insensitive; the token is exact and case-sensitive. When project overrides apply, mapped model requests then retrieve their target credential and forward to that target's destination with replaced `Authorization` and its matching `Host`. Deliberate controller reuse of the global item still performs separate verification and target reads. Catalog requests and qualifying unassigned titles use the global destination, retain the exact verified caller authorization and retrieve no project key. When overrides apply, mapped title-marked requests retain ordinary target priority. The title and observation options are independent and remain off unless explicitly enabled.
@@ -200,11 +258,12 @@ selected provider to the stable loopback URL once: activate, restart Codex yours
 receive a working response and confirm it independently in the app. Once integrated,
 use **Turn project routing On** / **Turn project routing Off** for everyday changes
 without restarting Codex or rewriting its provider URL. Off keeps saved overrides and sends admitted requests
-through the running listener using the existing global provider account. Here the
-global pair is top-level `upstreamBaseUrl` plus the existing incoming authorization;
-with `credentialRouting`, that authorization must match a fresh global-item read.
-Off makes no project-item lookup, even for an unavailable saved override. Legacy
-configurations retain the caller credential; aliases cannot select separate accounts.
+through the running listener using the explicitly saved default account. Incoming
+authorization must match the separately configured incoming item, then the router
+reads the selected outgoing item and substitutes its token. Off makes no project
+override-item lookup. The top-level `upstreamBaseUrl` remains the original direct
+recovery destination. Existing schema-1 files require an explicit import before
+companion Start; their standalone semantics remain unchanged.
 Identity and admission failures still block; inheritance does not resolve ambiguity.
 
 The app can move independently of this checkout and uses only its bundled router
@@ -218,6 +277,7 @@ restore the bound provider settings, restart Codex, verify and confirm a direct
 response, then stop the owned listener when permitted. Off still needs the listener.
 An external listener is never adopted or stopped. No last-used On state, automatic
 startup, fallback, automatic restart or account/assignment editing is provided.
+Named-account addition and explicit default selection are available as described above.
 
 See [companion setup, lifecycle, packaging and recovery](companion/README.md) for
 custom activation contexts and recovery details. The [managed-routing validation
@@ -233,6 +293,10 @@ node --check src/cli.js
 git diff --check
 ```
 
-Tests use temporary synthetic desktop state and local HTTPS upstreams with distinct global/project origins and API prefixes. The committed TLS key/certificate are public, test-only fixtures for localhost. Production uses normal upstream certificate verification. Tests never contact ICA or retrieve real credentials.
+Tests use temporary synthetic desktop state and local HTTPS upstreams with distinct global/project origins and API prefixes. The committed TLS key/certificate are public, test-only fixtures for localhost. Production uses normal upstream certificate verification. Tests never contact ICA or retrieve real credentials. Package tests additionally create
+a positively owned disposable Keychain with a public synthetic fixture, exercise the
+production native metadata/create boundary and bundled reader, then validate cleanup.
+No existing user item is queried, read, updated or deleted; the harness removes only
+its own entry from the current search list and never changes the default Keychain.
 
 Scope and approval history are recorded in the initial [specification](docs/superpowers/specs/2026-11-10-desktop-project-identification-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-desktop-project-identification-validation.md), the metadata increment's [specification](docs/superpowers/specs/2026-11-10-auxiliary-request-metadata-validation.md) and [implementation plan](docs/superpowers/plans/2026-11-10-auxiliary-request-metadata-validation.md), the title policy's [specification](docs/superpowers/specs/2026-11-10-unassigned-title-request-policy.md) and [implementation plan](docs/superpowers/plans/2026-11-10-unassigned-title-request-policy.md), credential routing's [specification](docs/superpowers/specs/2026-11-11-project-credential-routing.md) and [implementation plan](docs/superpowers/plans/2026-11-11-project-credential-routing.md), and managed routing's [specification](docs/superpowers/specs/2026-11-12-companion-routing-on-off.md) and [implementation plan](docs/superpowers/plans/2026-11-12-companion-routing-on-off.md).

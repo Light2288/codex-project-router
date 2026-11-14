@@ -2,8 +2,11 @@
 
 The companion uses bundled router modules through an installed Node 24 executable.
 Private router configuration remains in its original location, outside all Git
-checkouts and application bundles. Controls never retrieve credentials, execute
-the provider authentication helper, or preflight destinations.
+checkouts and application bundles. Routine inspection, startup and recovery
+controls never retrieve credentials,
+execute the provider authentication helper, or preflight destinations. Explicit
+account setup reads native item metadata and can add a new item through a concealed
+native entry field; existing secret values are not retrieved by setup.
 
 ## Local bridge
 
@@ -16,12 +19,17 @@ Selected configurations use their own `codexHome` and activation directory.
 Inspection reads current state without changing configuration or mappings.
 
 Run `node src/companion-cli.js` with one JSON object on stdin. The request has
-`schemaVersion: 1` and `action: "inspect"`, `"activate"`, or `"rollback"`.
-Inspection accepts only `configPath`, plus `browseHome` when the path is null.
+`schemaVersion: 1` and an inspect, activation, rollback or setup action.
+Inspection accepts `configPath` and optional absolute `browseHome`; the latter is
+required for a null selection and preserves catalog browsing at a genuinely absent
+selected destination. A valid selected configuration always supplies its own home.
+Unsafe/unavailable configuration evidence never triggers the missing-file fallback.
 Mutations require `configPath` and the exact fresh inspection `expectedContext`:
 `{configPath,codexHome,providerId,listenPort}`. No shell is required.
 
-The CLI accepts at most 16 KiB and emits exactly one JSON envelope, at most 1 MiB:
+The CLI accepts at most 16 KiB for inspection/activation/rollback. The one-shot
+`setup_preview` and `setup_commit` actions accept at most 1 MiB, with no key values.
+Every action emits exactly one JSON envelope, at most 1 MiB:
 `{schemaVersion:1,ok:true,result}` or
 `{schemaVersion:1,ok:false,error:{code,message}}`. Failures exit nonzero with
 fixed safe errors. Overflow fails without a partial catalog. The existing
@@ -29,12 +37,17 @@ fixed safe errors. Overflow fails without a partial catalog. The existing
 
 Inspection separates configuration, provider and catalog outcomes. Configuration
 is `missing`, `valid`, `invalid`, or `unavailable`; a valid selection includes its
-canonical path and `legacy` or `credential` mode. Provider state is `direct`,
+canonical path and `legacy`, `credential` or `accounts` mode, independent
+`setupState` (`ready`, `required`, `migration_required`, `invalid`) and optional
+`defaultAccount` ID/display name. Provider state is `direct`,
 `router`, `conflict`, or `unavailable`, with independent `proxyReady`,
 `recoveryRequired`, and `recordPhase`. A provider/recovery failure retains the
 selected context and any independently readable catalog.
 
-Catalog entries contain only `{id,name,routeAlias,routeState}`. They use current
+Catalog entries contain `{id,name,routeAlias,routeState}`, with optional safe
+`account` ID/display name and `assignmentKind` (`override`, `inherited`,
+`legacy_inherited`, `target_missing`) for schema 2. Full references and endpoints
+are restricted to explicit setup preview. They use current
 `local-projects`, validate UUID key/record agreement and string names, and sort
 by name then ID. Routing keeps exact existing mapping keys. Unmapped projects
 have null aliases; missing credential targets are `target_missing` in credential
@@ -59,6 +72,62 @@ authoritative; there is no cross-file transaction against external editors.
 Readiness proves neither desktop-loaded settings nor gateway/key acceptance.
 Restart Codex manually after provider changes and explicitly confirm a working
 response. Native lifecycle and recovery controls are documented with the app.
+
+## Native account setup
+
+Use **Create private configuration…** to choose a missing JSON destination in a
+private directory outside Git/application bundles, or **Select existing / import…**
+and **Preview import…** to inspect an existing file. Setup uses one sheet; selecting
+a destination or opening it never starts/activates routing. Missing-file preview
+requires a compatible direct provider and no conflicting recovery evidence.
+
+An outgoing account has a name, canonical HTTPS endpoint and exact file-backed
+Keychain reference. Select an existing item from metadata, or choose **Enter new
+key…** and type in the concealed field. Advanced exposes the exact destination
+Keychain path, service and predetermined account identity. An explicit path works
+without default-Keychain discovery or search-list changes. Production serializes
+native metadata/add operations and grants only its executable plus the fixed
+`/usr/bin/security` reader access; no all-applications ACL, unlock, update or delete
+operation is used. Unsupported Data Protection/iCloud-only items fail visibly.
+The native file-backed/ACL APIs emit intentional SDK deprecation diagnostics; no
+global warning suppression hides this compatibility tradeoff.
+
+Incoming credential confirmation in Advanced identifies the item matching what
+the desktop already sends. It is independent of the outgoing item and **Default
+account** picker. Choose the default explicitly even for the first account, or
+explicitly leave setup incomplete. **Add account…** preserves the default and
+assignments; **Choose default…** opens the same sheet with a separate Save action.
+The everyday default display reports configuration, not credential accessibility,
+gateway acceptance or billing attribution. Startup/inspection do not test those.
+
+Imports preserve schema-1 complete endpoint/reference pairs and unused targets,
+including explicit targets equal to the old global pair. Legacy labels become
+explicit inheritance. Missing enabled alias targets remain failures. Mapping keys,
+original-direct recovery, optional absent properties and a private byte-exact
+checkpoint survive. The new companion requires schema 2 ready setup before Start;
+standalone schema-1 serving stays compatible. The [synthetic schema-2 example](../examples/router.accounts.example.json)
+shows incoming/default roles and paired accounts without real metadata.
+
+Read-only browsing is available while routing runs. Save requires fresh safe direct
+state and any outstanding response confirmation, no owned listener and an empty
+port, rechecked under the shared setup lease. Off does not authorize Save or Stop.
+After a safe stop and Save, the next explicit **Start router (routing Off)** loads
+the new file in Off. No running reload or pending changes are saved. Direct restore
+uses the preserved desktop connection even if it differs from the default account.
+Incomplete/invalid accounts block routing while validated original-direct recovery
+remains available; unsafe core/record evidence still blocks.
+
+Before native creation the private `account-setup.json` receipt durably records the
+planned identity; only metadata/references enter configuration or helper messages.
+A created-but-unlinked item is retained. **Check operation outcome** reconciles the
+exact identity and saved result; never recreate it or assume cancellation undid
+creation. Lost acknowledgements may follow a committed save: retain the lease,
+receipt and checkpoint until the exact helper exits and the result is observed.
+Uncertain operations block further writes and dismissal. Existing/stale
+`.activation.lock` files are never automatically removed, adopted or used to signal
+a PID. Independently verify the recorded process origin and resolve the lock locally,
+retaining recovery evidence. No automatic retry or rollback occurs.
+Account editing/deletion and assignment editing remain deferred.
 
 ## Native core verification
 
@@ -224,8 +293,19 @@ synthetic configuration exercises inspection, managed Ready Off, persistent
 get/set On/Off and activation/rollback. It verifies the same child owns the listener,
 the health fingerprint and provider/router bytes remain unchanged across mode
 changes, and a local HTTPS destination receives zero connections. A standalone
-`serve` compatibility check remains. No credential lookup or desktop restart occurs.
+`serve` compatibility check remains. Those ordinary controls retrieve no credentials
+and perform no desktop restart.
 It also checks rejection of files inside a synthetic Git checkout and app bundle.
+The same three tests also cover schema-2 first creation, explicit default/incoming
+completion, schema-1 import/checkpoints and schema-1 standalone compatibility.
+A separately compiled test-only Swift harness exercises production KeychainStore
+metadata/create against a positively owned disposable Keychain, rejects duplicate
+creation and compares the bundled reader result in child memory. Only paths and
+references cross arguments; only fixed pass/fail markers leave the comparison.
+Cleanup validates ownership, removes only its own current search-list entry and
+deletes the owned scratch Keychain without changing the default. This proves the
+native core/fixed-reader path; the harness ACL identity differs from the packaged
+app identity, so actual app consent remains manual evidence.
 An additional macOS Seatbelt check denies checkout reads (including symlink
 access), launches the relocated native executable, proves its visible window and
 synthetic private-store lock, and separately exercises bundled controls under the
@@ -243,10 +323,11 @@ allows selecting an existing file through a native panel. Configuration and Node
 selection, launch and refresh never start or activate the router. Browsing remains
 available without a configuration if the normal Codex catalog is readable. Select
 an installed Node 24 executable if automatic discovery fails; the GUI does not
-inherit an nvm shell setup. Neither runtime nor configuration is installed or
-created by the controls.
+inherit an nvm shell setup. The runtime is selected, not installed; explicit account
+setup can create
+a private configuration after preview and confirmation.
 
-The focused window leads with project-routing state, the existing global provider
+The focused window leads with project-routing state, the configured default
 account and searchable project overrides. Setup, operational facts, activation and
 recovery are available in disclosures. It shows exact selected local paths, mode,
 on-disk provider state, matching readiness, session ownership and manual desktop
@@ -260,8 +341,8 @@ manual refresh and action-time checks use the controller's coalescing and fresh
 context validation.
 
 Activation asks for provider-wide confirmation: every chat using that provider
-can be affected. In managed mode, an identified project without an override inherits
-the existing global provider account; unresolved or ambiguous identities can block.
+can be affected. In schema-2 managed mode, an identified project without an override inherits
+the explicitly configured default account; unresolved or ambiguous identities can block.
 Restart Codex and send a request yourself, then use the separately labeled routed or direct
 response confirmation button. Health does not establish desktop-loaded settings,
 gateway/key acceptance, billing attribution or stream completeness. After possible
@@ -336,8 +417,9 @@ macOS observation after the automated package checks. Automated fixture coverage
 does not claim those observations or live operational acceptance. Preserve actual
 provider/router settings during a UI-only package check.
 
-This increment has no assignment editing, project hiding, account/default-route
-management, Keychain management, startup automation, bundled Node, automatic Codex
+This increment adds named-account setup, add-only Keychain creation and explicit
+default selection. It has no assignment editing, project hiding, account editing
+or deletion, startup automation, bundled Node, automatic Codex
 restart, automatic prompts, or improved gateway/billing attribution. Later
 increments require their own scope and approval.
 
@@ -355,11 +437,16 @@ separate routed-response confirmation. Activation affects every chat using that
 provider. After this integration, **Turn project routing On** applies saved project
 overrides and **Turn project routing Off** suspends them for subsequent requests
 without a Codex restart or any provider URL rewrite. Saved overrides remain visible and unchanged while Off.
-Changing a mapping, credential reference or destination still requires restarting
-the listener with its changed configuration. There is no editing of those values
-in this increment.
+Saving an account/default change requires the safe stop/save/explicit Start boundary
+above. Assignment editing remains deferred.
 
-In credential mode the global pair means top-level `upstreamBaseUrl` and the
+With schema 2, Off selects the explicit default endpoint/item after separate incoming
+authentication; On selects an explicit saved account or inherits the default. The
+original top-level URL remains direct recovery. Missing targets/access failures
+never fall back. Unassigned title requests also substitute the selected outgoing
+credential, including at a different origin.
+
+The retained schema-1 engine uses top-level `upstreamBaseUrl` and the
 existing incoming authorization, verified against a fresh `globalCredential` read.
 On selects an explicit project's complete destination/credential pair; an identified
 project without a saved alias inherits that global pair. Off uses that global pair
@@ -408,8 +495,8 @@ above. Custom `codexHome`, provider, config path and port remain bound to the
 selected/retained context; changing them does not retarget pending recovery.
 For unowned/external listeners, use the manual origin/port verification above.
 
-The implementation does not create account/default-route or assignment editing,
-Keychain management, automatic startup, automatic Codex restart, fallback or
-automatic model prompts. The [current validation record](../docs/validation/companion-routing-on-off.md)
-keeps native On/Off interaction, live desktop/recovery acceptance and final review
-explicitly pending until observed. Prior reports are historical evidence only.
+The implementation adds account creation/import and explicit default selection;
+account editing/deletion, assignment editing, automatic startup, automatic Codex
+restart, fallback and automatic prompts remain deferred. The [current account setup
+validation record](../docs/validation/companion-account-default-setup.md) separates
+automated evidence from native/live acceptance. Prior reports are historical evidence only.

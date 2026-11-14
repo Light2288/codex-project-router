@@ -12,7 +12,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import http from "node:http";
 import { parse } from "smol-toml";
-import { loadRouterConfig, configFingerprint } from "./config.js";
+import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, configFingerprint, operationalFingerprint } from "./config.js";
 import { RouterError } from "./errors.js";
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 const proxyUrl = (cfg) => `http://127.0.0.1:${cfg.listenPort}/v1`;
@@ -28,7 +28,7 @@ async function ownedFile(path) {
     throw new RouterError("ACTIVATION_CONFLICT");
   return { text: await readFile(path, "utf8"), mode: info.mode & 0o777 };
 }
-function provider(source, cfg) {
+export function inspectProviderConfiguration(source, cfg) {
   try {
     const data = parse(source),
       p = data.model_providers?.[cfg.providerId];
@@ -74,7 +74,7 @@ function provider(source, cfg) {
   }
 }
 function replacement(source, cfg, expectedUrl, newUrl) {
-  const current = provider(source, cfg);
+  const current = inspectProviderConfiguration(source, cfg);
   if (current.url !== expectedUrl) throw new RouterError("ACTIVATION_CONFLICT");
   const updated =
     source.slice(0, current.offset) +
@@ -131,7 +131,8 @@ async function readRecord(path, context) {
       !["prepared", "active", "restored"].includes(r.phase) ||
       typeof r.backupFile !== "string" ||
       !/^codex-config-[0-9a-f-]{36}\.toml$/.test(r.backupFile) ||
-      !/^https:\/\//.test(r.originalBaseUrl) ||
+      typeof r.originalBaseUrl !== "string" ||
+      normalize(r.originalBaseUrl) !== context.cfg.upstreamBaseUrl ||
       typeof r.backupHash !== "string"
     )
       throw new Error();
@@ -139,7 +140,7 @@ async function readRecord(path, context) {
     if (
       backup.mode & 0o077 ||
       digest(backup.text) !== r.backupHash ||
-      provider(backup.text, context.cfg).url !== r.originalBaseUrl
+      inspectProviderConfiguration(backup.text, context.cfg).url !== r.originalBaseUrl
     )
       throw new Error();
     return { record: r, text };
@@ -147,8 +148,8 @@ async function readRecord(path, context) {
     throw new RouterError("ACTIVATION_CONFLICT");
   }
 }
-async function context(configPath, expectedContext) {
-  const cfg = await loadRouterConfig(configPath),
+async function context(configPath, expectedContext, recovery = false) {
+  const cfg = await (recovery ? loadRecoveryConfig : loadRouterConfig)(configPath),
     path = await realpath(configPath),
     dir = dirname(path);
   // Bind companion authorization to the configuration loaded by this operation,
@@ -228,18 +229,19 @@ async function locked(c, fn) {
     await unlink(path);
   }
 }
-async function operation(configPath, fn, expectedContext) {
+async function operation(configPath, fn, expectedContext, recovery = false) {
   try {
-    const c = await context(configPath, expectedContext);
+    const c = await context(configPath, expectedContext, recovery);
     return await locked(c, () => fn(c));
   } catch (e) {
+    if (recovery && ["CONFIG_INVALID", "CONFIG_UNAVAILABLE"].includes(e.code)) throw new RouterError("ACTIVATION_CONFLICT");
     throw e instanceof RouterError ? e : new RouterError("STORAGE_FAILED");
   }
 }
 export async function activate(configPath, { expectedContext } = {}) {
   return operation(configPath, async (c) => {
     const file = await ownedFile(c.codexPath),
-      p = provider(file.text, c.cfg),
+      p = inspectProviderConfiguration(file.text, c.cfg),
       existing = await readRecord(c.recordPath, c);
     await ready(c.cfg);
     if (existing && existing.record.phase !== "restored") {
@@ -294,9 +296,9 @@ export async function activate(configPath, { expectedContext } = {}) {
 }
 export async function rollback(configPath, { expectedContext } = {}) {
   return operation(configPath, async (c) => {
-    const file = await ownedFile(c.codexPath),
-      p = provider(file.text, c.cfg),
-      existing = await readRecord(c.recordPath, c);
+    const existing = await readRecord(c.recordPath, c),
+      file = await ownedFile(c.codexPath),
+      p = inspectProviderConfiguration(file.text, c.cfg);
     if (!existing) {
       if (normalize(p.url) !== c.cfg.upstreamBaseUrl)
         throw new RouterError("ACTIVATION_CONFLICT");
@@ -321,25 +323,30 @@ export async function rollback(configPath, { expectedContext } = {}) {
         existing.text,
       );
     return { state: "direct", changed, restartRequired: changed };
-  }, expectedContext);
+  }, expectedContext, true);
 }
-export async function inspectActivation(configPath) {
+export async function inspectActivation(configPath, { probeProxy = true } = {}) {
   try {
-    const c = await context(configPath),
+    const c = await context(configPath, undefined, true),
+      inspection = await inspectRouterConfiguration(configPath),
       file = await ownedFile(c.codexPath),
-      p = provider(file.text, c.cfg),
+      p = inspectProviderConfiguration(file.text, c.cfg),
       existing = await readRecord(c.recordPath, c);
-    let proxyReady = true;
-    try {
-      await ready(c.cfg);
-    } catch (e) {
-      if (e.code !== "PROXY_NOT_READY") throw e;
-      proxyReady = false;
+    if (operationalFingerprint(inspection.config) !== operationalFingerprint(c.cfg)) throw new RouterError("ACTIVATION_CONFLICT");
+    const routingReady = inspection.setupState === "ready" || inspection.setupState === "migration_required";
+    let proxyReady = false;
+    if (routingReady && probeProxy) {
+      try {
+        await ready(inspection.config);
+        proxyReady = true;
+      } catch (e) {
+        if (e.code !== "PROXY_NOT_READY") throw e;
+      }
     }
     const state =
       existing && p.url === existing.record.proxyBaseUrl
         ? "active"
-        : p.url === (existing?.record.originalBaseUrl ?? c.cfg.upstreamBaseUrl)
+        : (existing ? p.url === existing.record.originalBaseUrl : URL.canParse(p.url) && normalize(p.url) === c.cfg.upstreamBaseUrl)
           ? "direct"
           : "conflict";
     const recordPhase = existing?.record.phase ?? "none";
@@ -353,7 +360,7 @@ export async function inspectActivation(configPath) {
       // Only operational identity contributes: never hash authentication data
       // or raw provider/configuration bytes into comparison metadata.
       revision: digest(JSON.stringify([
-        configFingerprint(c.cfg), state,
+        routingReady ? configFingerprint(inspection.config) : operationalFingerprint(c.cfg), state,
         existing ? [existing.record.routerConfigPath, existing.record.codexConfigPath,
           existing.record.providerId, existing.record.backupFile, recordPhase] : null,
       ])),

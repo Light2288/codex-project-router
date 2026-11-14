@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, cp, stat, realpath, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, cp, stat, realpath, symlink, rmdir } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { once } from 'node:events';
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
-const sourceNames = ['activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
+const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
   t.after(() => rm(path, {recursive:true,force:true}));
@@ -32,11 +32,36 @@ async function tree(path, prefix = '') {
 
 function processes(t) {
   const children = [], ports = [], upstreams = [];
-  async function stop(tracked) {
-    if (tracked.child.exitCode === null && tracked.child.signalCode === null) tracked.child.kill('SIGTERM');
-    const deadline = setTimeout(() => tracked.child.kill('SIGKILL'), 2000);
-    try { await tracked.closed; } finally { clearTimeout(deadline); }
-    assert.throws(() => process.kill(tracked.child.pid, 0), {code:'ESRCH'});
+  function signal(tracked, name) {
+    try {
+      if (tracked.group) process.kill(-tracked.child.pid, name);
+      else if (tracked.child.exitCode === null && tracked.child.signalCode === null) tracked.child.kill(name);
+    } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
+  function groupExists(tracked) {
+    try { process.kill(-tracked.child.pid, 0); return true; }
+    catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  }
+  function stop(tracked) {
+    // Memoize the completed ownership check so later hooks cannot signal a reused PID.
+    return tracked.stopping ??= (async () => {
+      signal(tracked, 'SIGTERM');
+      let deadline, kill, finished = false;
+      try {
+        await Promise.race([
+          (async () => {
+            await tracked.closed;
+            // A retained native probe owns its reader's process group as well.
+            while (!finished && tracked.group && groupExists(tracked)) await new Promise(resolve => setTimeout(resolve, 25));
+          })(),
+          new Promise((_, reject) => {
+            deadline = setTimeout(() => reject(new Error('Synthetic child/group did not exit and reap')), 5000);
+            kill = setTimeout(() => { try { signal(tracked, 'SIGKILL'); } catch (error) { reject(error); } }, 2000);
+          }),
+        ]);
+        assert.throws(() => process.kill(tracked.child.pid, 0), {code:'ESRCH'});
+      } finally { finished = true; clearTimeout(kill); clearTimeout(deadline); }
+    })();
   }
   t.after(async () => {
     // Complete every cleanup/check even if an earlier child or port fails.
@@ -51,6 +76,15 @@ function processes(t) {
   });
   return {
     stop,
+    async wait(tracked, timeoutMs) {
+      let deadline;
+      try {
+        return await Promise.race([
+          tracked.closed,
+          new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('Synthetic process deadline exceeded')), timeoutMs); }),
+        ]);
+      } finally { clearTimeout(deadline); await stop(tracked); }
+    },
     async port() {
       const free = net.createServer(); free.listen(0,'127.0.0.1'); await once(free,'listening');
       const port = free.address().port; await new Promise(resolve => free.close(resolve));
@@ -58,7 +92,7 @@ function processes(t) {
     },
     start(executable, args, options) {
       const child = spawn(executable,args,{...options,stdio:['pipe','pipe','pipe']});
-      const tracked = {child,closed:once(child,'close'),stdout:'',stderr:'',offset:0};
+      const tracked = {child,closed:once(child,'close'),stdout:'',stderr:'',offset:0,group:options?.detached === true};
       child.stdout.on('data',data => tracked.stdout += data);
       child.stderr.on('data',data => tracked.stderr += data);
       children.push(tracked); return tracked;
@@ -115,6 +149,106 @@ async function managedModes(tracked, context, sessionId, unchanged, {ready=true}
   }
 }
 
+// Only synthetic configuration leases are made here; native creation uses the separate owned harness.
+async function setupCommit(bridge, configPath, preview, change) {
+  const operationId = randomUUID(), lockPath = join(dirname(configPath),'.activation.lock');
+  const bytes = JSON.stringify({pid:process.pid,setupOperationId:operationId,configPath});
+  await writeFile(lockPath,bytes,{mode:0o600,flag:'wx'});
+  const identity = await stat(lockPath);
+  try {
+    return await bridge({action:'setup_commit',configPath,expectedContext:preview.context,
+      expectedRevision:preview.configurationRevision,operationId,change});
+  } finally {
+    const current = await stat(lockPath);
+    assert.equal(current.ino,identity.ino);
+    assert.equal(await readFile(lockPath,'utf8'),bytes);
+    await rm(lockPath);
+  }
+}
+const syntheticReference = account => ({keychainPath:'/synthetic-unavailable.keychain-db',service:'package-fixture',account});
+
+async function nativeKeychainProbe(t, dir, app, node, lifecycle) {
+  const executable = join(dir,'native keychain probe'), reader = join(dir,'reader probe.mjs');
+  const nativeRoot = await realpath(await mkdtemp(join(homedir(),'Library/Caches/codex-router-package-probe-')));
+  let nativeCleanupVerified = false;
+  // Preserve owned evidence if native cleanup fails, instead of unlinking its file first.
+  t.after(async()=>{
+    if (nativeCleanupVerified) await rmdir(nativeRoot);
+    else t.diagnostic('Native cleanup unverified; owned scratch evidence preserved at '+nativeRoot);
+  });
+  // The public fixture is constructed independently in each process, never passed in argv or pipes.
+  await writeFile(reader, `import {pathToFileURL} from 'node:url';
+const [modulePath,keychainPath,service,account] = process.argv.slice(2);
+try {
+  const {readKeychainCredential} = await import(pathToFileURL(modulePath));
+  const value = await readKeychainCredential({keychainPath,service,account});
+  const expected = String.fromCharCode(...Array.from({length:48},(_,i)=>33+(i*7%94)));
+  process.stdout.write(value === expected ? 'package-reader-pass\\n' : 'package-reader-fail\\n');
+  process.exitCode = value === expected ? 0 : 1;
+} catch { process.stdout.write('package-reader-fail\\n'); process.exitCode=1; }
+`);
+  const sources = ['WireTypes.swift','AccountTypes.swift','KeychainStore.swift','SetupTransactionStore.swift'];
+  const compiled = await run('/usr/bin/xcrun',['swiftc','-parse-as-library','-target','arm64-apple-macos14.0',
+    ...sources.map(name=>join(root,'companion/Sources/CompanionCore',name)),
+    join(root,'test/helpers/keychain-package-probe.swift'),'-o',executable],{maxBuffer:256*1024,timeout:60_000});
+  assert.equal(compiled.stdout,'');
+  const diagnostics = compiled.stderr.split('\n').filter(line=>/:\d+:\d+: warning:/.test(line));
+  assert.ok(diagnostics.length > 0);
+  assert.ok(diagnostics.every(line=>line.includes('deprecated')),'only intentional file-backed Security API diagnostics are expected');
+  t.diagnostic(`Native harness compilation emitted ${diagnostics.length} intentional file-backed Security API deprecation diagnostics; no other warnings.`);
+  const options = {cwd:dir,env:{PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'},detached:true};
+  const result = lifecycle.start(executable,[nativeRoot,node,reader,join(app,'Contents/Resources/router/src/credentials.js')],options);
+  result.child.stdin.end();
+  assert.deepEqual(await lifecycle.wait(result,20_000),[0,null]);
+  assert.equal(result.stdout,'native-keychain-cleanup-pass\nnative-keychain-package-pass\n');
+  assert.equal(result.stderr,'');
+  assert.deepEqual(await readdir(nativeRoot),[],'owned scratch Keychain directory must be removed');
+  nativeCleanupVerified = true;
+
+  // The real native timeout must reap a reader that ignores polite termination,
+  // then finish its owned Keychain cleanup before returning a fixed failure.
+  const stalledRoot = await realpath(await mkdtemp(join(homedir(),'Library/Caches/codex-router-package-probe-')));
+  let stalledCleanupVerified = false;
+  t.after(async()=>{
+    if (stalledCleanupVerified) await rmdir(stalledRoot);
+    else t.diagnostic('Native cleanup unverified; owned scratch evidence preserved at '+stalledRoot);
+  });
+  const stalledReader = join(dir,'stalled reader.mjs'), readerPID = join(dir,'stalled reader.pid');
+  await writeFile(stalledReader, `import {writeFileSync} from 'node:fs';
+process.on('SIGTERM',()=>{});
+writeFileSync(${JSON.stringify(readerPID)},String(process.pid));
+setInterval(()=>{},1000);
+`);
+  const stalled = lifecycle.start(executable,[stalledRoot,node,stalledReader,'unused-synthetic-module'],options);
+  stalled.child.stdin.end();
+  let stalledPID, observedReaderGroup;
+  const [stalledExit] = await Promise.all([
+    lifecycle.wait(stalled,20_000),
+    (async()=>{
+      for (let i=0;i<200;i++) {
+        try { stalledPID = Number(await readFile(readerPID,'utf8')); break; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      assert.ok(Number.isInteger(stalledPID) && stalledPID > 0);
+      const {stdout:readerGroup} = await run('/bin/ps',['-o','pgid=','-p',String(stalledPID)],{timeout:5000});
+      observedReaderGroup = Number(readerGroup.trim());
+      // If group inheritance regresses, let the still-owned native parent reap
+      // this synthetic reader and clean its Keychain before reporting failure.
+      if (observedReaderGroup !== stalled.child.pid) process.kill(stalledPID,'SIGKILL');
+    })(),
+  ]);
+  assert.deepEqual(stalledExit,[1,null]);
+  assert.equal(stalled.stdout,'native-keychain-cleanup-pass\nnative-keychain-package-fail\n');
+  assert.equal(stalled.stderr,'native-probe-failed-bundled-reader\n');
+  assert.deepEqual(await readdir(stalledRoot),[]);
+  stalledCleanupVerified = true;
+  assert.equal(observedReaderGroup,stalled.child.pid,'native reader must inherit the retained probe group');
+  assert.throws(()=>process.kill(stalledPID,0),{code:'ESRCH'});
+  t.diagnostic('A deliberately stalled reader ignored SIGTERM, was killed and reaped by the native deadline, and returned fixed failure after verified owned scratch cleanup. Both native probe process groups were absent.');
+  t.diagnostic('Production native metadata/create, duplicate rejection and bundled fixed-reader comparison passed; the owned scratch Keychain/sidecars were removed, its current search-list entry was absent, and the opaque default handle stayed unchanged. Harness ACL identity differs from the packaged app.');
+}
+
 async function requireBuiltApp(t) {
   try { await stat(builtApp); return true; } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -124,6 +258,22 @@ async function requireBuiltApp(t) {
 }
 
 test('assembly copies the explicit production allowlist and rejects dependency drift', async t => {
+  const lifecycle = processes(t);
+  const stalled = lifecycle.start(process.execPath,['-e',`
+    const {spawn}=require('node:child_process');
+    process.on('SIGTERM',()=>{});
+    const reader=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});
+    console.log(reader.pid);
+    setInterval(()=>{},1000);
+  `],{detached:true});
+  stalled.child.stdin.end();
+  const readerPID = await nextFrame(stalled);
+  assert.ok(Number.isInteger(readerPID) && readerPID > 0);
+  await assert.rejects(lifecycle.wait(stalled,100),/Synthetic process deadline exceeded/);
+  assert.equal(stalled.child.signalCode,'SIGKILL','an unresponsive probe must reach the hard deadline');
+  assert.throws(()=>process.kill(readerPID,0),{code:'ESRCH'},'the grouped reader must exit and be reaped too');
+  t.diagnostic('Synthetic unresponsive probe hit its bounded deadline; its reader exited, the probe required SIGKILL, both PIDs and the retained process group were absent.');
+
   const {assembleCompanion} = await import('../scripts/build-companion.mjs');
   const dir = await temporary(t), router = join(dir,'synthetic checkout');
   await mkdir(join(router,'src'),{recursive:true});
@@ -148,7 +298,7 @@ test('assembly copies the explicit production allowlist and rejects dependency d
   await assert.rejects(assembleCompanion({binaryPath:binary,routerRoot:router,outputPath:join(dir,'Bad.app')}), /pinned/);
 });
 
-test('relocated signed app runs bundled inspection and synthetic lifecycle without GUI PATH', {timeout:60_000}, async t => {
+test('relocated signed app runs bundled inspection and synthetic lifecycle without GUI PATH', {timeout:120_000}, async t => {
   if (!await requireBuiltApp(t)) return;
   const lifecycle = processes(t);
   const dir = await temporary(t), app = join(dir,'Relocated App With Spaces.app');
@@ -197,16 +347,42 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     const tracked=lifecycle.start(node,['--use-system-ca',cli],{cwd:dir,env});
     tracked.child.stdin.end(JSON.stringify({schemaVersion:1,...request}));
     const [code]=await tracked.closed; const response=JSON.parse(tracked.stdout);
-    assert.equal(response.ok,true,tracked.stderr); assert.equal(code,0); return response.result;
+    assert.equal(response.ok,true,response.error?.code ?? tracked.stderr); assert.equal(code,0); return response.result;
   }
   const id='11111111-1111-4111-8111-111111111111';
   await writeFile(join(home,'.codex-global-state.json'),JSON.stringify({'local-projects':{[id]:{id,name:'Synthetic project'}}}));
   const port=await lifecycle.port(), upstream=await lifecycle.upstream();
-  const config={schemaVersion:1,codexHome:home,providerId:'synthetic',upstreamBaseUrl:upstream.url,listenPort:port,projectRoutes:{[id]:'synthetic-route'}};
+  const incoming = syntheticReference('incoming'), outgoing = syntheticReference('outgoing');
+  const config={schemaVersion:1,codexHome:home,providerId:'synthetic',upstreamBaseUrl:upstream.url,listenPort:port,projectRoutes:{[id]:'synthetic-route'},
+    credentialRouting:{globalCredential:incoming,routeTargets:{'synthetic-route':{upstreamBaseUrl:upstream.url+'/account',credential:outgoing}}}};
   const configPath=join(dir,'private router.json');await writeFile(configPath,JSON.stringify(config),{mode:0o600});
   const providerPath=join(home,'config.toml');const original='model_provider = "synthetic"\n[model_providers.synthetic]\nbase_url = "https://synthetic.invalid/v1"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.synthetic.auth]\ncommand = "/synthetic/auth-must-not-run"\nargs = []\n'.replace('https://synthetic.invalid/v1',upstream.url);
   await writeFile(providerPath,original,{mode:0o600});
-  const before=await bridge({action:'inspect',configPath});assert.equal(before.provider.state,'direct');assert.equal(before.catalog.entries[0].name,'Synthetic project');
+  const legacy=await bridge({action:'inspect',configPath});
+  assert.equal(legacy.configuration.setupState,'migration_required');
+  assert.equal(legacy.provider.state,'direct'); assert.equal(legacy.catalog.entries[0].name,'Synthetic project');
+  const compatibility=lifecycle.start(node,['--use-system-ca',join(router,'src/cli.js'),'serve','--config',configPath],{cwd:dir,env});
+  compatibility.child.stdin.end();
+  assert.deepEqual(await nextFrame(compatibility),{state:'listening',host:'127.0.0.1',port});
+  await lifecycle.stop(compatibility);
+  const sourceBytes = await readFile(configPath), preview = await bridge({action:'setup_preview',configPath});
+  assert.equal(preview.sourceKind,'enabled'); assert.equal(preview.accounts.length,2);
+  assert.deepEqual(preview.incomingCredential,incoming);
+  const defaultAccount = preview.accounts.find(account=>account.sourceAlias === 'synthetic-route');
+  assert.ok(defaultAccount);
+  const migrated = await setupCommit(bridge,configPath,preview,{kind:'migrate',accounts:preview.accounts.map(({id,displayName,upstreamBaseUrl,credential})=>({id,displayName,upstreamBaseUrl,credential})),
+    incomingCredential:incoming,defaultAccountId:defaultAccount.id});
+  assert.equal(migrated.setupState,'ready');
+  assert.deepEqual(await readFile(migrated.checkpointPath),sourceBytes);
+  const saved = JSON.parse(await readFile(configPath));
+  assert.equal(saved.schemaVersion,2); assert.deepEqual(saved.projectRoutes,config.projectRoutes);
+  assert.equal(saved.upstreamBaseUrl,upstream.url); assert.deepEqual(saved.accountRouting.incomingCredential,incoming);
+  assert.deepEqual(saved.accountRouting.accounts[defaultAccount.id].credential,outgoing);
+  assert.equal(saved.accountRouting.defaultAccountId,defaultAccount.id);
+  assert.equal(await readFile(providerPath,'utf8'),original);
+  const before=await bridge({action:'inspect',configPath});
+  assert.equal(before.configuration.mode,'accounts'); assert.equal(before.configuration.setupState,'ready');
+  assert.equal(before.configuration.defaultAccount.id,defaultAccount.id);
   const configBytes=await readFile(configPath), sessionId=randomUUID();
   const child=lifecycle.start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId],{cwd:dir,env});
   await managedModes(child,before.context,sessionId,async()=>{
@@ -232,7 +408,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   assert.equal(await readFile(providerPath,'utf8'),original);
   await lifecycle.stop(child);
   assert.equal((await bridge({action:'inspect',configPath})).provider.proxyReady,false);
-  // The historical standalone entry still starts independently with its existing contract.
+  // Schema-2 standalone serving also remains available after the schema-1 check above.
   const standalone=lifecycle.start(node,['--use-system-ca',join(router,'src/cli.js'),'serve','--config',configPath],{cwd:dir,env});
   standalone.child.stdin.end();
   assert.deepEqual(await nextFrame(standalone),{state:'listening',host:'127.0.0.1',port});
@@ -241,6 +417,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   assert.equal((await bridge({action:'inspect',configPath})).provider.proxyReady,false);
   assert.equal(upstream.connections(),0);
   await reusablePort(port);
+  await nativeKeychainProbe(t,dir,app,node,lifecycle);
   for(const location of [join(dir,'Git checkout'),join(app,'Contents/Resources')]) {
     await mkdir(location,{recursive:true});if(location.includes('Git checkout'))await mkdir(join(location,'.git'));
     const forbidden=join(location,'private-config.json');await writeFile(forbidden,JSON.stringify(config),{mode:0o600});
@@ -284,13 +461,11 @@ test('native relocated app and bundled controls work with checkout reads denied 
   const port = await lifecycle.port(), upstream = await lifecycle.upstream();
   const id = '22222222-2222-4222-8222-222222222222';
   const configPath = join(home,'.codex-project-router/config.json');
-  await writeFile(configPath,JSON.stringify({schemaVersion:1,codexHome,providerId:'synthetic',upstreamBaseUrl:upstream.url,listenPort:port,projectRoutes:{[id]:'source-denied'}}),{mode:0o600});
   await writeFile(join(codexHome,'.codex-global-state.json'),JSON.stringify({'local-projects':{[id]:{id,name:'Source denied synthetic project'}}}),{mode:0o600});
   const providerPath = join(codexHome,'config.toml');
   const original = 'model_provider = "synthetic"\n[model_providers.synthetic]\nbase_url = "https://synthetic.invalid/v1"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.synthetic.auth]\ncommand = "/synthetic/auth-must-not-run"\nargs = []\n'.replace('https://synthetic.invalid/v1',upstream.url);
   await writeFile(providerPath,original,{mode:0o600});
   await writeFile(join(store,'state.json'),JSON.stringify({schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node}),{mode:0o600});
-  const configBytes = await readFile(configPath);
   const start = (executable,args) => lifecycle.start('/usr/bin/sandbox-exec',['-f',profile,executable,...args],{cwd:dir,env});
   const native = start(join(app,'Contents/MacOS/CodexProjectRouter'),[]);
   native.child.stdin.end();
@@ -306,7 +481,7 @@ test('native relocated app and bundled controls work with checkout reads denied 
   const windowProbe = 'import CoreGraphics; import Foundation; let pid = Int(CommandLine.arguments[1])!; let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []; let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }; print(found ? "visible-native-window" : "missing"); exit(found ? 0 : 1)';
   await run('/usr/bin/swift',['-e',windowProbe,String(native.child.pid)],{cwd:dir,env,timeout:20_000});
   assert.deepEqual(JSON.parse(await readFile(join(store,'state.json'),'utf8')),{schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node});
-  assert.deepEqual(await readFile(configPath),configBytes);
+  await assert.rejects(stat(configPath),{code:'ENOENT'});
   assert.equal(await readFile(providerPath,'utf8'),original);
   t.diagnostic('Relocated signed native executable displayed its own on-screen window and held the synthetic companion instance.lock under source-denial confinement.');
 
@@ -317,9 +492,41 @@ test('native relocated app and bundled controls work with checkout reads denied 
     const {stdout} = await execution;
     const response = JSON.parse(stdout); assert.equal(response.ok,true); return response.result;
   }
+  const browsing = await bridge({action:'inspect',configPath:null,browseHome:codexHome});
+  assert.equal(browsing.configuration.state,'missing');
+  assert.equal(browsing.catalog.entries[0].name,'Source denied synthetic project');
+  const selectedMissing = await bridge({action:'inspect',configPath,browseHome:codexHome});
+  assert.equal(selectedMissing.configuration.state,'missing');
+  assert.equal(selectedMissing.catalog.entries[0].name,'Source denied synthetic project');
+  assert.equal(selectedMissing.context,undefined);
+  const preview = await bridge({action:'setup_preview',configPath,browseHome:codexHome});
+  assert.equal(preview.sourceKind,'missing'); assert.equal(preview.setupState,'required');
+  const account = {id:'33333333-3333-4333-8333-333333333333',displayName:'Synthetic default',
+    upstreamBaseUrl:upstream.url+'/default',credential:syntheticReference('outgoing')};
+  await reusablePort(preview.context.listenPort);
+  const created = await setupCommit(bridge,configPath,preview,{kind:'create_configuration',account,
+    incomingCredential:null,defaultAccountId:null});
+  assert.equal(created.setupState,'required'); assert.equal(created.checkpointPath,null);
+  const saved = JSON.parse(await readFile(configPath));
+  assert.deepEqual(saved.projectRoutes,{}); assert.equal(saved.accountRouting.defaultAccountId,null);
+  assert.equal(saved.accountRouting.incomingCredential,null); assert.equal(saved.upstreamBaseUrl,upstream.url);
+  assert.equal(await readFile(providerPath,'utf8'),original);
+  // Use the preallocated fixture port after verifying first creation's preserved defaults.
+  saved.listenPort=port; await writeFile(configPath,JSON.stringify(saved),{mode:0o600});
+  const incomplete = start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',randomUUID()]);
+  incomplete.child.stdin.end(); assert.equal((await incomplete.closed)[0],1);
+  assert.equal(incomplete.stdout,''); await reusablePort(port);
+  const completion = await bridge({action:'setup_preview',configPath});
+  const completed = await setupCommit(bridge,configPath,completion,{kind:'set_default',defaultAccountId:account.id,
+    incomingCredential:syntheticReference('incoming')});
+  assert.equal(completed.setupState,'ready');
+  const configBytes = await readFile(configPath);
   const before = await bridge({action:'inspect',configPath});
+  assert.equal(before.configuration.mode,'accounts'); assert.equal(before.configuration.setupState,'ready');
+  assert.equal(before.configuration.defaultAccount.displayName,'Synthetic default');
   assert.equal(before.provider.state,'direct'); assert.equal(before.provider.proxyReady,false);
   assert.equal(before.catalog.entries[0].name,'Source denied synthetic project');
+  assert.equal(before.catalog.entries[0].assignmentKind,'inherited');
   const sessionId = randomUUID();
   const server = start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId]);
   await managedModes(server,before.context,sessionId,async()=>{

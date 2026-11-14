@@ -83,6 +83,17 @@ if len(sys.argv) > 2 and sys.argv[2] == 'serve':
         try:
             c, _ = listener.accept(); c.close()
         except socket.timeout: pass
+mode = behavior.get('mode', 'valid')
+if mode in ['stdinDelayed', 'stdinTimeout', 'stdinCancelled', 'stdinEarlyExit']:
+    with open(os.path.join(root, 'stdin-paused'), 'w') as f: f.write('paused')
+    if mode == 'stdinEarlyExit':
+        os.close(0)
+        with open(os.path.join(root, 'stdin-response')) as f: response = json.load(f)
+        print(json.dumps(dict(schemaVersion=1, ok=True, result=response))); sys.exit(0)
+    if mode == 'stdinCancelled':
+        deadline = time.monotonic() + 8
+        while not os.path.exists(os.path.join(root, 'release-stdin')) and time.monotonic() < deadline: time.sleep(.01)
+    else: time.sleep(1.5 if mode == 'stdinDelayed' else 6.3)
 request = json.load(sys.stdin)
 mode = behavior.get('mode', 'valid')
 if mode == 'heldMutation' and request['action'] != 'inspect':
@@ -96,6 +107,21 @@ if mode == 'unknown':
     print(json.dumps(dict(schemaVersion=1, ok=True, result=dict(configuration=dict(state='unknown'), provider=dict(state='unknown', recoveryRequired=False, proxyReady=True, recordPhase='none'), catalog=dict(state='ready', entries=[])))))
     sys.exit(0)
 if mode == 'malformed': print('SENTINEL_PRIVATE'); sys.exit(0)
+if request['action'] in ['setup_preview', 'setup_commit']:
+    config = request['configPath']
+    with open(config) as f: cfg = json.load(f)
+    context = dict(configPath=config, codexHome=cfg['home'], providerId='fixture', listenPort=cfg['port'])
+    ref = dict(keychainPath='/private/synthetic.keychain-db', service='synthetic', account='existing')
+    account = dict(id='11111111-1111-4111-8111-111111111111', displayName='Existing', upstreamBaseUrl='https://example.invalid/api', credential=ref, sourceAlias=None)
+    if request['action'] == 'setup_preview':
+        result = dict(context=context, configurationRevision='a'*64, setupState='ready', sourceKind='accounts', accounts=[account], routeAccounts={}, incomingCredential=ref, defaultAccountId=account['id'], incomingHint=None, originalDirect=account)
+        if mode == 'setupUnknownState': result['setupState'] = 'future'
+        if mode == 'setupWrongContext': result['context']['configPath'] += '-wrong'
+    else:
+        with open(os.path.join(root, 'setup-request'), 'w') as f: json.dump(request, f)
+        result = dict(context=context, operationId=request['operationId'], setupState='ready', configurationRevision='b'*64, checkpointPath=None, changed=True)
+        if mode == 'setupLostReply': print('lost'); sys.exit(0)
+    print(json.dumps(dict(schemaVersion=1, ok=True, result=result))); sys.exit(0)
 if request['action'] == 'inspect':
     config = request.get('configPath')
     if config:
@@ -109,15 +135,20 @@ if request['action'] == 'inspect':
         provider_state = 'direct'
         if os.path.exists(os.path.join(root, 'provider-state')):
             with open(os.path.join(root, 'provider-state')) as f: provider_state = f.read()
-        result = dict(configuration=dict(state='valid', path=config, mode='legacy'), context=context,
+        result = dict(configuration=dict(state='valid', path=config, mode='accounts', setupState='ready'), context=context,
                       revision='fixture_revision', provider=dict(state=provider_state, recoveryRequired=provider_state == 'router', proxyReady=ready, recordPhase='active' if provider_state == 'router' else 'none'), catalog=dict(state='ready', entries=[]))
     else:
         result = dict(configuration=dict(state='missing'), provider=dict(state='unavailable', recoveryRequired=False, proxyReady=None, recordPhase='unavailable'), catalog=dict(state='ready', entries=[dict(id='A',name='Project',routeAlias=None,routeState='unmapped')]))
-else: result = dict(state='active' if request['action'] == 'activate' else 'direct', changed=True, restartRequired=True)
+if request['action'] == 'inspect' and request.get('configPath'):
+    if mode == 'setupRequired': result['configuration']['setupState'] = 'required'
+    if mode == 'legacySetup': result['configuration'].update(mode='legacy', setupState='migration_required')
+    if mode == 'wireUnknownSetup': result['configuration']['setupState'] = 'future'
+    if mode == 'wireUnknownAssignment': result['catalog']['entries'] = [dict(id='A', name='Project', routeAlias=None, routeState='unmapped', assignmentKind='future')]
+if request['action'] != 'inspect': result = dict(state='active' if request['action'] == 'activate' else 'direct', changed=True, restartRequired=True)
 if mode == 'delayedInspection' and request['action'] == 'inspect':
     with open(os.path.join(root, 'snapshot-captured'), 'w') as f: f.write('captured')
     while not os.path.exists(os.path.join(root, 'release-snapshot')): time.sleep(.01)
 if mode == 'overflow' and request['action'] == 'inspect':
     result['catalog']['entries'] = [dict(id='A', name='SENTINEL_PRIVATE' * 100000, routeAlias=None, routeState='unmapped')]
 print(json.dumps(dict(schemaVersion=1, ok=True, result=result)))
-sys.exit(9 if mode == 'exitFailure' else 0)
+sys.exit(9 if mode == 'exitFailure' or (mode == 'mutationExitFailure' and request['action'] != 'inspect') else 0)

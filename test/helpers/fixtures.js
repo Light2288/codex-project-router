@@ -4,6 +4,19 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 export const P1 = "11111111-1111-4111-8111-111111111111";
 export const P2 = "22222222-2222-4222-8222-222222222222";
+export const A1 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+export const A2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+export function accountRouting() {
+  return {
+    incomingCredential: { keychainPath: "/nonexistent/incoming.keychain-db", service: "synthetic-incoming", account: "incoming" },
+    defaultAccountId: A1,
+    accounts: {
+      [A1]: { displayName: "Default account", upstreamBaseUrl: "https://default.example.invalid/api/region/v1", credential: { keychainPath: "/nonexistent/default.keychain-db", service: "synthetic-default", account: "default" } },
+      [A2]: { displayName: "Project account", upstreamBaseUrl: "https://project.example.invalid/full/prefix/v1", credential: { keychainPath: "/nonexistent/project.keychain-db", service: "synthetic-project", account: "project" } },
+    },
+    routeAccounts: { "route-a": A2, "route-b": null },
+  };
+}
 export const T1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const T2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const CHILD = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";

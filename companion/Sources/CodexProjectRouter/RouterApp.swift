@@ -16,6 +16,7 @@ import CompanionCore
 
 @MainActor final class RouterAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let controller: RouterController
+    let accountSetup: AccountSetupController?
     let navigation: QuitGuidanceNavigation
     private var controlsWindow: NSWindow?
     private var polling: Timer?
@@ -28,12 +29,15 @@ import CompanionCore
     override convenience init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let resources = (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("router")
-        let controller = RouterController(backend: ProcessBackend(resourcesURL: resources, nodeExecutable: nil),
+        let backend = ProcessBackend(resourcesURL: resources, nodeExecutable: nil)
+        let controller = RouterController(backend: backend,
             store: PrivateStore(directory: home.appendingPathComponent(".codex-project-router/companion")),
             browseHome: home.appendingPathComponent(".codex"))
-        self.init(controller: controller)
+        let setup = AccountSetupController(router: controller, backend: backend, keychain: KeychainStore(), browseHome: home.appendingPathComponent(".codex"))
+        self.init(controller: controller, accountSetup: setup)
     }
     init(controller: RouterController,
+         accountSetup: AccountSetupController? = nil,
          navigation: QuitGuidanceNavigation? = nil,
          presentQuitAlert: @escaping @MainActor (NSAlert) async -> NSApplication.ModalResponse = {
              NSApp.activate(ignoringOtherApps: true)
@@ -41,7 +45,7 @@ import CompanionCore
          },
          showControls: (@MainActor () -> Void)? = nil,
          terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
-        self.controller = controller
+        self.controller = controller; self.accountSetup = accountSetup
         self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
         self.showControls = showControls
@@ -63,6 +67,7 @@ import CompanionCore
         RunLoop.main.add(timer, forMode: .common)
         polling = timer
     }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { accountSetup?.canDismiss ?? true }
     func windowWillClose(_ notification: Notification) {
         navigation.clear()
         scheduleRefresh(windowVisible: false)
@@ -81,7 +86,7 @@ import CompanionCore
         if controlsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Codex Project Router"
-            window.contentView = NSHostingView(rootView: ControlsView(controller: controller, navigation: navigation))
+            window.contentView = NSHostingView(rootView: ControlsView(controller: controller, navigation: navigation, accountSetup: accountSetup))
             window.minSize = NSSize(width: 760, height: 680)
             window.isReleasedWhenClosed = false
             window.delegate = self

@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
-import fs, { readFile, writeFile, unlink, realpath, symlink, readdir } from "node:fs/promises";
+import fs, { readFile, writeFile, unlink, realpath, symlink, readdir, chmod, mkdir } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { configFingerprint } from "../src/config.js";
 import { activate } from "../src/activation.js";
 import { inspectCompanion, runCompanionControl } from "../src/companion.js";
-import { fixture, P1, P2 } from "./helpers/fixtures.js";
+import { fixture, P1, P2, accountRouting, A1, A2 } from "./helpers/fixtures.js";
 
 const P3 = "33333333-3333-4333-8333-333333333333";
 const P4 = "44444444-4444-4444-8444-444444444444";
@@ -49,7 +49,7 @@ test("inspection projects each mode without secrets", async t => {
     const f = await setup(t, credential);
     const before = await Promise.all([readFile(f.configPath), readFile(f.providerPath), readFile(f.statePath)]);
     const result = await inspectCompanion({ configPath: f.configPath });
-    assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: credential ? "credential" : "legacy" });
+    assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: credential ? "credential" : "legacy", setupState: "migration_required" });
     assert.deepEqual(result.context, contextFor(f));
     assert.deepEqual(result.provider, { state: "direct", recoveryRequired: false, proxyReady: true, recordPhase: "none" });
     assert.deepEqual(result.catalog, { state: "ready", entries: expectedEntries(credential) });
@@ -229,3 +229,101 @@ for (const action of ["activate", "rollback"]) {
     });
   }
 }
+
+
+test("account inspection summarizes default and exact assignments without private references", async t => {
+  const f = await setup(t);
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  await f.saveConfig();
+  const result = await inspectCompanion({ configPath: f.configPath });
+  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" } });
+  assert.deepEqual(result.catalog.entries, [
+    { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped", assignmentKind: "override", account: { id: A2, displayName: "Project account" } },
+    { id: P2, name: "Beta", routeAlias: "route-b", routeState: "mapped", assignmentKind: "legacy_inherited", account: { id: A1, displayName: "Default account" } },
+  ]);
+  assert.doesNotMatch(JSON.stringify(result), /keychain|synthetic-incoming|default\.example|project\.example/);
+  delete f.config.accountRouting.routeAccounts["route-b"];
+  f.state["local-projects"][P3] = { id: P3, name: "Gamma" };
+  await f.saveConfig(); await f.saveState();
+  const entries = (await inspectCompanion({ configPath: f.configPath })).catalog.entries;
+  assert.deepEqual(entries[1], { id: P2, name: "Beta", routeAlias: "route-b", routeState: "target_missing", assignmentKind: "target_missing" });
+  assert.deepEqual(entries[2], { id: P3, name: "Gamma", routeAlias: null, routeState: "unmapped", assignmentKind: "inherited", account: { id: A1, displayName: "Default account" } });
+});
+
+test("invalid account inspection preserves catalog context and recovery without fresh setup", async t => {
+  const f = await setup(t);
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  await f.saveConfig();
+  const expectedContext = contextFor(f);
+  await activate(f.configPath);
+  f.config.accountRouting.defaultAccountId = "SECRET_SENTINEL";
+  await f.saveConfig(); await f.stop();
+  const result = await inspectCompanion({ configPath: f.configPath });
+  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "invalid" });
+  assert.deepEqual(result.context, expectedContext);
+  assert.equal(result.provider.state, "router");
+  assert.equal(result.provider.proxyReady, false);
+  assert.equal(result.catalog.state, "ready");
+  assert.equal(result.catalog.entries.length, 2);
+  assert.doesNotMatch(JSON.stringify(result), /SECRET_SENTINEL|keychain|default\.example/);
+  await assert.rejects(runCompanionControl({ action: "activate", configPath: f.configPath, expectedContext }), { code: "ACCOUNT_SETUP_INVALID" });
+  assert.equal((await runCompanionControl({ action: "rollback", configPath: f.configPath, expectedContext })).state, "direct");
+  assert.equal(await readFile(f.providerPath, "utf8"), f.original);
+});
+
+test("missing selected setup destination keeps explicit normal-home catalog without inventing context", async t => {
+  const f = await setup(t), browseHome = await realpath(f.dir);
+  await unlink(f.configPath);
+  const result = await inspectCompanion({configPath:f.configPath,browseHome});
+  assert.deepEqual(result.configuration,{state:"missing"});
+  assert.equal(result.catalog.state,"ready");
+  assert.deepEqual(result.catalog.entries.map(e=>e.name),["Alpha","Beta"]);
+  assert.ok(result.catalog.entries.every(e=>e.routeAlias===null && e.routeState==="unmapped"));
+  assert.equal(result.context,undefined); assert.equal(result.revision,undefined);
+  assert.equal(result.provider.state,"unavailable");
+  assert.equal(result.provider.recoveryRequired,false);
+  assert.equal(result.provider.proxyReady,null);
+  assert.doesNotMatch(JSON.stringify(result),secret);
+  assert.equal((await inspectCompanion({configPath:f.configPath})).catalog.state,"unavailable");
+  // A dangling link is existing unsafe evidence, not an absent setup destination.
+  await symlink(f.configPath+".absent",f.configPath);
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
+  await unlink(f.configPath);
+  const linkedDirectory=join(f.dir,"linked directory"); await symlink(f.dir,linkedDirectory);
+  assert.equal((await inspectCompanion({configPath:join(linkedDirectory,"absent.json"),browseHome})).catalog.state,"unavailable");
+  for (const bytes of ["{SECRET_SENTINEL",JSON.stringify({...f.config,schemaVersion:999})]) {
+    await writeFile(f.configPath,bytes,{mode:0o600});
+    assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
+  }
+  await f.saveConfig(); await chmod(f.configPath,0o644);
+  assert.equal((await inspectCompanion({configPath:f.configPath,browseHome})).catalog.state,"unavailable");
+});
+
+test("valid selected configuration keeps its own home authoritative over browse fallback", async t => {
+  const f=await setup(t), other=join(f.dir,"other home"); await mkdir(other);
+  await writeFile(join(other,".codex-global-state.json"),JSON.stringify({"local-projects":{[P3]:{id:P3,name:"Wrong fallback"}}}));
+  const result=await inspectCompanion({configPath:f.configPath,browseHome:other});
+  assert.deepEqual(result.catalog.entries,expectedEntries(false));
+  assert.deepEqual(result.context,contextFor(f));
+});
+
+
+test("missing destination provider recovery stays required for unsafe or unsettled direct evidence", async t => {
+  const f=await setup(t), browseHome=await realpath(f.dir); await unlink(f.configPath);
+  const inspect=()=>inspectCompanion({configPath:f.configPath,browseHome});
+  assert.equal((await inspect()).provider.recoveryRequired,false);
+  for(const name of ["activation.json","companion-journal.json","codex-config-11111111-1111-4111-8111-111111111111.toml","account-setup-checkpoint-synthetic.json"]) {
+    const path=join(f.dir,name); await writeFile(path,"SECRET_SENTINEL",{mode:0o600});
+    assert.equal((await inspect()).provider.recoveryRequired,true,name);
+    assert.equal(await readFile(path,"utf8"),"SECRET_SENTINEL"); await unlink(path);
+  }
+  for(const bytes of ["{SECRET_SENTINEL",f.original.replace("supports_websockets = false","supports_websockets = true"),f.original.replace(f.config.upstreamBaseUrl,"http://127.0.0.1:8787/v1")]) {
+    await writeFile(f.providerPath,bytes); assert.equal((await inspect()).provider.recoveryRequired,true);
+  }
+  await writeFile(f.providerPath,f.original); await chmod(f.dir,0o755);
+  assert.equal((await inspect()).provider.recoveryRequired,true); await chmod(f.dir,0o700);
+  await unlink(f.providerPath); await symlink(f.statePath,f.providerPath);
+  assert.equal((await inspect()).provider.recoveryRequired,true);
+});
