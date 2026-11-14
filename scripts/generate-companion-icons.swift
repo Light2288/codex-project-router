@@ -51,8 +51,7 @@ func trimmed(_ image: CGImage) throws -> CGImage {
     guard maxX >= minX, maxY >= minY else { throw failure("Menu-bar source contains no visible artwork") }
     minX = max(0, minX - 1); minY = max(0, minY - 1)
     maxX = min(image.width - 1, maxX + 1); maxY = min(image.height - 1, maxY + 1)
-    guard
-          let normalized = canvas.makeImage(),
+    guard let normalized = canvas.makeImage(),
           let crop = normalized.cropping(to: CGRect(x: minX, y: minY,
               width: maxX - minX + 1, height: maxY - minY + 1)) else {
         throw failure("Menu-bar source contains no visible artwork")

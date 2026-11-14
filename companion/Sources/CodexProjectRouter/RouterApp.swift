@@ -11,9 +11,15 @@ import CompanionCore
             Divider()
             Button("Quit Codex Project Router") { delegate.requestQuit() }.keyboardShortcut("q")
         } label: {
-            Image("MenuBarIconTemplate")
-                .renderingMode(.template)
-                .accessibilityLabel("Codex Project Router")
+            Group {
+                if let icon = NSImage(named: "MenuBarIconTemplate") {
+                    Image(nsImage: icon).renderingMode(.template)
+                } else {
+                    Image(systemName: "arrow.triangle.branch")
+                        .onAppear { NSLog("Menu-bar artwork unavailable; using the routing symbol.") }
+                }
+            }
+            .accessibilityLabel("Codex Project Router")
         }
     }
 }
