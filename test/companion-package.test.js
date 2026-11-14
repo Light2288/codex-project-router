@@ -8,12 +8,12 @@ import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import net from 'node:net';
 import https from 'node:https';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
-const brandingNames = ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff'];
+const brandingNames = ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff'];
 const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
 const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
@@ -294,8 +294,27 @@ test('assembly copies the explicit production allowlist and rejects dependency d
   await assembleCompanion({binaryPath:binary,routerRoot:router,outputPath:output});
   const resources = join(output,'Contents/Resources/router');
   assert.deepEqual(await tree(resources), ['node_modules/smol-toml/LICENSE','node_modules/smol-toml/dist/index.js','node_modules/smol-toml/package.json','package.json',...sourceNames.map(n=>'src/'+n)].sort());
-  assert.deepEqual((await readdir(join(output,'Contents/Resources'))).sort(), ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff','router']);
+  assert.deepEqual((await readdir(join(output,'Contents/Resources'))).sort(), ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff','router']);
   assert.equal((await run('/usr/bin/swift',[brandingProbe,output],{timeout:30_000})).stdout,'branding-package-pass\n');
+  const hashes = {
+    'assets/branding/codex-project-router.png':'dce0a2d6e486622ed741b902eb3c43d71f2b5d685d24aa82726d6ca40725723b',
+    'assets/branding/menu-bar-source.png':'71343bcb526218ab25a0a9f06a525f5986b68a34d8cecd556874f978a9561d1d',
+    'companion/Resources/CompanionIcon.png':'dce0a2d6e486622ed741b902eb3c43d71f2b5d685d24aa82726d6ca40725723b',
+    'companion/Resources/MenuBarIconTemplate.tiff':'ab61605ff0b7f10da013d254f61172b13dd0f6c3965050f37473ad7cdbf3c026',
+  };
+  for (const [name,hash] of Object.entries(hashes)) {
+    assert.equal(createHash('sha256').update(await readFile(join(root,name))).digest('hex'),hash,
+      'Original and unrelated artwork must be preserved: '+name);
+  }
+  assert.equal((await run('/usr/bin/swift',[brandingProbe,'--artwork',join(root,'assets/branding/AppIcon.icon/Assets/Artwork.png')],{timeout:30_000})).stdout,'branding-artwork-pass\n');
+  const catalogApp = join(dir,'Catalog Only.app');
+  await cp(output,catalogApp,{recursive:true});
+  await rm(join(catalogApp,'Contents/Resources/AppIcon.icns'));
+  assert.equal((await run('/usr/bin/swift',[brandingProbe,catalogApp,'--catalog-only'],{timeout:30_000})).stdout,'branding-catalog-pass\n');
+  await writeFile(join(catalogApp,'Contents/Resources/Assets.car'),'invalid catalog');
+  await assert.rejects(run('/usr/bin/swift',[brandingProbe,catalogApp,'--catalog-only'],{timeout:30_000}), /Cannot resolve AppIcon from Assets.car/);
+  await rm(join(catalogApp,'Contents/Resources/Assets.car'));
+  await assert.rejects(run('/usr/bin/swift',[brandingProbe,catalogApp,'--catalog-only'],{timeout:30_000}), /Cannot read icon catalog Assets.car/);
   await writeFile(join(output,'Contents/Resources/CompanionIcon.png'),'invalid image');
   await assert.rejects(run('/usr/bin/swift',[brandingProbe,output],{timeout:30_000}), /Cannot decode CompanionIcon.png/);
   assert.equal((await stat(join(output,'Contents/MacOS/CodexProjectRouter'))).mode & 0o111,0o111);
@@ -348,6 +367,9 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     ['build','--package-path','companion','-c','release','--show-bin-path'],
   ]);
   await run('/usr/bin/codesign',['--verify','--deep','--strict',join(buildRoot,'dist/Codex Project Router.app')]);
+  await rm(join(buildRoot,'companion/Resources/Assets.car'));
+  await assert.rejects(run(node,[join(buildRoot,'scripts/build-companion.mjs')],{cwd:dir,env:{PATH:join(buildRoot,'fixture bin')+':/usr/bin:/bin',HOME:dir,TMPDIR:tmpdir()}}), /branding resource Assets.car/);
+  await cp(join(app,'Contents/Resources/Assets.car'),join(buildRoot,'companion/Resources/Assets.car'));
   await rm(join(buildRoot,'companion/Resources/MenuBarIconTemplate.tiff'));
   await assert.rejects(run(node,[join(buildRoot,'scripts/build-companion.mjs')],{cwd:dir,env:{PATH:join(buildRoot,'fixture bin')+':/usr/bin:/bin',HOME:dir,TMPDIR:tmpdir()}}), /branding resource MenuBarIconTemplate.tiff/);
   const home=join(dir,'private codex'); await mkdir(home,{mode:0o700});

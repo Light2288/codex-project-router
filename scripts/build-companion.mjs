@@ -35,7 +35,7 @@ export async function assembleCompanion({binaryPath,routerRoot,outputPath}) {
   await copyRegular(binaryPath,join(contents,'MacOS/CodexProjectRouter'));
   await chmod(join(contents,'MacOS/CodexProjectRouter'),0o755);
   await copyRegular(join(root,'companion/Resources/Info.plist'),join(contents,'Info.plist'));
-  for (const name of ['AppIcon.icns','CompanionIcon.png','MenuBarIconTemplate.tiff']) {
+  for (const name of ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff']) {
     try {
       await copyRegular(join(root,'companion/Resources',name),join(contents,'Resources',name));
     } catch (cause) {
