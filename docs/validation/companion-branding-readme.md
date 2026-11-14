@@ -97,5 +97,19 @@ private configuration and the existing companion session were not changed.
 
 ## Final review
 
-The required integrated specification-then-quality review is pending. Its
-identity and findings will be recorded here after both stages finish.
+The integrated review stopped at **SPEC REVIEW: BLOCKED**. The reviewer verified
+the package identity and its 21-file change list, then found inconsistent stage
+metadata: the specification retains its historical Stage 3 marker while the
+approved plan records Stage 4. The implementation approvals are recorded in the
+plan and execution ledger. No product defect was reported, but specification
+review did not return PASS, so quality review was not dispatched.
+
+The reviewer's remedy is to correct or explicitly contextualize the
+specification's stage marker and provide an updated review package. The active
+review skill requires stopping on BLOCKED; that remedy has not been applied in
+this run. Task 3 remains open, and final quality approval is unobserved.
+
+- `GATE_RUN_ID`: `28241290-b5be-4e4e-8452-6a1ce0826216`
+- `REVIEWED_STATE_ID`: `50f73d21-72c4-4708-8609-701673033fdc`
+- `PACKAGE_SHA256`: `d9b3f68aab77af8848edf0f5f882ddd98ef562144d647942752b746c2a7a695f`
+- Reviewed implementation commit: `609ee6b`.
