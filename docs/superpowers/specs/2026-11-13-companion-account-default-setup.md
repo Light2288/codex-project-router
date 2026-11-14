@@ -10,7 +10,7 @@
 
 **Updated:** 2026-11-14
 
-**Implementation lifecycle:** Native/live account-default evidence and operational recovery recorded in [validation](../../validation/companion-account-default-setup.md). Task 8 task review is complete through `888ccd9`: specification compliant, quality Approved; intentional Security deprecations classified Minor. The sole final sequential specification/quality gate and local closeout remain pending. Approved requirements/design are unchanged.
+**Implementation lifecycle:** Locally complete. All task gates and the sole final sequential gate are complete: specification PASS and quality APPROVED on `ee8bd85`; both findings addressed, no new findings. [Validation](../../validation/companion-account-default-setup.md) distinguishes post-fix automated evidence from earlier human native/live observations and records exact operational recovery. Documentation closeout is complete; parent final archival/reporting/checks form the endpoint. Push and merge remain unauthorized. Approved requirements/design are unchanged.
 
 **Storage:** Saved in the existing checkout; commit with the separately approved plan on the implementation branch.
 
@@ -182,4 +182,4 @@ Deferred work remains account editing/deletion, live assignment editing, hiding/
 
 **Execution endpoint:** Deliver only this account/default increment, complete verification/review and operational recovery, commit locally, report evidence and limitations, then stop before subsequent increments, push or merge.
 
-**Current stage: Stage 4 — implementation authorized.** The specification was approved by the message reproducing it; the separately presented implementation plan was subsequently approved with `plan approved`. The user then selected Subagent-driven execution. Both artifacts are saved; push and merge remain unauthorized. Task 8 task review is complete (specification compliant, quality Approved; intentional Security deprecations Minor). The sole final sequential gate and local closeout remain pending.
+**Current stage: Stage 4 — locally complete.** The specification was approved by the message reproducing it; the separately presented implementation plan was subsequently approved with `plan approved`. The user then selected Subagent-driven execution. Both artifacts are saved; push and merge remain unauthorized. Task 8 task review and the sole final sequential gate are complete: specification PASS, quality APPROVED on `ee8bd85`, both findings addressed and no new findings. Documentation closeout is complete; parent final archival, checks and reporting form the endpoint. No next increment, push or merge is authorized.

@@ -3,12 +3,13 @@
 Created: 2026-11-13
 Updated: 2026-11-14
 
-Status: automated verification, isolated native setup, the bounded live
-account/default observations and operational recovery below are complete.
-Task 8 task review is complete through `888ccd9`: specification compliant,
-quality Approved; intentional Security deprecations classified Minor. The sole
-final sequential specification/quality gate and local closeout remain pending.
-Historical results do not establish this increment's acceptance.
+Status: locally complete. Post-fix automated acceptance and the sole final
+sequential gate are complete: specification PASS and quality APPROVED on
+`ee8bd85`, both original findings addressed and no new findings. Earlier human
+native/live observations and exact operational recovery remain recorded with
+their limits; no post-fix human UI/live repeat is claimed. Parent final archival,
+checks and reporting form the endpoint. No push, merge or next increment is
+authorized.
 
 Scope: the approved account/default setup increment, governed by its
 [specification](../superpowers/specs/2026-11-13-companion-account-default-setup.md)
@@ -19,17 +20,30 @@ from the configured outgoing default.
 
 ## Automated acceptance
 
-The fresh ordered acceptance on the current two-count diagnostic source ran from
-the repository: native tests **236/236** (176 Core, 60 App), current release
-build/ad-hoc signing, Node tests **812/812**, and exactly **3/3 package tests with
-zero skips**. Each command exited 0 in that order; `node --check src/cli.js` and
-`git diff --check` then passed. No product/test edits occurred between commands.
-The earlier repair acceptance recorded 234 native tests (176 Core, 58 App);
-that historical result is retained separately from this fresh run. Parent
-independently rechecked the decisive proof and the current bundle signature
-verification (exit 0); product source remained frozen after the ordered gate.
-The signed artifact is an ignored local Apple-silicon app, not a distribution
-notarization claim. All package results below use that current artifact.
+The final ordered acceptance on post-fix implementation `ee8bd85` ran from the
+repository with every command exiting 0 in the required order:
+
+| Order | Command | Decisive result |
+| --- | --- | --- |
+| 1 | `npm run companion:test` | **238/238**: 176 Core + 62 App, zero failures |
+| 2 | `npm run companion:build` | Current release app built and ad-hoc signed |
+| 3 | `npm test` | **817/817**, zero failures/cancellations/skips/todo |
+| 4 | `npm run companion:package-test` | Exactly **3/3**, zero failures/cancellations/skips/todo |
+| 5 | `node --check src/cli.js` | Passed, no output |
+| 6 | `git diff --check` | Passed, no output |
+
+The pre-fix diagnostic revision passed 236 native tests (176 Core, 60 App),
+812 Node tests and three zero-skip package tests, plus signed build/syntax/
+whitespace. The still earlier repair run passed 234 native tests (176 Core,
+58 App). Both are historical results, superseded for current-source automated
+acceptance by 238/817/3 above. Parent independently rechecked the earlier decisive
+proof and signature; neither earlier signed artifact is relabeled as the final
+post-fix human UI observation.
+
+The current signed artifact is an ignored local Apple-silicon app, not a
+distribution notarization claim. Current package results use the rebuilt
+post-fix artifact. Earlier development failures and native/live observations
+below retain their original attribution.
 
 Test-first `npm test` failed before the production resource change: 808 tests,
 805 passed, three package failures and zero skips. Assembly decisively required
@@ -86,6 +100,11 @@ visible without global suppression.
 
 ## Native and live observations
 
+All human native, keyboard and live observations in this section predate
+`ee8bd85` and used the pre-fix signed artifact. No post-fix human UI/live repeat
+is claimed. Focused regressions and actual disposable native/package checks
+verify the final changes; they do not replace or relabel these observations.
+
 The user observed the isolated synthetic catalog, setup-required/missing-default
 state and disabled Start in an attributed native window. The first native Save
 failed before a configuration, receipt, lease or Keychain item was created; the
@@ -120,7 +139,7 @@ claimed.
 | Exact direct restoration, manual restart/response confirmation | Completed final Restore direct, manual restart, fresh working direct reply, actual direct-response button, guarded Stop and normal Quit. Original active-provider definition and owned normal router settings restored; unrelated settings preserved |
 | Native fixture cleanup | Owned disposable Keychain/root removed; default Keychain unchanged. Final recorded native/Node/logger processes absent and independent port check empty; context records settled and journal restored |
 | Task 8 task review | Complete through `888ccd9`: specification compliant, quality Approved; intentional Security deprecations Minor |
-| Sole final sequential specification/quality gate and local closeout | Pending; final quality stage has not been dispatched |
+| Sole final sequential specification/quality gate and local closeout | Specification PASS; quality APPROVED on `ee8bd85`; both findings addressed, no new findings. Documentation closeout complete; parent final archival/checks/reporting is the endpoint |
 
 On 2026-11-14, a distinct current keyboard check used the same signed app opened
 through LaunchServices while stopped/Direct, with original normal selection,
@@ -271,8 +290,13 @@ restore changed only owned selection/runtime/pending fields and their original
 optional-property presence. The final parsed journal equals its original; no
 provider or catalog write was used for that restoration. Raw final snapshots and
 full outcomes remain parent-private outside Git. No further live operation is
-needed for this evidence handoff. Task 8 task review is complete as recorded
-above; the sole final sequential gate and local closeout remain pending.
+needed for this evidence handoff. Task 8 task review, the sole final sequential
+gate and documentation closeout are complete as recorded below. The normal
+router configuration remains original and unmigrated; account setup remains in
+the private test capture/execution contexts. Parent's independent post-fix
+settled-state check confirmed journal/provider equality with the recovered
+snapshots, app absence and an empty port. No live application of account setup
+or further runtime action is implied.
 
 Before that successful import, the native form presented an empty list with
 identical privately compared filter values. Standalone probes compiled for both the app's deployment target
@@ -289,6 +313,54 @@ outside Git. This report records only sanitized outcomes. Prior live
 `499/CANCELLED` qualifications and the two accepted viewport/focus observations
 remain in the historical validation record; this increment neither erases them
 nor claims to have repeated those observations.
+
+
+## Final review and local closeout
+
+The sole sequential gate finished specification **PASS**, then quality
+**APPROVED**, on implementation commit
+`ee8bd85b91c0b982906700f8c3400266090a1032`. Its sanitized identity is:
+
+- Gate run: `account-default-final-304cc353-3257-4f04-8577-b7a88de2eb01`.
+- Reviewed state: `git-ee8bd85b91c0b982906700f8c3400266090a1032-fix-wave-4b1d07ff-d698-4fe1-a9c4-980a8a9ba07f`.
+- Final fix-package SHA-256: `554d8130f5f9b564b36b331ae2f37a3ed939bc9a7edbf4b7ac03894a6055b9ac`.
+
+Before substantive specification review, stale lifecycle text still described
+Task 8 review as pending despite its actual approval through `888ccd9`.
+Documentation reconciliation in `2c5099f` repaired that input inconsistency;
+it was neither a product defect nor a second final gate. The same sole gate
+then produced two findings, addressed in one combined fix wave. Its scoped
+specification re-review passed before scoped quality approval; both reports
+verified the unchanged package identity and exact-byte hash.
+
+| Original finding | Final remedy and verification | Disposition |
+| --- | --- | --- |
+| Important: enabled schema-1 import could discard/replace the saved global incoming verifier | Preview and native form preserve the existing verifier; authoritative commit compares against freshly loaded source and rejects null/different references before checkpoint/write. Regressions verify a distinct outgoing default, each reference-component refusal, unchanged files and continued explicit incoming choice for legacy/fresh setup | ADDRESSED |
+| Minor: native probe/reader lifecycle had a deadline and retained-cleanup gap | Probe is registered in retained lifecycle with a 20-second deadline and bounded TERM/KILL/group cleanup. POSIX-spawned reader inherits that owned group, has bounded wait/reaping, and permits scratch Keychain cleanup only after confirmed reaping; unverified cleanup retains evidence. Actual stalled-reader and unresponsive-probe fault cases passed | ADDRESSED |
+
+Final quality reported **new findings: NONE**. Focused setup tests passed 27/27;
+native presentation passed 14/14. Full fresh acceptance is the ordered
+238-native/817-Node/three-package sequence above. Both Node and separate package
+runs proved actual reader group inheritance, TERM-ignoring reader KILL/reaping,
+outer probe deadline/escalation, absent child PIDs/groups and verified owned
+scratch cleanup. Source-denial controls, managed Off/On controls, unchanged
+synthetic bytes, activation/rollback and zero control-time upstream connections
+also passed. These tests use disposable synthetic resources, not live-user
+settings or a new human UI observation.
+
+Intentional file-backed Security deprecations remain disclosed: seven release
+warning sites and thirteen per native harness compile, with no other warnings;
+the native test run had zero warning sites. No warning suppression or
+warning-free release claim is made. Harness versus packaged-app ACL identity
+remains distinct. The pre-fix picker and inherited-PTY exit causes remain
+unproven; deferred viewport/focus observations and bounded cancellation limits
+above are unchanged.
+
+The approved specification/plan content, approval provenance and dates are
+preserved; completed preflight/task checkboxes reflect the authoritative task
+ledger and gates. Documentation is closed locally. Parent owns final archival,
+Git/settled-state checks and the user report, then stops before another increment,
+push or merge. No further live operation or implicit migration is authorized.
 
 
 ## Execution decisions
