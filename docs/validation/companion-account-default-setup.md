@@ -120,6 +120,19 @@ claimed.
 | Native fixture cleanup | Owned disposable Keychain/root removed; default Keychain unchanged. Final recorded native/Node/logger processes absent and independent port check empty; context records settled and journal restored |
 | Task 8 task review; final sequential specification and quality review | Both pending; final gate has not started |
 
+On 2026-11-14, a distinct current keyboard check used the same signed app opened
+through LaunchServices while stopped/Direct, with original normal selection,
+runtime optional absence, no pending action and an empty port. The user explicitly
+reported that searching for a nonmatching public marker showed no matching
+projects; Command-A/Delete restored the list; one Tab/Shift-Tab cycle kept focus
+visible; and Command-Q quit normally. System keyboard settings remained unchanged,
+and no save, Start or activation was performed. Parent independently verified
+exact native exit, no remaining companion, empty port, original normal config and
+activation bytes preserved, and final parsed journal equal to the original. This
+is a narrow current search/keyboard/Quit observation, not a comprehensive focus
+audit or a fix for the two accepted predecessor viewport/focus limitations; both
+remain deferred.
+
 The first interrupted native consent attempt did not create an item. Its private
 prepared receipt and dead-owner lease were preserved before a controlled reset
 of that disposable fixture. The successful later creation does not retroactively
