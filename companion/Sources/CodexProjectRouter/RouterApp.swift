@@ -28,13 +28,14 @@ import CompanionCore
     let controller: RouterController
     let accountSetup: AccountSetupController?
     let navigation: QuitGuidanceNavigation
-    private var controlsWindow: NSWindow?
+    private(set) var controlsWindow: NSWindow?
     private var polling: Timer?
     private var quitInProgress = false
     private var terminationApproved = false
     private let presentQuitAlert: @MainActor (NSAlert) async -> NSApplication.ModalResponse
     private let showControls: (@MainActor () -> Void)?
     private let terminate: @MainActor () -> Void
+    private let setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Bool
 
     override convenience init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -54,12 +55,14 @@ import CompanionCore
              return $0.runModal()
          },
          showControls: (@MainActor () -> Void)? = nil,
-         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
+         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
+         setActivationPolicy: @escaping @MainActor (NSApplication.ActivationPolicy) -> Bool = { NSApp.setActivationPolicy($0) }) {
         self.controller = controller; self.accountSetup = accountSetup
         self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
         self.showControls = showControls
         self.terminate = terminate
+        self.setActivationPolicy = setActivationPolicy
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -79,8 +82,10 @@ import CompanionCore
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { accountSetup?.canDismiss ?? true }
     func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === controlsWindow else { return }
         navigation.clear()
         scheduleRefresh(windowVisible: false)
+        applyActivationPolicy(.accessory)
     }
     func windowDidMiniaturize(_ notification: Notification) { scheduleRefresh(windowVisible: false) }
     func windowDidDeminiaturize(_ notification: Notification) {
@@ -91,6 +96,11 @@ import CompanionCore
     func openControls() {
         showControlsWindow()
         Task { await controller.refresh() }
+    }
+    private func applyActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        if !setActivationPolicy(policy) {
+            NSLog("macOS rejected companion activation policy %ld; the next window action will retry.", policy.rawValue)
+        }
     }
     private func showControlsWindow() {
         if controlsWindow == nil {
@@ -103,6 +113,7 @@ import CompanionCore
             window.center()
             controlsWindow = window
         }
+        applyActivationPolicy(.regular)
         controlsWindow?.deminiaturize(nil)
         controlsWindow?.makeKeyAndOrderFront(nil)
         scheduleRefresh(windowVisible: true)

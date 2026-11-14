@@ -55,6 +55,16 @@ import CompanionCore
     }
     func testSavingKeepsControlsAndSheetAvailableUntilOutcome() async throws {
         try await withSetup { router, setup, backend in
+            var policies: [NSApplication.ActivationPolicy] = []
+            let delegate = RouterAppDelegate(controller: router, accountSetup: setup,
+                setActivationPolicy: { policies.append($0); return true })
+            defer {
+                delegate.controlsWindow?.close()
+                delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            }
+            delegate.openControls()
+            let window = try XCTUnwrap(delegate.controlsWindow)
+            await router.refreshAndWait()
             backend.holdCommit = true
             var form = AccountSetupForm(preview: try XCTUnwrap(setup.preview), intent: .setDefault)
             form.defaultSelection = AccountSetupForm.noDefault
@@ -62,13 +72,18 @@ import CompanionCore
             let saving = Task { await setup.save(change) }
             await backend.waitForCommit()
             XCTAssertEqual(setup.state, .saving); XCTAssertFalse(setup.canDismiss)
-            let delegate = RouterAppDelegate(controller: router, accountSetup: setup)
-            XCTAssertFalse(delegate.windowShouldClose(NSWindow()))
+            XCTAssertFalse(delegate.windowShouldClose(window))
+            window.performClose(nil)
+            XCTAssertTrue(window.isVisible)
+            XCTAssertEqual(policies, [.regular])
             XCTAssertFalse(AccountSetupPresentation(state: setup.state, routerCanSave: router.canBeginAccountSetup, createdItem: false).canSave)
             XCTAssertEqual(QuitGuidance.current(for: router).destination, .status)
             backend.releaseCommit(); await saving.value
             XCTAssertEqual(setup.state, .saved); XCTAssertTrue(setup.canDismiss)
-            XCTAssertTrue(delegate.windowShouldClose(NSWindow()))
+            XCTAssertTrue(delegate.windowShouldClose(window))
+            window.performClose(nil)
+            XCTAssertFalse(window.isVisible)
+            XCTAssertEqual(policies, [.regular, .accessory])
             XCTAssertNil(setup.preview?.defaultAccountId); XCTAssertFalse(router.canStart)
             XCTAssertEqual(backend.activations, 0); XCTAssertEqual(backend.starts, 0)
         }

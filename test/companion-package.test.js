@@ -493,7 +493,7 @@ test('native relocated app and bundled controls work with checkout reads denied 
     await new Promise(r=>setTimeout(r,100));
   }
   assert.equal(lockObserved,true,'native process must hold the synthetic store lock; HOME overrides alone are insufficient');
-  const windowProbe = 'import CoreGraphics; import Foundation; let pid = Int(CommandLine.arguments[1])!; let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []; let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }; print(found ? "visible-native-window" : "missing"); exit(found ? 0 : 1)';
+  const windowProbe = 'import AppKit; import CoreGraphics; let pid = Int(CommandLine.arguments[1])!; let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []; let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }; let regular = NSRunningApplication(processIdentifier: pid_t(pid))?.activationPolicy == .regular; print(regular ? "regular-native-app" : "missing-regular-policy"); print(found ? "visible-native-window" : "missing"); exit(found && regular ? 0 : 1)';
   await run('/usr/bin/swift',['-e',windowProbe,String(native.child.pid)],{cwd:dir,env,timeout:20_000});
   assert.deepEqual(JSON.parse(await readFile(join(store,'state.json'),'utf8')),{schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node});
   await assert.rejects(stat(configPath),{code:'ENOENT'});
