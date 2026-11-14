@@ -23,7 +23,7 @@ enum AccountFormError: Error, LocalizedError {
         case .credential: return "Select an exact existing item, or enter a new key and choose its Keychain."
         case .incoming: return "Confirm the incoming credential choice separately in Advanced."
         case .defaultChoice: return "Choose a default explicitly, or choose to leave setup incomplete."
-        case .changedImport: return "Import must preserve every saved account endpoint and credential reference. Refresh the preview."
+        case .changedImport: return "Import must preserve any saved incoming verifier and every saved account endpoint and credential reference. Refresh the preview."
         }
     }
 }
@@ -40,7 +40,7 @@ struct AccountSetupForm {
     var nativeAccountID: String?
     var defaultIsPreserved: Bool { preview.sourceKind == "accounts" && intent == .add }
     var isImport: Bool { ["legacy", "enabled"].contains(preview.sourceKind) }
-    var needsIncomingChoice: Bool { preview.incomingCredential == nil || isImport }
+    var needsIncomingChoice: Bool { preview.incomingCredential == nil }
     var offersDefaultChoice: Bool { !defaultIsPreserved }
     var selectableCredentialAccounts: [SetupPreview.Account] {
         accounts.filter { $0.id != nativeAccountID && (preview.sourceKind == "missing" || !isImport && intent == .add || $0.credential == nil) }
@@ -61,6 +61,9 @@ struct AccountSetupForm {
         }
     }
     func change() throws -> SetupChange {
+        if preview.sourceKind == "enabled" {
+            guard let preserved = preview.incomingCredential, incomingSelection == preserved else { throw AccountFormError.changedImport }
+        }
         if needsIncomingChoice && !incomingConfirmed { throw AccountFormError.incoming }
         let incoming = needsIncomingChoice ? incomingSelection : nil
         if let incoming, !Self.validReference(incoming) { throw AccountFormError.credential }
@@ -270,6 +273,7 @@ struct AccountMetadataLookupPresentation {
                     Toggle("I confirm this incoming choice separately", isOn: formBinding(\.incomingConfirmed, fallback: false))
                 } else if let incoming = current.preview.incomingCredential {
                     Text("Incoming desktop credential (preserved)").font(.headline)
+                    Text("The saved incoming verifier is retained. Desktop authentication is unchanged; credential access remains unverified.").font(.caption)
                     referenceDetails(incoming)
                 }
                 if current.needsIncomingChoice || !current.selectableCredentialAccounts.isEmpty {

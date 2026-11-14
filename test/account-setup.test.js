@@ -43,12 +43,14 @@ test("enabled migration preserves explicit old-global and unused pairs", async t
   assert.equal(preview.accounts.length, 4);
   assert.equal(preview.sourceKind, "enabled");
   assert.deepEqual(preview.incomingHint, ref);
+  assert.deepEqual(preview.incomingCredential, ref);
   assert.equal(Object.hasOwn(preview.routeAccounts, "constructor"), true);
   assert.equal(Object.hasOwn(preview.routeAccounts, "route-b"), false);
   const change = migration(preview); change.defaultAccountId = preview.originalDirect.id;
   const result = await f.commit(preview, change), saved = JSON.parse(await readFile(f.configPath));
   assert.equal(result.setupState, "ready"); assert.match(result.configurationRevision, /^[a-f0-9]{64}$/);
   assert.equal(saved.schemaVersion, 2); assert.equal(saved.credentialRouting, undefined);
+  assert.deepEqual(saved.accountRouting.incomingCredential, ref);
   assert.deepEqual(saved.projectRoutes, f.config.projectRoutes);
   assert.equal(saved.upstreamBaseUrl, f.config.upstreamBaseUrl);
   assert.equal(Object.hasOwn(saved, "observeRequestMetadata"), false);
@@ -61,6 +63,37 @@ test("enabled migration preserves explicit old-global and unused pairs", async t
   assert.deepEqual(await readFile(f.providerPath), before);
   assert.equal(await readFile(join(f.dir, ".activation.lock"), "utf8") !== "", true);
 });
+
+test("enabled migration retains its verifier when a distinct outgoing default is selected", async t => {
+  const f = await fixtureSetup(t), outgoing = {...ref, account: "separate-outgoing"};
+  f.config.credentialRouting.routeTargets["route-a"].credential = outgoing; await f.saveConfig();
+  const p = await f.preview(), change = migration(p), provider = await readFile(f.providerPath);
+  change.defaultAccountId = p.routeAccounts["route-a"];
+  change.incomingCredential = p.incomingCredential;
+  const result = await f.commit(p, change), saved = JSON.parse(await readFile(f.configPath));
+  assert.equal(result.setupState, "ready");
+  assert.deepEqual(saved.accountRouting.incomingCredential, ref);
+  assert.deepEqual(saved.accountRouting.accounts[change.defaultAccountId].credential, outgoing);
+  assert.deepEqual(saved.accountRouting.accounts[p.originalDirect.id].credential, ref);
+  assert.deepEqual(await readFile(f.providerPath), provider);
+});
+
+for (const [label, incomingCredential] of [
+  ["unset", null],
+  ["different Keychain", {...ref, keychainPath: "/different.keychain-db"}],
+  ["different service", {...ref, service: "different"}],
+  ["outgoing reference", {...ref, account: "outgoing"}],
+]) {
+  test(`enabled migration refuses ${label} incoming verifier without writing`, async t => {
+    const f = await fixtureSetup(t), original = await readFile(f.configPath), provider = await readFile(f.providerPath);
+    const p = await f.preview(), change = migration(p);
+    change.incomingCredential = incomingCredential;
+    await assert.rejects(f.commit(p, change), {code: "ACCOUNT_SETUP_INVALID"});
+    assert.deepEqual(await readFile(f.configPath), original);
+    assert.deepEqual(await readFile(f.providerPath), provider);
+    assert.equal((await readdir(f.dir)).some(name => name.startsWith("account-setup-checkpoint-") || name.endsWith(".tmp")), false);
+  });
+}
 
 test("legacy migration preserves labels as inheritance and exact case-sensitive mapping keys", async t => {
   const f = await fixtureSetup(t, "legacy");

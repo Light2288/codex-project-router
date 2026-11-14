@@ -32,11 +32,36 @@ async function tree(path, prefix = '') {
 
 function processes(t) {
   const children = [], ports = [], upstreams = [];
-  async function stop(tracked) {
-    if (tracked.child.exitCode === null && tracked.child.signalCode === null) tracked.child.kill('SIGTERM');
-    const deadline = setTimeout(() => tracked.child.kill('SIGKILL'), 2000);
-    try { await tracked.closed; } finally { clearTimeout(deadline); }
-    assert.throws(() => process.kill(tracked.child.pid, 0), {code:'ESRCH'});
+  function signal(tracked, name) {
+    try {
+      if (tracked.group) process.kill(-tracked.child.pid, name);
+      else if (tracked.child.exitCode === null && tracked.child.signalCode === null) tracked.child.kill(name);
+    } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
+  function groupExists(tracked) {
+    try { process.kill(-tracked.child.pid, 0); return true; }
+    catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  }
+  function stop(tracked) {
+    // Memoize the completed ownership check so later hooks cannot signal a reused PID.
+    return tracked.stopping ??= (async () => {
+      signal(tracked, 'SIGTERM');
+      let deadline, kill, finished = false;
+      try {
+        await Promise.race([
+          (async () => {
+            await tracked.closed;
+            // A retained native probe owns its reader's process group as well.
+            while (!finished && tracked.group && groupExists(tracked)) await new Promise(resolve => setTimeout(resolve, 25));
+          })(),
+          new Promise((_, reject) => {
+            deadline = setTimeout(() => reject(new Error('Synthetic child/group did not exit and reap')), 5000);
+            kill = setTimeout(() => { try { signal(tracked, 'SIGKILL'); } catch (error) { reject(error); } }, 2000);
+          }),
+        ]);
+        assert.throws(() => process.kill(tracked.child.pid, 0), {code:'ESRCH'});
+      } finally { finished = true; clearTimeout(kill); clearTimeout(deadline); }
+    })();
   }
   t.after(async () => {
     // Complete every cleanup/check even if an earlier child or port fails.
@@ -51,6 +76,15 @@ function processes(t) {
   });
   return {
     stop,
+    async wait(tracked, timeoutMs) {
+      let deadline;
+      try {
+        return await Promise.race([
+          tracked.closed,
+          new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error('Synthetic process deadline exceeded')), timeoutMs); }),
+        ]);
+      } finally { clearTimeout(deadline); await stop(tracked); }
+    },
     async port() {
       const free = net.createServer(); free.listen(0,'127.0.0.1'); await once(free,'listening');
       const port = free.address().port; await new Promise(resolve => free.close(resolve));
@@ -58,7 +92,7 @@ function processes(t) {
     },
     start(executable, args, options) {
       const child = spawn(executable,args,{...options,stdio:['pipe','pipe','pipe']});
-      const tracked = {child,closed:once(child,'close'),stdout:'',stderr:'',offset:0};
+      const tracked = {child,closed:once(child,'close'),stdout:'',stderr:'',offset:0,group:options?.detached === true};
       child.stdout.on('data',data => tracked.stdout += data);
       child.stderr.on('data',data => tracked.stderr += data);
       children.push(tracked); return tracked;
@@ -133,12 +167,15 @@ async function setupCommit(bridge, configPath, preview, change) {
 }
 const syntheticReference = account => ({keychainPath:'/synthetic-unavailable.keychain-db',service:'package-fixture',account});
 
-async function nativeKeychainProbe(t, dir, app, node) {
+async function nativeKeychainProbe(t, dir, app, node, lifecycle) {
   const executable = join(dir,'native keychain probe'), reader = join(dir,'reader probe.mjs');
   const nativeRoot = await realpath(await mkdtemp(join(homedir(),'Library/Caches/codex-router-package-probe-')));
   let nativeCleanupVerified = false;
   // Preserve owned evidence if native cleanup fails, instead of unlinking its file first.
-  t.after(async()=>{ if (nativeCleanupVerified) await rmdir(nativeRoot); });
+  t.after(async()=>{
+    if (nativeCleanupVerified) await rmdir(nativeRoot);
+    else t.diagnostic('Native cleanup unverified; owned scratch evidence preserved at '+nativeRoot);
+  });
   // The public fixture is constructed independently in each process, never passed in argv or pipes.
   await writeFile(reader, `import {pathToFileURL} from 'node:url';
 const [modulePath,keychainPath,service,account] = process.argv.slice(2);
@@ -159,12 +196,56 @@ try {
   assert.ok(diagnostics.length > 0);
   assert.ok(diagnostics.every(line=>line.includes('deprecated')),'only intentional file-backed Security API diagnostics are expected');
   t.diagnostic(`Native harness compilation emitted ${diagnostics.length} intentional file-backed Security API deprecation diagnostics; no other warnings.`);
-  const result = await run(executable,[nativeRoot,node,reader,join(app,'Contents/Resources/router/src/credentials.js')],
-    {cwd:dir,env:{PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'},maxBuffer:16*1024});
-  assert.equal(result.stdout,'native-keychain-package-pass\n');
+  const options = {cwd:dir,env:{PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'},detached:true};
+  const result = lifecycle.start(executable,[nativeRoot,node,reader,join(app,'Contents/Resources/router/src/credentials.js')],options);
+  result.child.stdin.end();
+  assert.deepEqual(await lifecycle.wait(result,20_000),[0,null]);
+  assert.equal(result.stdout,'native-keychain-cleanup-pass\nnative-keychain-package-pass\n');
   assert.equal(result.stderr,'');
   assert.deepEqual(await readdir(nativeRoot),[],'owned scratch Keychain directory must be removed');
   nativeCleanupVerified = true;
+
+  // The real native timeout must reap a reader that ignores polite termination,
+  // then finish its owned Keychain cleanup before returning a fixed failure.
+  const stalledRoot = await realpath(await mkdtemp(join(homedir(),'Library/Caches/codex-router-package-probe-')));
+  let stalledCleanupVerified = false;
+  t.after(async()=>{
+    if (stalledCleanupVerified) await rmdir(stalledRoot);
+    else t.diagnostic('Native cleanup unverified; owned scratch evidence preserved at '+stalledRoot);
+  });
+  const stalledReader = join(dir,'stalled reader.mjs'), readerPID = join(dir,'stalled reader.pid');
+  await writeFile(stalledReader, `import {writeFileSync} from 'node:fs';
+process.on('SIGTERM',()=>{});
+writeFileSync(${JSON.stringify(readerPID)},String(process.pid));
+setInterval(()=>{},1000);
+`);
+  const stalled = lifecycle.start(executable,[stalledRoot,node,stalledReader,'unused-synthetic-module'],options);
+  stalled.child.stdin.end();
+  let stalledPID, observedReaderGroup;
+  const [stalledExit] = await Promise.all([
+    lifecycle.wait(stalled,20_000),
+    (async()=>{
+      for (let i=0;i<200;i++) {
+        try { stalledPID = Number(await readFile(readerPID,'utf8')); break; }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+        await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      assert.ok(Number.isInteger(stalledPID) && stalledPID > 0);
+      const {stdout:readerGroup} = await run('/bin/ps',['-o','pgid=','-p',String(stalledPID)],{timeout:5000});
+      observedReaderGroup = Number(readerGroup.trim());
+      // If group inheritance regresses, let the still-owned native parent reap
+      // this synthetic reader and clean its Keychain before reporting failure.
+      if (observedReaderGroup !== stalled.child.pid) process.kill(stalledPID,'SIGKILL');
+    })(),
+  ]);
+  assert.deepEqual(stalledExit,[1,null]);
+  assert.equal(stalled.stdout,'native-keychain-cleanup-pass\nnative-keychain-package-fail\n');
+  assert.equal(stalled.stderr,'native-probe-failed-bundled-reader\n');
+  assert.deepEqual(await readdir(stalledRoot),[]);
+  stalledCleanupVerified = true;
+  assert.equal(observedReaderGroup,stalled.child.pid,'native reader must inherit the retained probe group');
+  assert.throws(()=>process.kill(stalledPID,0),{code:'ESRCH'});
+  t.diagnostic('A deliberately stalled reader ignored SIGTERM, was killed and reaped by the native deadline, and returned fixed failure after verified owned scratch cleanup. Both native probe process groups were absent.');
   t.diagnostic('Production native metadata/create, duplicate rejection and bundled fixed-reader comparison passed; the owned scratch Keychain/sidecars were removed, its current search-list entry was absent, and the opaque default handle stayed unchanged. Harness ACL identity differs from the packaged app.');
 }
 
@@ -177,6 +258,22 @@ async function requireBuiltApp(t) {
 }
 
 test('assembly copies the explicit production allowlist and rejects dependency drift', async t => {
+  const lifecycle = processes(t);
+  const stalled = lifecycle.start(process.execPath,['-e',`
+    const {spawn}=require('node:child_process');
+    process.on('SIGTERM',()=>{});
+    const reader=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});
+    console.log(reader.pid);
+    setInterval(()=>{},1000);
+  `],{detached:true});
+  stalled.child.stdin.end();
+  const readerPID = await nextFrame(stalled);
+  assert.ok(Number.isInteger(readerPID) && readerPID > 0);
+  await assert.rejects(lifecycle.wait(stalled,100),/Synthetic process deadline exceeded/);
+  assert.equal(stalled.child.signalCode,'SIGKILL','an unresponsive probe must reach the hard deadline');
+  assert.throws(()=>process.kill(readerPID,0),{code:'ESRCH'},'the grouped reader must exit and be reaped too');
+  t.diagnostic('Synthetic unresponsive probe hit its bounded deadline; its reader exited, the probe required SIGKILL, both PIDs and the retained process group were absent.');
+
   const {assembleCompanion} = await import('../scripts/build-companion.mjs');
   const dir = await temporary(t), router = join(dir,'synthetic checkout');
   await mkdir(join(router,'src'),{recursive:true});
@@ -270,6 +367,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   await lifecycle.stop(compatibility);
   const sourceBytes = await readFile(configPath), preview = await bridge({action:'setup_preview',configPath});
   assert.equal(preview.sourceKind,'enabled'); assert.equal(preview.accounts.length,2);
+  assert.deepEqual(preview.incomingCredential,incoming);
   const defaultAccount = preview.accounts.find(account=>account.sourceAlias === 'synthetic-route');
   assert.ok(defaultAccount);
   const migrated = await setupCommit(bridge,configPath,preview,{kind:'migrate',accounts:preview.accounts.map(({id,displayName,upstreamBaseUrl,credential})=>({id,displayName,upstreamBaseUrl,credential})),
@@ -319,7 +417,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   assert.equal((await bridge({action:'inspect',configPath})).provider.proxyReady,false);
   assert.equal(upstream.connections(),0);
   await reusablePort(port);
-  await nativeKeychainProbe(t,dir,app,node);
+  await nativeKeychainProbe(t,dir,app,node,lifecycle);
   for(const location of [join(dir,'Git checkout'),join(app,'Contents/Resources')]) {
     await mkdir(location,{recursive:true});if(location.includes('Git checkout'))await mkdir(join(location,'.git'));
     const forbidden=join(location,'private-config.json');await writeFile(forbidden,JSON.stringify(config),{mode:0o600});

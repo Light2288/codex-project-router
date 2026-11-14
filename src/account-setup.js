@@ -147,7 +147,7 @@ function preview(s) {
     sourceKind:!s.file?"missing":cfg.schemaVersion===2?"accounts":cfg.credentialRouting?"enabled":"legacy",
     accounts:cfg.accountRouting?Object.entries(cfg.accountRouting.accounts).map(([id,a])=>({id,...a,sourceAlias:null})):proposed.accounts,
     routeAccounts:cfg.accountRouting?.routeAccounts ?? proposed.routeAccounts,
-    incomingCredential:cfg.accountRouting?.incomingCredential ?? null,defaultAccountId:cfg.accountRouting?.defaultAccountId ?? null,
+    incomingCredential:cfg.accountRouting?.incomingCredential ?? cfg.credentialRouting?.globalCredential ?? null,defaultAccountId:cfg.accountRouting?.defaultAccountId ?? null,
     incomingHint:incomingHint(compatible.data.model_providers[cfg.providerId].auth),originalDirect:proposed.originalDirect};
 }
 export async function previewAccountSetup({configPath,browseHome} = {}) {
@@ -175,6 +175,7 @@ function apply(s,p,change) {
   const routing = value.accountRouting ?? {incomingCredential:null,defaultAccountId:null,accounts:{},routeAccounts:{}};
   if (change.kind === "migrate") {
     if (!s.file || s.cfg.schemaVersion !== 1 || !exact(change,["kind","accounts","incomingCredential","defaultAccountId"]) || !Array.isArray(change.accounts) || change.accounts.length !== p.accounts.length) throw invalid();
+    if (s.cfg.credentialRouting && !isDeepStrictEqual(change.incomingCredential,s.cfg.credentialRouting.globalCredential)) throw invalid();
     const accounts = change.accounts.map(account), names = new Set();
     if (new Set(accounts.map(a=>a.id)).size !== accounts.length) throw invalid();
     for (const candidate of p.accounts) {

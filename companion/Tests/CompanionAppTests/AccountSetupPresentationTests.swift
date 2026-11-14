@@ -8,8 +8,8 @@ import CompanionCore
     private let outgoing = CredentialReference(keychainPath: "/synthetic/outgoing.keychain-db", service: "outgoing", account: "account")
     private let incoming = CredentialReference(keychainPath: "/synthetic/incoming.keychain-db", service: "desktop", account: "caller")
     private func preview(source: String = "missing") -> SetupPreview {
-        let direct = SetupPreview.Account(id: accountID, displayName: "Default", upstreamBaseUrl: "https://direct.example/v1", credential: source == "missing" ? nil : outgoing, sourceAlias: nil)
-        return SetupPreview(context: .init(configPath: "/synthetic/config.json", codexHome: "/synthetic/codex", providerId: "provider", listenPort: 43123), configurationRevision: "synthetic", setupState: source == "accounts" ? "ready" : "migration_required", sourceKind: source, accounts: [direct], routeAccounts: ["legacy": nil], incomingCredential: source == "accounts" ? incoming : nil, defaultAccountId: source == "accounts" ? accountID : nil, incomingHint: nil, originalDirect: direct)
+        let direct = SetupPreview.Account(id: accountID, displayName: "Default", upstreamBaseUrl: "https://direct.example/v1", credential: source == "missing" ? nil : source == "enabled" ? incoming : outgoing, sourceAlias: nil)
+        return SetupPreview(context: .init(configPath: "/synthetic/config.json", codexHome: "/synthetic/codex", providerId: "provider", listenPort: 43123), configurationRevision: "synthetic", setupState: source == "accounts" ? "ready" : "migration_required", sourceKind: source, accounts: [direct], routeAccounts: ["legacy": nil], incomingCredential: ["accounts", "enabled"].contains(source) ? incoming : nil, defaultAccountId: source == "accounts" ? accountID : nil, incomingHint: nil, originalDirect: direct)
     }
     func testFirstAccountNeedsExplicitDefault() throws {
         // Selecting an outgoing item must never silently designate it as incoming or default.
@@ -61,12 +61,35 @@ import CompanionCore
         XCTAssertTrue(rows[1].contains("gone")); XCTAssertTrue(rows[1].contains("Inherited label"))
         XCTAssertTrue(rows[2].contains("Missing target"))
         var form = AccountSetupForm(preview: source, intent: .importConfiguration)
-        form.incomingSelection = incoming; form.incomingConfirmed = true; form.defaultSelection = secondID
-        guard case let .migrate(accounts, _, id) = try form.change() else { return XCTFail("Expected migration") }
+        XCTAssertFalse(form.needsIncomingChoice, "The enabled verifier is preserved, not offered for replacement")
+        form.defaultSelection = secondID
+        guard case let .migrate(accounts, selectedIncoming, id) = try form.change() else { return XCTFail("Expected migration") }
         XCTAssertEqual(accounts.map(\.id), [accountID, secondID]); XCTAssertEqual(id, secondID)
         XCTAssertEqual(accounts[1].credential, outgoing)
+        XCTAssertEqual(selectedIncoming, incoming)
         form.accounts[1].upstreamBaseUrl = "https://changed.example"
         XCTAssertThrowsError(try form.change(), "Import cannot replace a saved target")
+    }
+    func testEnabledImportRefusesDiscardingOrReplacingPreservedVerifier() throws {
+        var form = AccountSetupForm(preview: preview(source: "enabled"), intent: .importConfiguration)
+        form.defaultSelection = accountID
+        form.incomingConfirmed = true
+        for replacement in [nil, outgoing] as [CredentialReference?] {
+            form.incomingSelection = replacement
+            XCTAssertThrowsError(try form.change(), "Enabled import cannot replace its existing verifier")
+        }
+    }
+    func testLegacyImportStillRequiresExplicitIncomingChoice() throws {
+        var form = AccountSetupForm(preview: preview(source: "legacy"), intent: .importConfiguration)
+        form.defaultSelection = accountID
+        XCTAssertTrue(form.needsIncomingChoice)
+        XCTAssertThrowsError(try form.change())
+        form.incomingConfirmed = true
+        guard case let .migrate(_, selected, _) = try form.change() else { return XCTFail("Expected import") }
+        XCTAssertNil(selected, "An explicitly unset legacy verifier leaves setup incomplete")
+        form.incomingSelection = incoming
+        guard case let .migrate(_, selected, _) = try form.change() else { return XCTFail("Expected import") }
+        XCTAssertEqual(selected, incoming)
     }
     func testSetupRequiredKeepsCatalogAndRecovery() {
         let presentation = AccountSetupPresentation(state: .ready, routerCanSave: false, createdItem: false)

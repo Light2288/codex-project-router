@@ -153,6 +153,7 @@ private final class OwnedScratchKeychain {
     static func main() async {
         var scratch: OwnedScratchKeychain?
         var passed = false
+        var readerReaped = true
         var stage = "arguments"
         var originalDefault: (OSStatus, SecKeychain?)?
         do {
@@ -191,15 +192,56 @@ private final class OwnedScratchKeychain {
             try require(afterDuplicate == [reference])
 
             stage = "bundled-reader"
-            let child = Process(), output = Pipe(), errors = Pipe()
-            child.executableURL = URL(fileURLWithPath: args[2])
-            child.arguments = [args[3], args[4], reference.keychainPath, reference.service, reference.account]
-            child.environment = ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"]
-            child.standardInput = FileHandle.nullDevice; child.standardOutput = output; child.standardError = errors
-            try child.run(); child.waitUntilExit()
+            let output = Pipe(), errors = Pipe()
+            defer { output.fileHandleForReading.closeFile(); errors.fileHandleForReading.closeFile() }
+            var actions: posix_spawn_file_actions_t?
+            try require(posix_spawn_file_actions_init(&actions) == 0)
+            defer { posix_spawn_file_actions_destroy(&actions) }
+            try require(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0) == 0)
+            try require(posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, STDOUT_FILENO) == 0)
+            try require(posix_spawn_file_actions_adddup2(&actions, errors.fileHandleForWriting.fileDescriptor, STDERR_FILENO) == 0)
+            var attributes: posix_spawnattr_t?
+            try require(posix_spawnattr_init(&attributes) == 0)
+            defer { posix_spawnattr_destroy(&attributes) }
+            // Foundation Process creates a separate group on macOS. Inherit the
+            // Node owner's retained group, closing all unrelated descriptors.
+            try require(posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)) == 0)
+            let arguments = [args[2], args[3], args[4], reference.keychainPath, reference.service, reference.account].map { $0.withCString { strdup($0) } } + [nil]
+            let environment = ["PATH=/usr/bin:/bin", "LANG=en_US.UTF-8"].map { $0.withCString { strdup($0) } } + [nil]
+            defer { arguments.forEach { free($0) }; environment.forEach { free($0) } }
+            var readerPID: pid_t = 0
+            let launched = arguments.withUnsafeBufferPointer { argv in
+                environment.withUnsafeBufferPointer { env in
+                    posix_spawn(&readerPID, args[2], &actions, &attributes, argv.baseAddress!, env.baseAddress!)
+                }
+            }
+            output.fileHandleForWriting.closeFile(); errors.fileHandleForWriting.closeFile()
+            try require(launched == 0)
+            readerReaped = false
+            var status: Int32 = 0
+            func reapReader(before deadline: Double) async throws -> Bool {
+                repeat {
+                    let result = waitpid(readerPID, &status, WNOHANG)
+                    if result == readerPID { readerReaped = true; return true }
+                    try require(result == 0 || result == -1 && errno == EINTR)
+                    try await Task.sleep(nanoseconds: 25_000_000)
+                } while ProcessInfo.processInfo.systemUptime < deadline
+                return false
+            }
+            // Keep cleanup reachable on reader stalls; the longer Node deadline
+            // also covers blocked native operations and the whole reader group.
+            if try await !reapReader(before: ProcessInfo.processInfo.systemUptime + 8) {
+                try require(kill(readerPID, SIGTERM) == 0 || errno == ESRCH)
+                if try await !reapReader(before: ProcessInfo.processInfo.systemUptime + 1) {
+                    try require(kill(readerPID, SIGKILL) == 0 || errno == ESRCH)
+                    let reaped = try await reapReader(before: ProcessInfo.processInfo.systemUptime + 2)
+                    try require(reaped)
+                }
+                throw ProbeFailure.failed
+            }
             let bytes = output.fileHandleForReading.readDataToEndOfFile()
             let errorBytes = errors.fileHandleForReading.readDataToEndOfFile()
-            try require(child.terminationReason == .exit && child.terminationStatus == 0)
+            try require(status == 0)
             try require(bytes == Data("package-reader-pass\n".utf8) && errorBytes.isEmpty)
             passed = true
         } catch {
@@ -209,7 +251,12 @@ private final class OwnedScratchKeychain {
             if case KeychainError.nativeStatus(let status) = error { fputs("native-probe-status-\(status)\n", stderr) }
             if case ProbeFailure.nativeStatus(let status) = error { fputs("native-probe-status-\(status)\n", stderr) }
         }
-        do { try scratch?.cleanup() } catch {
+        do {
+            // A reader with unknown lifecycle may still use the scratch state.
+            // Preserve it for inspection rather than claim cleanup completed.
+            try require(readerReaped)
+            if let scratch { try scratch.cleanup(); print("native-keychain-cleanup-pass") }
+        } catch {
             passed = false
             fputs("native-probe-failed-\(scratch?.stage ?? "cleanup")\n", stderr)
             if case ProbeFailure.nativeStatus(let status) = error { fputs("native-probe-status-\(status)\n", stderr) }
