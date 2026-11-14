@@ -326,7 +326,14 @@ Ordinary `npm test` explicitly skips the two artifact integration tests when an
 app has not yet been built. Final package acceptance requires a current build and
 zero skipped package tests; rebuild when executable resources change.
 
-The controls window opens at launch; the menu-bar item reopens it after closing.
+The controls window opens at launch, showing the navy app icon in the Dock and
+making the companion available through **⌘Tab**. Minimizing the window or hiding
+the app keeps that presence. An allowed close returns the running app to the
+menu bar; **Open controls…** restores the same window and Dock presence. A close
+refused during account setup keeps both available. The menu-bar item stays
+available throughout. Pinned and recent Dock items follow macOS preferences.
+Dock **Quit** enters the same guarded termination flow as other Quit requests;
+closing controls leaves the controller and owned listener running.
 First launch discovers only an existing normal private router configuration, or
 allows selecting an existing file through a native panel. Configuration and Node
 selection, launch and refresh never start or activate the router. Browsing remains

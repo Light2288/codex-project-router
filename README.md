@@ -104,6 +104,11 @@ When recovery is required, use **Restore direct**, restart Codex, verify and
 confirm a direct response, then stop the owned listener when permitted. Closing
 the controls window leaves the companion running.
 
+The navy icon appears in the Dock and **⌘Tab** while controls are open, including
+when minimized or hidden. Closing controls returns the running app to the menu
+bar; **Open controls…** brings it back. **Quit** from the Dock uses the same
+guarded recovery checks. Pinned and recent Dock items follow your macOS settings.
+
 The companion supports account addition and explicit default selection. Account
 editing/deletion and project-assignment editing remain deferred; see the
 [configuration guide](docs/operating-guide.md#private-configuration) for saved mappings.

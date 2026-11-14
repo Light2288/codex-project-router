@@ -56,7 +56,9 @@ import CompanionCore
          },
          showControls: (@MainActor () -> Void)? = nil,
          terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
-         setActivationPolicy: @escaping @MainActor (NSApplication.ActivationPolicy) -> Bool = { NSApp.setActivationPolicy($0) }) {
+         setActivationPolicy: @escaping @MainActor (NSApplication.ActivationPolicy) -> Bool = { policy in
+             NSApp.activationPolicy() == policy || NSApp.setActivationPolicy(policy)
+         }) {
         self.controller = controller; self.accountSetup = accountSetup
         self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
