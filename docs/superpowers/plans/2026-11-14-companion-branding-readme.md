@@ -71,12 +71,12 @@
 
 **Interfaces:** Existing commands and operational behavior remain authoritative. Documentation introduces no new operational feature.
 
-- [ ] Inventory the current README sections and links before editing so each substantive procedure has an explicit destination.
-- [ ] Create a concise README using the USDZ example's structure: centered navy logo/title, description, accurate requirement/license badges, introduction, features, prerequisites, installation, companion build/open commands, setup/use overview, documentation links, development checks, and license.
-- [ ] Move detailed operating material into the guide. Preserve configuration, authentication-role distinctions, activation/recovery procedures, schema compatibility, optional policies, privacy boundaries, and validation limitations. Resolve any contradictory legacy wording using current code and existing companion documentation.
-- [ ] Correct relative links and repository references affected by the move. Preserve useful anchors or provide clearly linked destinations where needed.
-- [ ] Check local link/image targets and fragment anchors, inspect README rendering, and compare the section inventory against the final documents. Expect no missing material, broken local links, or unsupported feature claims.
-- [ ] Run `git diff --check`; expect no output. Commit the documentation update.
+- [x] Inventory the current README sections and links before editing so each substantive procedure has an explicit destination.
+- [x] Create a concise README using the USDZ example's structure: centered navy logo/title, description, accurate requirement/license badges, introduction, features, prerequisites, installation, companion build/open commands, setup/use overview, documentation links, development checks, and license.
+- [x] Move detailed operating material into the guide. Preserve configuration, authentication-role distinctions, activation/recovery procedures, schema compatibility, optional policies, privacy boundaries, and validation limitations. Resolve any contradictory legacy wording using current code and existing companion documentation.
+- [x] Correct relative links and repository references affected by the move. Preserve useful anchors or provide clearly linked destinations where needed.
+- [x] Check local link/image targets and fragment anchors, inspect README rendering, and compare the section inventory against the final documents. Expect no missing material, broken local links, or unsupported feature claims.
+- [x] Run `git diff --check`; expect no output. Commit the documentation update.
 
 ## Task 3: Verify, review, and close out [size: S | risk: none | mechanical: true | clear_pattern: true | objectively_verifiable: true | concerns: none]
 

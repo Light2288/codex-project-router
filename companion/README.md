@@ -1,5 +1,14 @@
 # Companion operational controls
 
+For installation and everyday use, start with the [project README](../README.md).
+The [operating guide](../docs/operating-guide.md) covers private configuration,
+standalone CLI commands, compatibility, and recovery procedures.
+
+The app bundle includes the navy app/header icon and a monochrome menu-bar
+template with normal/Retina representations. Artwork and regeneration instructions
+are in the [branding guide](../assets/branding/README.md). Branding is decorative;
+the controls' text remains the authority for routing status.
+
 The companion uses bundled router modules through an installed Node 24 executable.
 Private router configuration remains in its original location, outside all Git
 checkouts and application bundles. Routine inspection, startup and recovery
