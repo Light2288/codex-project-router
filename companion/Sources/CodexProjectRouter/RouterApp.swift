@@ -5,11 +5,21 @@ import CompanionCore
 @main struct RouterApp: App {
     @NSApplicationDelegateAdaptor(RouterAppDelegate.self) private var delegate
     var body: some Scene {
-        MenuBarExtra("Codex Project Router", systemImage: "arrow.triangle.branch") {
+        MenuBarExtra {
             Button("Open controls…") { delegate.openControls() }.keyboardShortcut("o")
             Button("Refresh") { Task { await delegate.controller.refresh() } }
             Divider()
             Button("Quit Codex Project Router") { delegate.requestQuit() }.keyboardShortcut("q")
+        } label: {
+            Group {
+                if let icon = NSImage(named: "MenuBarIconTemplate") {
+                    Image(nsImage: icon).renderingMode(.template)
+                } else {
+                    Image(systemName: "arrow.triangle.branch")
+                        .onAppear { NSLog("Menu-bar artwork unavailable; using the routing symbol.") }
+                }
+            }
+            .accessibilityLabel("Codex Project Router")
         }
     }
 }
@@ -18,13 +28,14 @@ import CompanionCore
     let controller: RouterController
     let accountSetup: AccountSetupController?
     let navigation: QuitGuidanceNavigation
-    private var controlsWindow: NSWindow?
+    private(set) var controlsWindow: NSWindow?
     private var polling: Timer?
     private var quitInProgress = false
     private var terminationApproved = false
     private let presentQuitAlert: @MainActor (NSAlert) async -> NSApplication.ModalResponse
     private let showControls: (@MainActor () -> Void)?
     private let terminate: @MainActor () -> Void
+    private let setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Bool
 
     override convenience init() {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -44,12 +55,16 @@ import CompanionCore
              return $0.runModal()
          },
          showControls: (@MainActor () -> Void)? = nil,
-         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
+         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
+         setActivationPolicy: @escaping @MainActor (NSApplication.ActivationPolicy) -> Bool = { policy in
+             NSApp.activationPolicy() == policy || NSApp.setActivationPolicy(policy)
+         }) {
         self.controller = controller; self.accountSetup = accountSetup
         self.navigation = navigation ?? QuitGuidanceNavigation()
         self.presentQuitAlert = presentQuitAlert
         self.showControls = showControls
         self.terminate = terminate
+        self.setActivationPolicy = setActivationPolicy
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -69,8 +84,10 @@ import CompanionCore
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { accountSetup?.canDismiss ?? true }
     func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === controlsWindow else { return }
         navigation.clear()
         scheduleRefresh(windowVisible: false)
+        applyActivationPolicy(.accessory)
     }
     func windowDidMiniaturize(_ notification: Notification) { scheduleRefresh(windowVisible: false) }
     func windowDidDeminiaturize(_ notification: Notification) {
@@ -81,6 +98,11 @@ import CompanionCore
     func openControls() {
         showControlsWindow()
         Task { await controller.refresh() }
+    }
+    private func applyActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        if !setActivationPolicy(policy) {
+            NSLog("macOS rejected companion activation policy %ld; the next window action will retry.", policy.rawValue)
+        }
     }
     private func showControlsWindow() {
         if controlsWindow == nil {
@@ -93,6 +115,7 @@ import CompanionCore
             window.center()
             controlsWindow = window
         }
+        applyActivationPolicy(.regular)
         controlsWindow?.deminiaturize(nil)
         controlsWindow?.makeKeyAndOrderFront(nil)
         scheduleRefresh(windowVisible: true)

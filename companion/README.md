@@ -1,5 +1,14 @@
 # Companion operational controls
 
+For installation and everyday use, start with the [project README](../README.md).
+The [operating guide](../docs/operating-guide.md) covers private configuration,
+standalone CLI commands, compatibility, and recovery procedures.
+
+The app bundle includes the navy app/header icon and a monochrome menu-bar
+template with normal/Retina representations. Artwork and regeneration instructions
+are in the [branding guide](../assets/branding/README.md). Branding is decorative;
+the controls' text remains the authority for routing status.
+
 The companion uses bundled router modules through an installed Node 24 executable.
 Private router configuration remains in its original location, outside all Git
 checkouts and application bundles. Routine inspection, startup and recovery
@@ -279,7 +288,17 @@ open "dist/Codex Project Router.app"
 CodexProjectRouter` and `swift build --package-path companion -c release
 --show-bin-path`, then assembles and ad-hoc signs the ignored local app. This is a
 local build, without distribution notarization or an installer. Move the entire
-app wherever convenient, including a path with spaces. It loads its router only
+app wherever convenient, including a path with spaces. The canonical local
+output is `dist/Codex Project Router.app`; open that copy after rebuilding.
+Quit an in-use copy through its normal guarded Quit flow before replacing its
+bundle. Closing controls alone leaves the companion running.
+
+Current macOS uses the compiled native icon catalog; an ICNS fallback is also
+bundled, with macOS 14.0 retained as the deployment minimum. Ordinary builds copy
+the committed icon resources. To change them, follow the
+[branding generation instructions](../assets/branding/README.md).
+
+The app loads its router only
 from `Contents/Resources/router`; no checkout location or selected Node path is
 embedded. The explicit resource allowlist contains the router ESM manifest and
 production source modules plus the installed pinned `smol-toml` manifest, `dist`
@@ -317,7 +336,14 @@ Ordinary `npm test` explicitly skips the two artifact integration tests when an
 app has not yet been built. Final package acceptance requires a current build and
 zero skipped package tests; rebuild when executable resources change.
 
-The controls window opens at launch; the menu-bar item reopens it after closing.
+The controls window opens at launch, showing the navy app icon in the Dock and
+making the companion available through **⌘Tab**. Minimizing the window or hiding
+the app keeps that presence. An allowed close returns the running app to the
+menu bar; **Open controls…** restores the same window and Dock presence. A close
+refused during account setup keeps both available. The menu-bar item stays
+available throughout. Pinned and recent Dock items follow macOS preferences.
+Dock **Quit** enters the same guarded termination flow as other Quit requests;
+closing controls leaves the controller and owned listener running.
 First launch discovers only an existing normal private router configuration, or
 allows selecting an existing file through a native panel. Configuration and Node
 selection, launch and refresh never start or activate the router. Browsing remains

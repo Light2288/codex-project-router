@@ -260,6 +260,115 @@ import CompanionCore
             XCTAssertEqual(display.catalog, "Catalog unavailable. Refresh to retry.")
         }
     }
+    func testControlsOpenCloseAndReopenPreserveBackgroundRouting() async throws {
+        // Closing presentation must neither lose the owned listener nor change its routing selection.
+        try await withPendingDirectController { controller, backend, store in
+            backend.routingError = nil
+            await controller.start()
+            let childID = try XCTUnwrap(controller.ownedRouter).id
+            let journal = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
+            var policies: [NSApplication.ActivationPolicy] = []
+            let delegate = RouterAppDelegate(controller: controller, setActivationPolicy: { policies.append($0); return true })
+            defer {
+                delegate.controlsWindow?.close()
+                delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            }
+            delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+            let window = try XCTUnwrap(delegate.controlsWindow)
+            XCTAssertTrue(window.isVisible)
+            XCTAssertEqual(policies.last, .regular)
+            window.performClose(nil)
+            XCTAssertFalse(window.isVisible)
+            XCTAssertEqual(policies.last, .accessory)
+            for _ in 0..<2 {
+                XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false))
+                XCTAssertTrue(delegate.controlsWindow === window)
+                XCTAssertTrue(window.isVisible)
+                XCTAssertEqual(policies.last, .regular)
+                window.performClose(nil)
+                XCTAssertEqual(policies.last, .accessory)
+            }
+            await controller.refreshAndWait()
+            XCTAssertEqual(policies, [.regular, .accessory, .regular, .accessory, .regular, .accessory])
+            XCTAssertEqual(controller.ownedRouter?.id, childID)
+            XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+            XCTAssertEqual(backend.startCount, 1)
+            XCTAssertEqual(backend.controlCount, 0)
+            XCTAssertEqual(backend.stopCount, 0)
+            XCTAssertEqual(backend.modeSetCount, 0)
+            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), journal)
+            XCTAssertFalse(controller.quitRequested)
+            XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+        }
+    }
+    func testUnrelatedCloseDoesNotDemoteControls() async throws {
+        // A sheet or another window must not remove the real controls from the Dock or invalidate guidance.
+        try await withController { controller, _ in
+            let navigation = QuitGuidanceNavigation()
+            var policies: [NSApplication.ActivationPolicy] = []
+            let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
+                setActivationPolicy: { policies.append($0); return true })
+            defer {
+                delegate.controlsWindow?.close()
+                delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            }
+            delegate.openControls()
+            let token = navigation.beginRequest(); navigation.present(token)
+            let requestID = try XCTUnwrap(navigation.requestID)
+            let unrelatedObjects: [Any?] = [nil, "malformed", NSWindow()]
+            for object in unrelatedObjects {
+                delegate.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: object))
+            }
+            XCTAssertEqual(policies, [.regular])
+            XCTAssertEqual(navigation.requestID, requestID)
+            XCTAssertTrue(try XCTUnwrap(delegate.controlsWindow).isVisible)
+            await controller.refreshAndWait()
+        }
+    }
+    func testMinimizingControlsPreservesRegularPresence() async throws {
+        // A minimized window stays open and must remain discoverable through the Dock.
+        try await withController { controller, _ in
+            var policies: [NSApplication.ActivationPolicy] = []
+            let delegate = RouterAppDelegate(controller: controller, setActivationPolicy: { policies.append($0); return true })
+            defer {
+                delegate.controlsWindow?.close()
+                delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            }
+            delegate.openControls()
+            let window = try XCTUnwrap(delegate.controlsWindow)
+            window.miniaturize(nil)
+            delegate.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification, object: window))
+            XCTAssertEqual(policies, [.regular])
+            delegate.openControls()
+            delegate.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification, object: window))
+            XCTAssertTrue(delegate.controlsWindow === window)
+            XCTAssertFalse(window.isMiniaturized)
+            XCTAssertTrue(window.isVisible)
+            XCTAssertEqual(policies, [.regular, .regular])
+            await controller.refreshAndWait()
+        }
+    }
+    func testRejectedActivationPolicyIsRetried() async throws {
+        // A failed native transition must not become a cached success that prevents later recovery.
+        try await withController { controller, _ in
+            var policies: [NSApplication.ActivationPolicy] = []
+            let delegate = RouterAppDelegate(controller: controller, setActivationPolicy: { policies.append($0); return false })
+            defer {
+                delegate.controlsWindow?.close()
+                delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+            }
+            delegate.openControls()
+            let window = try XCTUnwrap(delegate.controlsWindow)
+            delegate.openControls()
+            window.performClose(nil)
+            delegate.openControls()
+            window.performClose(nil)
+            XCTAssertTrue(delegate.controlsWindow === window)
+            XCTAssertEqual(policies, [.regular, .regular, .accessory, .regular, .accessory])
+            XCTAssertFalse(controller.quitRequested)
+            await controller.refreshAndWait()
+        }
+    }
     func testClosingLastWindowDoesNotRequestQuit() async throws {
         try await withController { controller, _ in
             await controller.refresh()

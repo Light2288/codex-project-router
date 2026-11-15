@@ -1,0 +1,18 @@
+{
+  "fill-specializations": [
+    { "value": { "solid": "srgb:0.005,0.025,0.075,1" } }
+  ],
+  "groups": [
+    {
+      "name": "Complete artwork",
+      "layers": [
+        { "name": "Navy folder", "image-name": "Artwork.png", "glass": false }
+      ],
+      "blur-material": null,
+      "shadow": { "kind": "neutral", "opacity": 0 },
+      "specular": false,
+      "translucency": { "enabled": false, "value": 0 }
+    }
+  ],
+  "supported-platforms": { "squares": ["macOS"] }
+}

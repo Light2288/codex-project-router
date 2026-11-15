@@ -249,22 +249,29 @@ import CompanionCore
         let controller = try await makeController(pending: true)
         await controller.start()
         let navigation = QuitGuidanceNavigation(), refresh = QuitBarrier<Inspection>()
-        let baseline = backend.inspectCount
         var showCount = 0, terminateCount = 0
         var journalAfterDeniedAttempt: Result<Data, Error>?
         let delegate = RouterAppDelegate(controller: controller, navigation: navigation, presentQuitAlert: { _ in
             journalAfterDeniedAttempt = Result { try Data(contentsOf: self.store.directory.appendingPathComponent("state.json")) }
             self.backend.inspectBarrier = refresh
             return .alertFirstButtonReturn
-        }, showControls: { showCount += 1 }, terminate: { terminateCount += 1 })
-        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+        }, showControls: { showCount += 1 }, terminate: { terminateCount += 1 }, setActivationPolicy: { _ in true })
+        let inspectionsBeforeOpening = backend.inspectCount
+        delegate.openControls()
+        let window = try XCTUnwrap(delegate.controlsWindow)
+        try await waitUntil { backend.inspectCount > inspectionsBeforeOpening }
+        let baseline = backend.inspectCount
+        defer {
+            window.close()
+            delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        }
         let quit = try XCTUnwrap(delegate.requestQuit())
         try await waitUntil { refresh.waiting }
         XCTAssertNil(navigation.requestID)
         XCTAssertEqual(showCount, 1)
         XCTAssertNil(delegate.requestQuit())
         XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateCancel)
-        delegate.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+        window.performClose(nil)
         refresh.release(backend.snapshot)
         await quit.value
         XCTAssertNil(navigation.requestID)
@@ -312,15 +319,62 @@ import CompanionCore
         await controller.start()
         let navigation = QuitGuidanceNavigation()
         let delegate = RouterAppDelegate(controller: controller, navigation: navigation,
-            presentQuitAlert: { _ in .alertFirstButtonReturn }, showControls: {}, terminate: { XCTFail("Guidance must not exit") })
-        defer { delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification)) }
+            presentQuitAlert: { _ in .alertFirstButtonReturn }, showControls: {}, terminate: { XCTFail("Guidance must not exit") },
+            setActivationPolicy: { _ in true })
+        delegate.openControls()
+        let window = try XCTUnwrap(delegate.controlsWindow)
+        await controller.refreshAndWait()
+        defer {
+            window.close()
+            delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        }
         await delegate.requestQuit()?.value
         XCTAssertNotNil(navigation.requestID)
-        delegate.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+        window.performClose(nil)
         XCTAssertNil(navigation.requestID)
         await controller.refresh()
         XCTAssertNil(navigation.requestID)
         XCTAssertFalse(controller.quitRequested)
+    }
+
+    func testNativeQuitDenialKeepsRegularPresenceAndGuidanceReopensControls() async throws {
+        // The Dock's termination request cannot bypass recovery or turn an ordinary close into a stop.
+        let controller = try await makeController(pending: true)
+        await controller.start()
+        let childID = try XCTUnwrap(controller.ownedRouter).id
+        var policies: [NSApplication.ActivationPolicy] = []
+        var alertCount = 0
+        var response = NSApplication.ModalResponse.alertSecondButtonReturn
+        let delegate = RouterAppDelegate(controller: controller, presentQuitAlert: { _ in
+            alertCount += 1; return response
+        }, terminate: { XCTFail("An owned router awaiting recovery must keep running") },
+            setActivationPolicy: { policies.append($0); return true })
+        defer {
+            delegate.controlsWindow?.close()
+            delegate.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification))
+        }
+        delegate.openControls()
+        let window = try XCTUnwrap(delegate.controlsWindow)
+        await controller.refreshAndWait()
+        XCTAssertEqual(delegate.applicationShouldTerminate(NSApplication.shared), .terminateCancel)
+        try await waitUntil { alertCount == 1 }
+        XCTAssertTrue(window.isVisible)
+        XCTAssertEqual(policies, [.regular])
+        XCTAssertEqual(controller.ownedRouter?.id, childID)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertFalse(controller.quitRequested)
+        window.performClose(nil)
+        XCTAssertEqual(policies.last, .accessory)
+        response = .alertFirstButtonReturn
+        await delegate.requestQuit()?.value
+        XCTAssertEqual(alertCount, 2)
+        XCTAssertTrue(delegate.controlsWindow === window)
+        XCTAssertTrue(window.isVisible)
+        XCTAssertEqual(policies.last, .regular)
+        XCTAssertNotNil(delegate.navigation.requestID)
+        XCTAssertEqual(controller.ownedRouter?.id, childID)
+        XCTAssertEqual(backend.stopCount, 0)
+        XCTAssertTrue(backend.controls.isEmpty)
     }
 
     func testCancellationPreservesExistingGuidance() async throws {
