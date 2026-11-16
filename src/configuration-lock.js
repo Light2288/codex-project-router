@@ -1,4 +1,5 @@
 import * as defaultFS from "node:fs/promises";
+import * as defaultSyncFS from "node:fs";
 import { dirname, join, isAbsolute, resolve } from "node:path";
 import { loadRouterConfig } from "./config.js";
 import { RouterError } from "./errors.js";
@@ -29,12 +30,21 @@ export async function withConfigurationLock(configPath, action, {fs = defaultFS}
       !latestParent.isDirectory() || await fs.realpath(directory)!==directory ||
       ownedBytes && !(await fs.readFile(lockPath)).equals(ownedBytes)) throw conflict();
   };
+  const assertUnchangedSync=(syncFS=defaultSyncFS)=>{
+    const current=syncFS.lstatSync(lockPath), latestParent=syncFS.lstatSync(directory), descriptor=syncFS.fstatSync(handle.fd);
+    if(!current.isFile() || current.uid!==process.getuid() || current.mode & 0o077 || current.nlink!==1 ||
+      !sameIdentity(owned,current) || !sameIdentity(owned,descriptor) ||
+      parent.dev!==latestParent.dev || parent.ino!==latestParent.ino || parent.uid!==latestParent.uid || parent.mode!==latestParent.mode ||
+      !latestParent.isDirectory() || syncFS.realpathSync(directory)!==directory ||
+      ownedBytes && !syncFS.readFileSync(lockPath).equals(ownedBytes)) throw conflict();
+    if(!sameIdentity(owned,syncFS.lstatSync(lockPath))) throw conflict();
+  };
   try {
     owned=await handle.stat();
     ownedBytes=Buffer.from(JSON.stringify({pid:process.pid}));
     await handle.writeFile(ownedBytes);
     await assertUnchanged();
-    result=await action(await loadRouterConfig(configPath),{assertUnchanged});
+    result=await action(await loadRouterConfig(configPath),{assertUnchanged,assertUnchangedSync});
   } catch(error) { failure=error; }
   try {
     if(owned) { await assertUnchanged(); await fs.unlink(lockPath); }

@@ -539,3 +539,65 @@ test("late candidate checkpoint or intent replacement during preflight rejects b
     assert.equal(running.config.projectRoutes[P1],"route-a");
   });
 });
+
+test("source or catalog changes during second artifact pass reject before replacement",async t=>{
+  for(const kind of ["source_bytes","source_identity","catalog_name","catalog_identity","lease"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t),input=await f.input(),source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+    const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"on"};
+    const before=await readFile(f.configPath);let tempChecks=0,changed=false,synced=false,published=false;
+    const io=injectedFS(()=>false,async(method,path)=>{
+      if(method==="sync" && path===f.dir) synced=true;
+      if(!synced || method!=="open" || !String(path).endsWith(".tmp") || ++tempChecks!==2) return;
+      changed=true;
+      if(kind==="source_bytes") await fs.appendFile(f.configPath,"\n");
+      if(kind==="source_identity") {await writeFile(join(f.dir,"replacement"),before,{mode:0o600});await fs.rename(join(f.dir,"replacement"),f.configPath);}
+      if(kind==="catalog_name") {f.state["local-projects"][P1].name="Later name";await f.saveState();}
+      if(kind==="catalog_identity") {f.state["local-projects"][P1].id=P2;await f.saveState();}
+      if(kind==="lease") {await fs.rename(join(f.dir,".activation.lock"),join(f.dir,"prior-lock"));await writeFile(join(f.dir,".activation.lock"),"replacement",{mode:0o600});}
+    });
+    await assert.rejects(assignments.commitProjectAssignment({...input,expectedRunningRevision:running.configurationRevision},{running,fs:io,publish(){published=true;}}),{code:"ASSIGNMENT_CONFLICT"});
+    assert.equal(changed,true);assert.equal(published,false);
+    assert.deepEqual(await readFile(f.configPath),kind==="source_bytes" ? Buffer.concat([before,Buffer.from("\n")]) : before);
+    if(kind==="lease") assert.equal(await readFile(join(f.dir,".activation.lock"),"utf8"),"replacement");
+  });
+});
+
+test("stopped provider changes during second artifact pass reject before replacement",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath);let tempChecks=0,synced=false,changed=false;
+  const io=injectedFS(()=>false,async(method,path)=>{
+    if(method==="sync" && path===f.dir) synced=true;
+    if(synced && method==="open" && String(path).endsWith(".tmp") && ++tempChecks===2) {changed=true;await fs.appendFile(f.providerPath,"\n");}
+  });
+  await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_CONFLICT"});
+  assert.equal(changed,true);assert.deepEqual(await readFile(f.configPath),before);
+});
+
+test("unrelated desktop metadata during final preflight preserves catalog authority",async t=>{
+  const f=await persistenceSetup(t),input=await f.input();let tempChecks=0,synced=false,changed=false;
+  const io=injectedFS(()=>false,async(method,path)=>{
+    if(method==="sync" && path===f.dir) synced=true;
+    if(synced && method==="open" && String(path).endsWith(".tmp") && ++tempChecks===2) {changed=true;f.state["unrelated-desktop-metadata"]={counter:1};await f.saveState();}
+  });
+  const result=await assignments.commitProjectAssignment(input,{fs:io});
+  assert.equal(changed,true);assert.equal(result.changed,true);
+});
+
+test("final authority guard dispatches replacement without yielding to queued source edits",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),syncFS=await import("node:fs");
+  let scheduled=false,dispatched=false,interleaved=false;
+  const synchronous={...syncFS,lstatSync(path,...args){
+    const result=syncFS.lstatSync(path,...args);
+    if(path===f.dir && !scheduled) {scheduled=true;queueMicrotask(()=>{if(!dispatched){interleaved=true;syncFS.appendFileSync(f.configPath,"\n");}});}
+    return result;
+  }};
+  const io={...fs,rename(from,to){dispatched=true;return fs.rename(from,to);}};
+  const result=await assignments.commitProjectAssignment(input,{fs:io,syncFS:synchronous});
+  assert.equal(scheduled,true);assert.equal(dispatched,true);assert.equal(interleaved,false);assert.equal(result.changed,true);
+});
+
+test("final synchronous source read failure rejects before replacement",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath),syncFS=await import("node:fs");let observed=false;
+  const synchronous={...syncFS,openSync(path,...args){if(path===f.configPath){observed=true;throw Object.assign(new Error("SYNTHETIC_FINAL_READ"),{code:"EIO"});}return syncFS.openSync(path,...args);}};
+  await assert.rejects(assignments.commitProjectAssignment(input,{syncFS:synchronous}),{code:"ASSIGNMENT_UNAVAILABLE"});
+  assert.equal(observed,true);assert.deepEqual(await readFile(f.configPath),before);
+});

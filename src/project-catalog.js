@@ -32,9 +32,8 @@ function catalogEntry(id, name, routeAlias, cfg, catalogMissing = false) {
   if (account) entry.account = account;
   return entry;
 }
-export async function inspectProjectCatalog(codexHome, cfg) {
+export function inspectProjectCatalogValue(state, cfg) {
   try {
-    const state = JSON.parse(await readFile(join(codexHome, ".codex-global-state.json"), "utf8"));
     const projects = state?.["local-projects"];
     if (!object(projects)) throw new RouterError("STATE_UNAVAILABLE");
     const identities = new Set(), entries = [];
@@ -64,6 +63,14 @@ export async function inspectProjectCatalog(codexHome, cfg) {
       .sort(([a], [b]) => a.localeCompare(b));
     const revision = createHash("sha256").update(JSON.stringify(identitiesAndNames)).digest("hex");
     return { state: "ready", revision, entries };
+  } catch {
+    return { state: "unavailable", entries: [] };
+  }
+}
+
+export async function inspectProjectCatalog(codexHome, cfg) {
+  try {
+    return inspectProjectCatalogValue(JSON.parse(await readFile(join(codexHome, ".codex-global-state.json"), "utf8")), cfg);
   } catch {
     return { state: "unavailable", entries: [] };
   }

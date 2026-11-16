@@ -1,4 +1,5 @@
 import * as defaultFS from "node:fs/promises";
+import * as defaultSyncFS from "node:fs";
 import { constants } from "node:fs";
 import { dirname, join, isAbsolute, resolve } from "node:path";
 import net from "node:net";
@@ -6,7 +7,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { inspectRouterConfigurationValue, readRouterConfigurationSource, configurationIdentityFor, configFingerprint, UUID } from "./config.js";
 import { RouterError } from "./errors.js";
-import { inspectProjectCatalog } from "./project-catalog.js";
+import { inspectProjectCatalog, inspectProjectCatalogValue } from "./project-catalog.js";
 import { inspectProviderConfiguration, inspectActivation } from "./activation.js";
 import { withConfigurationLock } from "./configuration-lock.js";
 
@@ -101,6 +102,19 @@ async function privateFile(path, fs = defaultFS, privateOnly = true) {
       !sameFile(after,await handle.stat())) throw assignmentError("CONFLICT");
     return {bytes,info:after};
   } finally {await handle.close();}
+}
+function privateFileSync(path, fs, privateOnly = true) {
+  const before=fs.lstatSync(path);
+  const safe=info=>info.isFile() && info.uid===process.getuid() && info.nlink===1 && !(info.mode & (privateOnly ? 0o077 : 0o022));
+  if(!safe(before)) throw assignmentError("CONFLICT");
+  const descriptor=fs.openSync(path,constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened=fs.fstatSync(descriptor);
+    if(!safe(opened) || !sameFile(before,opened)) throw assignmentError("CONFLICT");
+    const bytes=fs.readFileSync(descriptor), after=fs.fstatSync(descriptor);
+    if(!sameFile(opened,after) || !sameFile(after,fs.lstatSync(path))) throw assignmentError("CONFLICT");
+    return {bytes,info:after};
+  } finally {fs.closeSync(descriptor);}
 }
 async function healthySource(configPath, fs) {
   const source=await readRouterConfigurationSource(configPath,{fs});
@@ -211,7 +225,7 @@ export async function readProjectAssignmentState(input, running) {
   return state;
 }
 
-export async function commitProjectAssignment(input = {}, {running, publish, fs = defaultFS} = {}) {
+export async function commitProjectAssignment(input = {}, {running, publish, fs = defaultFS, syncFS = defaultSyncFS} = {}) {
   const live=running!==undefined;
   const fields=["configPath","expectedContext","expectedSavedRevision","expectedConfigurationIdentity","expectedCatalogRevision","operationId","projectId","accountId",...(live ? ["expectedRunningRevision"] : [])];
   if(!exact(input,fields) || typeof input.configPath!=="string" || !isAbsolute(input.configPath) || resolve(input.configPath)!==input.configPath ||
@@ -258,6 +272,42 @@ export async function commitProjectAssignment(input = {}, {running, publish, fs 
           !sameFile(final.fileInfo,initial.fileInfo) || catalog.state!=="ready" || catalog.revision!==input.expectedCatalogRevision) throw assignmentError("CONFLICT");
         await lease.assertUnchanged();
       };
+      const assertFinalAuthority=(artifacts=[])=>{
+        // No await from this guard through rename dispatch: an event-loop task
+        // cannot invalidate one authority while another is being checked.
+        // The shared lease coordinates writers; this is not a filesystem CAS
+        // against external processes which ignore it.
+        lease.assertUnchangedSync(syncFS);
+        const assertDirectory=(path,expected,privateOnly)=>{
+          const info=syncFS.lstatSync(path);
+          if(!info.isDirectory() || info.dev!==expected.dev || info.ino!==expected.ino || info.uid!==expected.uid || info.mode!==expected.mode ||
+            info.uid!==process.getuid() || info.mode & (privateOnly ? 0o077 : 0o022) || syncFS.realpathSync(path)!==path) throw assignmentError("CONFLICT");
+        };
+        const assertFile=(path,expected,bytes,privateOnly=true)=>{
+          const actual=privateFileSync(path,syncFS,privateOnly);
+          if(!sameFile(expected,actual.info) || !actual.bytes.equals(bytes)) throw assignmentError("CONFLICT");
+        };
+        assertDirectory(directory,initial.directoryInfo,true);
+        for(const [path,info,bytes] of artifacts) assertFile(path,info,bytes);
+        if(evidence) {
+          assertDirectory(initial.config.codexHome,evidence.homeInfo,false);
+          assertFile(join(initial.config.codexHome,"config.toml"),evidence.provider.info,evidence.provider.bytes,false);
+          const recordPath=join(directory,"activation.json");
+          if(evidence.record) {
+            assertFile(recordPath,evidence.record.info,evidence.record.bytes);
+            assertFile(join(directory,JSON.parse(evidence.record.bytes).backupFile),evidence.backup.info,evidence.backup.bytes);
+          } else {
+            try {syncFS.lstatSync(recordPath);throw assignmentError("CONFLICT");} catch(error) {if(error.code!=="ENOENT") throw error;}
+          }
+        }
+        let catalog;
+        try {catalog=inspectProjectCatalogValue(JSON.parse(syncFS.readFileSync(join(initial.config.codexHome,".codex-global-state.json"),"utf8")),initial.config);}
+        catch(error) {if(error instanceof SyntaxError) throw assignmentError("CONFLICT");throw error;}
+        if(catalog.state!=="ready" || catalog.revision!==input.expectedCatalogRevision) throw assignmentError("CONFLICT");
+        assertFile(input.configPath,initial.fileInfo,Buffer.from(initial.source));
+        assertDirectory(directory,initial.directoryInfo,true);
+        lease.assertUnchangedSync(syncFS);
+      };
       const commit={context:input.expectedContext,operationId:input.operationId,projectId:input.projectId,changed:prepared.changed,
         beforeRevision:initial.configurationRevision,candidateRevision:prepared.configurationRevision,savedRevision:prepared.configurationRevision,
         beforeIdentity:initial.configurationIdentity,candidateIdentity:initial.configurationIdentity,savedIdentity:initial.configurationIdentity,
@@ -296,12 +346,15 @@ export async function commitProjectAssignment(input = {}, {running, publish, fs 
         // Preflight awaits external state; its checks cannot attest artifacts
         // validated before it. Retain the early check and verify them again.
         await assertPersistenceArtifacts();
+        assertFinalAuthority([[tempPath,tempInfo,Buffer.from(prepared.source)],
+          [commit.checkpointPath,checkpointInfo,Buffer.from(initial.source)],
+          [intentPath,intentInfo,Buffer.from(JSON.stringify(commit.intent)+"\n")]]);
         replacementAttempted=true;
         await fs.rename(tempPath,input.configPath);replaced=true;tempCreated=false;
         await syncDirectory();
         const persisted=await readRouterConfigurationSource(input.configPath,{fs});
         if(persisted.configurationRevision!==commit.savedRevision || persisted.configurationIdentity!==commit.savedIdentity) throw assignmentError("UNCERTAIN");
-      } else await fresh();
+      } else {await fresh();assertFinalAuthority();}
       if(live) {
         publicationAttempted=true;
         const next=Object.freeze({config:prepared.config,configurationRevision:commit.savedRevision,configurationIdentity:commit.savedIdentity,mode:running.mode});
