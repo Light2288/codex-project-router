@@ -95,7 +95,7 @@ rendering. Synthetic/native package results do not establish live gateway
 compatibility, billing attribution, or every macOS version's behavior. Real
 private configuration and the existing companion session were not changed.
 
-## Final review
+## Final review — historical blocked run, 2026-11-14
 
 The integrated review stopped at **SPEC REVIEW: BLOCKED**. The reviewer verified
 the package identity and its 21-file change list, then found inconsistent stage
@@ -113,3 +113,71 @@ this run. Task 3 remains open, and final quality approval is unobserved.
 - `REVIEWED_STATE_ID`: `50f73d21-72c4-4708-8609-701673033fdc`
 - `PACKAGE_SHA256`: `d9b3f68aab77af8848edf0f5f882ddd98ef562144d647942752b746c2a7a695f`
 - Reviewed implementation commit: `609ee6b`.
+
+## Closeout resumption — 2026-11-16
+
+`AUDIT-DOCS-BRANDING-CLOSEOUT-STAGE-CONFLICT` remained open at clean `main`
+`c0a5a53`, which matched both `origin/main` and actual remote `main`. The original
+specification and plan presentations and their separate approval messages were
+verified in **Design companion app icons**; exact turn references are recorded in
+the specification. The retained execution ledger agrees. The original immutable
+review package's SHA-256 was recomputed and matched its recorded identity.
+
+The specification now contextualizes its historical Stage 3 handoff and records
+the authorized Stage 4 resumption. Approved requirements and the BLOCKED review
+above are preserved. Review scope is the original branding increment from
+`5be89ca` through `2c20965`, plus the closeout documentation corrections on
+`docs/companion-branding-closeout`; later account/default, Dock and icon reviews
+are not reopened. Later approved Dock/icon behavior remains authoritative.
+
+This resumption changes documentation only. The acceptance counts above remain
+2026-11-14 evidence. No fresh full test suite, build, app launch, credential
+retrieval, settings change or live application observation was performed for this
+resumption. The resumed sequential review results are recorded below.
+
+## Resumed final review and local closeout — 2026-11-16
+
+The outstanding integrated review continued with one updated immutable package.
+The specification reviewer recomputed its hash, matched the expected identities,
+verified both file lists/diffs and returned **SPEC REVIEW: PASS**. A citation-only
+report correction removed invalid snapshot line suffixes; neither the package nor
+the substantive verdict changed. Only then was quality review dispatched with
+the unchanged package and complete fresh specification PASS report.
+
+Quality independently matched expected/current/specification-PASS identities and
+recomputed the package hash. It verified all 21 snapshot files against the package
+or exact binary hashes, reviewed the original branding changes and three closeout
+documents, and returned **QUALITY REVIEW: PASS — findings: NONE**. No fix pass,
+deferred minor, generic reviewer or later-increment review was dispatched. The
+package hash was independently rechecked unchanged after both stages.
+
+- `GATE_RUN_ID`: `f906e14a-e9e6-46c6-915a-f051d37b8e8c`
+- `REVIEWED_STATE_ID`: `6144655d-2d88-4a64-930c-b34d6f1aadcb`
+- `PACKAGE_SHA256`: `fb934af29b858db302b27bd7bff0fd8a880aea6ce7e6afec9bce212de0e0a514`
+- Original implementation/review range: `5be89ca..2c20965`; 21 changed files.
+- Closeout base: `c0a5a53`; three Markdown documents, with no product changes.
+
+Fresh bounded checks passed: `git diff --check` and local Markdown target checks
+for the closeout documents. No fresh full suites, build or live-app checks were
+performed for this documentation-only completion. The recorded 238 native, 817
+Node and three package tests remain the original 2026-11-14 acceptance. Later icon
+acceptance and current operational state are not substituted for those results.
+
+Quality explicitly declined to judge present-runtime compatibility, fresh full
+suites, live menu-bar appearance, Finder caching, human accessibility and full
+window interaction, which it did not observe. These remain the stated evidence
+limits, not additional passes or newly established capabilities.
+
+**Ruling:** Review the complete original branding range with corrected governing
+metadata, without reopening later approved increments. This preserves review
+ownership and the user's required separation. The cost is that later regressions
+are outside this historical branding review; no current-runtime acceptance is
+claimed. The original alpha-threshold crop ruling and its faint-pixel tradeoff
+remain recorded above, with no artwork changes in this closeout.
+
+`AUDIT-DOCS-BRANDING-CLOSEOUT-STAGE-CONFLICT` is resolved. The existing branding
+increment's Task 3 review and local documentation closeout are complete. Final
+edits only record observed results and consistent lifecycle/checklist metadata.
+The separate local `docs/companion-branding-closeout` branch is retained; `main`
+is unchanged, and no worktree, assignment artifacts/product changes, push or merge
+are part of this closeout.
