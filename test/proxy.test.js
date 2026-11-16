@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream";
 import { EventEmitter, getEventListeners, once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProxy } from "../src/proxy.js";
+import { configFingerprint } from "../src/config.js";
 import { RouterError } from "../src/errors.js";
 import { readKeychainCredential } from "../src/credentials.js";
 import { fixture, headers, titleHeaders, P1, P2, T1, T2, CHILD, A1, A2, accountRouting as fixtureAccountRouting, duplicateIdentityMetadata } from "./helpers/fixtures.js";
@@ -76,6 +77,7 @@ async function setupProxy(t, handler, options = {}) {
     inactivityTimeoutMs: options.timeoutMs,
     credentialReader: options.credentialReader,
     getProjectRoutingMode: options.getProjectRoutingMode,
+    getRequestRoutingSnapshot: options.getRequestRoutingSnapshot,
   });
   const acceptedSockets = [];
   proxy.on("request", req => acceptedSockets.push(req.socket));
@@ -2220,4 +2222,217 @@ nodeTest("incoming and outgoing shared references still retrieve independently",
   assert.equal(f.defaultCalls[0].headers.authorization, "Bearer outgoing-two");
   assert.equal(f.calls.length, 0);
   assert.deepEqual(reads, Array(4).fill(incomingAccountReference));
+});
+
+function freezeAssignment(value) {
+  if (value && typeof value === "object") {
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value)))
+      if (Object.hasOwn(descriptor, "value")) freezeAssignment(descriptor.value);
+    Object.freeze(value);
+  }
+  return value;
+}
+function assignmentSnapshot(f, { inherited = false, mode = "on", retry } = {}) {
+  const config = structuredClone(f.config);
+  if (inherited) delete config.projectRoutes[P1];
+  if (retry) Object.defineProperty(config, "codexHome", { get: retry });
+  return freezeAssignment({ config, mode });
+}
+function assignmentOptions(extra = {}) {
+  return {
+    defaultHandler: async (_req, res) => res.end("default"),
+    projectHandler: async (_req, res) => res.end("project"),
+    accountRouting,
+    credentialReader: async reference => reference.service,
+    ...extra,
+  };
+}
+
+// Capturing after authentication, or reusing startup assignments, misroutes one of these requests.
+nodeTest("assignment snapshot precedes incoming authentication", async t => {
+  let current, captures = 0, hold = true;
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  const f = await setupProxy(t, async (_req, res) => res.end("alternate"), assignmentOptions({
+    getRequestRoutingSnapshot: () => { captures++; return current; },
+    credentialReader: async reference => {
+      if (reference.service === "synthetic-incoming" && hold) {
+        hold = false; entered.resolve(); await release.promise;
+      }
+      return reference.service;
+    },
+  }));
+  const original = assignmentSnapshot(f);
+  current = original;
+  const originalBodyBytes = Buffer.from(' {"model":"unchanged","previous_response_id":"continuation-original","input":"π"} \n');
+  const pending = request(f, { token: "synthetic-incoming", body: originalBodyBytes });
+  await within(entered.promise, "incoming authentication did not reach barrier");
+  current = assignmentSnapshot(f, { inherited: true });
+  release.resolve();
+  assert.equal((await within(pending, "held request did not complete")).body, "project");
+  assert.equal((await request(f, { token: "synthetic-incoming", body: originalBodyBytes })).body, "default");
+  const [oldRequest] = f.projectCalls, [nextRequest] = f.defaultCalls;
+  assert.equal(oldRequest.headers.authorization, "Bearer synthetic-project");
+  assert.equal(nextRequest.headers.authorization, "Bearer synthetic-default");
+  assert.deepEqual(oldRequest.bodyBytes, originalBodyBytes);
+  assert.deepEqual(nextRequest.bodyBytes, originalBodyBytes);
+  assert.equal(captures, 2);
+  assert.equal(original.config.projectRoutes[P1], "route-a");
+  assert.ok(Object.isFrozen(original.config.accountRouting.accounts[A2]));
+  assert.equal(f.calls.length, 0);
+  assertRoutingCompletions(f, [["on", "override"], ["on", "global"]]);
+});
+
+// A retry must refresh desktop membership while retaining the received assignment and account pair.
+nodeTest("assignment snapshot survives identity retry and outgoing credential wait", async t => {
+  let current, pathReads = 0, captures = 0, held = true;
+  const retry = Promise.withResolvers(), outgoing = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  const f = await setupProxy(t, async (_req, res) => res.end("alternate"), assignmentOptions({
+    getRequestRoutingSnapshot: () => { captures++; return current; },
+    credentialReader: async reference => {
+      if (reference.service === "synthetic-project" && held) {
+        held = false; outgoing.resolve(); await release.promise;
+      }
+      return reference.service;
+    },
+  }));
+  current = assignmentSnapshot(f, { retry: () => {
+    if (++pathReads === 3) retry.resolve();
+    return f.dir;
+  } });
+  const originalBodyBytes = Buffer.from(' {"model":"unchanged","previous_response_id":"keep","input":"retry"} \n');
+  const pending = request(f, { token: "synthetic-incoming", raw: headers(CHILD), body: originalBodyBytes });
+  await within(retry.promise, "identity did not retry missing desktop membership");
+  current = assignmentSnapshot(f, { inherited: true, mode: "off" });
+  f.state["thread-project-assignments"][CHILD] = { projectKind: "local", projectId: P1 };
+  await f.saveState();
+  await within(outgoing.promise, "old project credential was not selected after retry");
+  current = assignmentSnapshot(f, { inherited: true });
+  release.resolve();
+  assert.equal((await within(pending, "outgoing credential wait did not complete")).body, "project");
+  assert.equal((await request(f, { token: "synthetic-incoming", raw: headers(CHILD), body: originalBodyBytes })).body, "default");
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer synthetic-project");
+  assert.equal(f.defaultCalls[0].headers.authorization, "Bearer synthetic-default");
+  assert.deepEqual(f.projectCalls[0].bodyBytes, originalBodyBytes);
+  assert.ok(pathReads >= 4);
+  assert.equal(captures, 2);
+  assert.equal(f.calls.length, 0);
+  assertRoutingCompletions(f, [["on", "override"], ["on", "global"]]);
+  // Configuration capture must not cache desktop membership for later requests.
+  f.state["local-projects"][P1].id = P2;
+  await f.saveState();
+  assert.equal(JSON.parse((await request(f, { token: "synthetic-incoming" })).body).error.code, "IDENTITY_CONFLICT");
+  assert.equal(f.projectCalls.length + f.defaultCalls.length, 2);
+});
+
+// Open responses retain their origin while each subsequent request on one socket takes a new snapshot.
+nodeTest("stream and reused connection capture independent snapshots", async t => {
+  let current, captures = 0;
+  const started = Promise.withResolvers(), finish = Promise.withResolvers();
+  t.after(() => finish.resolve());
+  const f = await setupProxy(t, async (_req, res) => res.end("alternate"), assignmentOptions({
+    getRequestRoutingSnapshot: () => { captures++; return current; },
+    projectHandler: async (_req, res, calls) => {
+      if (calls.length > 1) { res.end("project"); return; }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: project-first\n\n");
+      await finish.promise;
+      res.end("data: project-last\n\n");
+    },
+  }));
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  current = assignmentSnapshot(f);
+  const body = Buffer.from(' {"previous_response_id":"keep-stream","input":"π"}\n');
+  const pending = request(f, { agent, token: "synthetic-incoming", body, onChunk: () => started.resolve() });
+  await within(started.promise, "project stream was buffered");
+  current = assignmentSnapshot(f, { inherited: true });
+  assert.equal((await request(f, { token: "synthetic-incoming", body })).body, "default");
+  finish.resolve();
+  assert.equal((await within(pending, "old stream did not finish")).body, "data: project-first\n\ndata: project-last\n\n");
+  assert.equal((await request(f, { agent, token: "synthetic-incoming", body })).body, "default");
+  current = assignmentSnapshot(f, { mode: "off" });
+  assert.equal((await request(f, { agent, token: "synthetic-incoming", body })).body, "default");
+  assert.equal(f.acceptedSockets[0], f.acceptedSockets[2]);
+  assert.equal(f.acceptedSockets[0], f.acceptedSockets[3]);
+  assert.equal(captures, 4);
+  assert.equal(f.projectCalls.length, 1);
+  assert.equal(f.defaultCalls.length, 3);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.projectCalls[0].headers.authorization, "Bearer synthetic-project");
+  for (const call of f.defaultCalls) assert.equal(call.headers.authorization, "Bearer synthetic-default");
+  for (const call of [...f.projectCalls, ...f.defaultCalls]) assert.deepEqual(call.bodyBytes, body);
+  assertRoutingCompletions(f, [["on", "override"], ["on", "global"], ["on", "global"], ["off", "global"]]);
+});
+
+// Compact/background transport and selected failures cannot consult a newly applied assignment.
+nodeTest("compact background and failure never reroute", async t => {
+  for (const failure of [null, "credential", 402, 429, 500, 503, 307]) {
+    let current, held = true;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers();
+    t.after(() => release.resolve());
+    const f = await setupProxy(t, async (_req, res) => res.end("alternate"), assignmentOptions({
+      getRequestRoutingSnapshot: () => current,
+      projectHandler: async (_req, res) => {
+        res.writeHead(typeof failure === "number" ? failure : 200, { location: "https://alternate.invalid/responses" });
+        res.end("selected");
+      },
+      credentialReader: async reference => {
+        if (reference.service === "synthetic-project" && held) {
+          held = false; entered.resolve(); await release.promise;
+          if (failure === "credential") throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        }
+        return reference.service;
+      },
+    }));
+    current = assignmentSnapshot(f);
+    const originalBodyBytes = Buffer.from(' {"model":"original","previous_response_id":"continuation-original","input":"compact π"} \n');
+    const path = failure === null ? "/v1/responses/compact?raw=a%2Fb" : "/v1/responses?raw=a%2Fb";
+    const pending = request(f, { token: "synthetic-incoming", raw: headers(T1, { turn_trigger: "background" }), path, body: originalBodyBytes });
+    await within(entered.promise, "selected credential did not reach barrier");
+    current = assignmentSnapshot(f, { inherited: true, mode: "off" });
+    release.resolve();
+    const result = await within(pending, "selected failure did not finish");
+    assert.equal(result.status, failure === "credential" ? 503 : failure ?? 200);
+    if (failure === "credential") assert.equal(JSON.parse(result.body).error.code, "CREDENTIAL_UNAVAILABLE");
+    else {
+      assert.equal(result.body, "selected");
+      const oldRequest = f.projectCalls[0];
+      assert.equal(oldRequest.url, "/region/v1" + path.slice(3));
+      assert.equal(oldRequest.headers.authorization, "Bearer synthetic-project");
+      assert.deepEqual(oldRequest.bodyBytes, originalBodyBytes);
+    }
+    const alternateAccountCalls = [...f.calls, ...f.defaultCalls];
+    assert.equal(alternateAccountCalls.length, 0);
+    assert.equal(f.projectCalls.length, failure === "credential" ? 0 : 1);
+    assert.equal((await request(f, { token: "synthetic-incoming", raw: headers(T1, { turn_trigger: "background" }), path: "/v1/responses/compact?raw=a%2Fb", body: originalBodyBytes })).body, "default");
+    const nextRequest = f.defaultCalls[0];
+    assert.equal(nextRequest.headers.authorization, "Bearer synthetic-default");
+    assert.equal(nextRequest.url, "/default/full/v1/responses/compact?raw=a%2Fb");
+    assert.deepEqual(nextRequest.bodyBytes, originalBodyBytes);
+    assert.equal(diagnosticEvents(f).filter(event => event.event === "completed").length, 2);
+  }
+});
+
+nodeTest("assignment health reports the applied snapshot and invalid getters fail closed", async t => {
+  let current, captures = 0;
+  const f = await setupProxy(t, async (_req, res) => res.end("alternate"), assignmentOptions({
+    getRequestRoutingSnapshot: () => { captures++; return current; },
+  }));
+  current = assignmentSnapshot(f, { inherited: true, mode: "off" });
+  const health = await request(f, { path: "/healthz", method: "GET", raw: [], authenticated: false, body: "" });
+  assert.equal(health.status, 200);
+  const fingerprint = JSON.parse(health.body).configFingerprint;
+  assert.equal(fingerprint, configFingerprint(current.config));
+  assert.notEqual(fingerprint, configFingerprint(f.config));
+  assert.equal(captures, 1);
+  for (const invalid of [undefined, null, {}, { config: f.config, mode: "ON" }, { config: null, mode: "on" }, Promise.resolve(current)]) {
+    current = invalid;
+    assert.equal((await request(f, { token: "synthetic-incoming" })).status, 500);
+  }
+  assert.equal(f.calls.length + f.projectCalls.length + f.defaultCalls.length, 0);
+  assert.throws(() => createProxy(f.config, {
+    getProjectRoutingMode: () => "on", getRequestRoutingSnapshot: () => current,
+  }), TypeError);
 });
