@@ -13,6 +13,26 @@ if sys.argv[1:] == ['--version']:
     sys.exit(0)
 if sys.argv[1:2] == ['--use-system-ca']: del sys.argv[1]
 root = os.path.dirname(sys.argv[1])
+def assignment_summary():
+    return dict(kind='inherited', account=dict(id='11111111-1111-4111-8111-111111111111', displayName='Synthetic'))
+def assignment_intent(change):
+    return dict(schemaVersion=1, operationId=change['operationId'], context=change['expectedContext'], projectId=change['projectId'],
+                accountId=change['accountId'], checkpointName='assignment-checkpoint-' + change['operationId'].lower() + '.json',
+                beforeRevision='a'*64, beforeIdentity='b'*64, candidateRevision='c'*64, candidateIdentity='d'*64)
+def assignment_state(context, project, change=None, live=False):
+    revision, identity = ('c'*64, 'd'*64) if change else ('a'*64, 'b'*64)
+    return dict(context=context, savedState='ready', savedRevision=revision, savedIdentity=identity, savedFingerprint='e'*64,
+                catalogRevision='f'*64, runningRevision=revision if live else None, runningIdentity=identity if live else None,
+                runningFingerprint='e'*64 if live else None, mode='off' if live else None, projectId=project,
+                savedAssignment=assignment_summary() if project else None, runningAssignment=assignment_summary() if live and project else None,
+                intent=assignment_intent(change) if change else None, lastAttempt=None)
+def assignment_commit(change, live=False):
+    intent = assignment_intent(change)
+    return dict(context=change['expectedContext'], operationId=change['operationId'], projectId=change['projectId'], changed=True,
+                beforeRevision='a'*64, candidateRevision='c'*64, savedRevision='c'*64, beforeIdentity='b'*64,
+                candidateIdentity='d'*64, savedIdentity='d'*64, before=assignment_summary(), after=assignment_summary(),
+                checkpointPath=os.path.join(os.path.dirname(change['configPath']),intent['checkpointName']), intent=intent,
+                runningRevision='c'*64 if live else None, runningIdentity='d'*64 if live else None, runningFingerprint='e'*64 if live else None)
 with open(os.path.join(root, 'behavior.json')) as f: behavior = json.load(f)
 if os.environ.get('NODE_OPTIONS') or os.environ.get('NODE_PATH') or os.environ.get('COMPANION_SECRET'):
     sys.exit(19)
@@ -34,10 +54,12 @@ if os.path.basename(sys.argv[1]) == 'managed-serve.js':
     signal.signal(signal.SIGTERM, stop)
     current_mode = 'off'
     def reply(frame):
-        try: os.write(1, (json.dumps(frame) + '\n').encode())
+        try: os.write(1, (json.dumps(frame, separators=(',', ':')) + '\n').encode())
         except OSError: pass
     frame = dict(schemaVersion=1, type='ready', sessionId=sys.argv[5],
                  context=dict(configPath=sys.argv[3], codexHome=cfg['home'], providerId='fixture', listenPort=cfg['port']), mode='off')
+    if mode != 'modeOnlyReady': frame['capabilities'] = ['project_assignments_v1']
+    assignment_change = None
     if mode == 'unsupportedReady': frame['schemaVersion'] = 2
     if mode == 'wrongContextReady': frame['context']['providerId'] = 'wrong'
     if mode not in ['noReady', 'longOutput']: reply(frame)
@@ -59,6 +81,23 @@ if os.path.basename(sys.argv[1]) == 'managed-serve.js':
                 line, input_bytes = input_bytes.split(b'\n', 1)
                 command = json.loads(line)
                 with open(os.path.join(root, 'commands'), 'a') as f: f.write(json.dumps(command) + '\n')
+                if command['action'] in ['get_assignment', 'set_assignment']:
+                    context = frame['context']
+                    if command['action'] == 'set_assignment':
+                        assignment_change = dict(command, configPath=sys.argv[3], operationId=command['requestId'])
+                        with open(os.path.join(root, 'assignment-record'), 'w') as f: json.dump(assignment_change, f)
+                        if mode == 'assignmentTimeout': continue
+                        if mode == 'assignmentLoss': os.close(1); continue
+                        reply(dict(schemaVersion=1,type='assignment_result',sessionId=sys.argv[5],requestId=command['requestId'],
+                                   outcome='applied',code=None,commit=assignment_commit(assignment_change,True),
+                                   state=assignment_state(context,command['projectId'],assignment_change,True)))
+                    else:
+                        if mode == 'assignmentReadExit': sys.exit(0)
+                        state = assignment_state(context,command['projectId'],assignment_change,True)
+                        state['mode'] = current_mode
+                        if not assignment_change or command['operationId'] != assignment_change['operationId']: state['intent'] = None
+                        reply(dict(schemaVersion=1,type='assignment_state',sessionId=sys.argv[5],requestId=command['requestId'],state=state))
+                    continue
                 if command['action'] == 'set_mode':
                     current_mode = command['mode']
                     with open(os.path.join(root, 'router-mode'), 'w') as f: f.write(current_mode)
@@ -96,6 +135,28 @@ if mode in ['stdinDelayed', 'stdinTimeout', 'stdinCancelled', 'stdinEarlyExit']:
     else: time.sleep(1.5 if mode == 'stdinDelayed' else 6.3)
 request = json.load(sys.stdin)
 mode = behavior.get('mode', 'valid')
+if request['action'] in ['assignment_state', 'assignment_commit']:
+    context = request['expectedContext']
+    record = os.path.join(root, 'assignment-record')
+    if request['action'] == 'assignment_commit':
+        with open(os.path.join(root, 'assignment-request'), 'w') as f: json.dump(request, f)
+        if mode == 'assignmentHeld':
+            with open(os.path.join(root, 'assignment-started'), 'w') as f: f.write('started')
+            while not os.path.exists(os.path.join(root, 'release-assignment')): time.sleep(.01)
+        if mode == 'assignmentRejected':
+            print(json.dumps(dict(schemaVersion=1,ok=False,error=dict(code='ASSIGNMENT_CONFLICT',message='SENTINEL_PRIVATE')))); sys.exit(0)
+        with open(record, 'w') as f: json.dump(request, f)
+        if mode == 'assignmentLostReply': print('SENTINEL_PRIVATE'); sys.exit(0)
+        if mode == 'assignmentBooleanSchema':
+            print(json.dumps(dict(schemaVersion=True,ok=False,error=dict(code='ASSIGNMENT_CONFLICT',message='synthetic')))); sys.exit(0)
+        result = assignment_commit(request)
+    else:
+        change = None
+        if os.path.exists(record):
+            with open(record) as f: change = json.load(f)
+        result = assignment_state(context, request['projectId'], change)
+        if not change or request['operationId'] != change['operationId']: result['intent'] = None
+    print(json.dumps(dict(schemaVersion=1, ok=True, result=result))); sys.exit(0)
 if mode == 'heldMutation' and request['action'] != 'inspect':
     with open(os.path.join(root, 'mutation-started'), 'w') as f: f.write('started')
     while not os.path.exists(os.path.join(root, 'release-mutation')): time.sleep(.01)

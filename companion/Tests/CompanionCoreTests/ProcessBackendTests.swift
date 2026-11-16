@@ -472,6 +472,144 @@ import Darwin
         XCTAssertEqual(replacementMode, .off)
         _ = try await backend.stop(replacement)
     }
+    func testAssignmentRequiresCapabilityAndExactChild() async throws {
+        let child = try await startFixture()
+        let change = AssignmentFixtures.change(context: child.context)
+        let forgery = OwnedRouter(process: child.process, context: child.context, id: child.id)
+        do { _ = try await backend.applyAssignment(change, to: forgery); XCTFail("Forged assignment authority") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        let state = try await backend.readAssignment(child, projectID: change.projectId, operationID: nil)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.token)
+        let result = try await backend.applyAssignment(change, to: child)
+        XCTAssertEqual(result.operationId, change.operationId)
+        XCTAssertEqual(result.runningRevision, AssignmentFixtures.candidate)
+        XCTAssertTrue(child.process.isRunning)
+        _ = try await backend.stop(child)
+        try setMode("modeOnlyReady")
+        let old = try await startFixture()
+        do { _ = try await backend.readAssignment(old, projectID: change.projectId, operationID: nil); XCTFail("Old ready accepted assignment") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        let mode = try await backend.readRoutingMode(old); XCTAssertEqual(mode, .off)
+        _ = try await backend.stop(old)
+    }
+
+    func testStoppedHelperMustExitBeforeReconciliation() async throws {
+        let inspection = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(inspection.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentHeld")
+        defer { try? releaseFixture("release-assignment") }
+        let saving = Task { try await backend.saveStoppedAssignment(change) }
+        try await waitForFixture("assignment-started"); let pid = try fixturePID()
+        saving.cancel()
+        do { _ = try await saving.value; XCTFail("Cancelled helper accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertEqual(kill(pid, 0), 0)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId); XCTFail("Running helper reconciled") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        try setMode("valid"); _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.saveStoppedAssignment(AssignmentFixtures.change(context: context)); XCTFail("Second helper accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        try releaseFixture("release-assignment"); try await waitForExit(pid)
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let state = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: resources.appendingPathComponent("src/assignment-request"))) as? [String: Any])
+        XCTAssertEqual(request["action"] as? String, "assignment_commit")
+        XCTAssertTrue(request["accountId"] is NSNull)
+        XCTAssertNil(request["expectedRunningRevision"])
+    }
+
+    func testAssignmentUncertaintyPreservesDirectRecoveryAndRequiresExactExitedChild() async throws {
+        try setMode("assignmentLoss")
+        let child = try await startFixture(), change = AssignmentFixtures.change(context: child.context)
+        do { _ = try await backend.applyAssignment(change, to: child); XCTFail("Lost acknowledgment accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertTrue(child.process.isRunning); XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let recovered = try await backend.control(action: .rollback, configPath: config, expectedContext: child.context)
+        XCTAssertEqual(recovered.state, "direct"); XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId); XCTFail("Live child masqueraded as stopped") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        _ = try await backend.stop(child)
+        let replacement = try await startFixture()
+        do { _ = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId); XCTFail("Replacement masqueraded as stopped") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        _ = try await backend.stop(replacement)
+        let state = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate); XCTAssertNil(state.runningRevision)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testAssignmentReadRechecksExactChildAfterAwaitedLoss() async throws {
+        try setMode("assignmentReadExit")
+        let child = try await startFixture()
+        do { _ = try await backend.readAssignment(child, projectID: AssignmentFixtures.project, operationID: nil); XCTFail("Exited child supplied authority") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testStoppedAssignmentFailuresStaySeparateFromProviderUncertainty() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentRejected")
+        do { _ = try await backend.saveStoppedAssignment(change); XCTFail("Rejection accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict); XCTAssertFalse(error.localizedDescription.contains("SENTINEL")) }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("assignmentLostReply")
+        let next = AssignmentFixtures.change(context: context)
+        do { _ = try await backend.saveStoppedAssignment(next); XCTFail("Lost helper response accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain); XCTAssertFalse(error.localizedDescription.contains("SENTINEL")) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("valid")
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let state = try await backend.readStoppedAssignment(context: context, projectID: next.projectId, operationID: next.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testAssignmentTimeoutNeedsFreshAssignmentRead() async throws {
+        try setMode("assignmentTimeout")
+        let child = try await startFixture(), change = AssignmentFixtures.change(context: child.context)
+        let invocations = try String(contentsOf: resources.appendingPathComponent("src/invocations"))
+        let began = Date()
+        do { _ = try await backend.applyAssignment(change, to: child); XCTFail("Timed-out mutation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(began), 5.75)
+        XCTAssertTrue(child.process.isRunning); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        let mode = try await backend.readRoutingMode(child); XCTAssertEqual(mode, .off)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.applyAssignment(AssignmentFixtures.change(context: child.context), to: child); XCTFail("Unreconciled assignment retried") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let state = try await backend.readAssignment(child, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+        let commands = try String(contentsOf: resources.appendingPathComponent("src/commands")).split(separator: "\n")
+        XCTAssertEqual(commands.filter { $0.contains("set_assignment") }.count, 1)
+        XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/invocations")), invocations)
+        _ = try await backend.stop(child)
+    }
+
+    func testMalformedStoppedRejectionCannotClaimNoReplacement() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentBooleanSchema")
+        do { _ = try await backend.saveStoppedAssignment(change); XCTFail("Malformed rejection accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("valid")
+        let state = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
     private func startFixture() async throws -> OwnedRouter {
         let child = try await backend.start(configPath: config)
         startedChildren.append(child)

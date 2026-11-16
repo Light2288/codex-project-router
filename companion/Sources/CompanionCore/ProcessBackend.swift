@@ -98,10 +98,15 @@ private final class RunningCommand {
     func discard() { stdout.discard(); stderr.discard() }
 }
 
-@MainActor public final class ProcessBackend: CompanionBackend, AccountSetupBackend {
+@MainActor public final class ProcessBackend: CompanionBackend, AccountSetupBackend, ProjectAssignmentBackend {
     public var mutationRequiresReconciliation: Bool { mutationInFlight || needsReconciliation }
     public private(set) var uncertainSetupOperationID: String?
     public var setupHelperIsRunning: Bool { uncertainSetupOperationID != nil && mutationInFlight }
+    public var assignmentRequiresReconciliation: Bool { uncertainAssignment != nil }
+    public var uncertainAssignmentOperationID: String? { uncertainAssignment?.change.operationId }
+    public var assignmentHelperIsRunning: Bool { uncertainAssignment?.childID == nil && uncertainAssignment != nil && mutationInFlight }
+    private var uncertainAssignment: (change: AssignmentChange, childID: UUID?)?
+    private var assignmentInFlight = false
     public var onChildExit: ((UUID, Int32) -> Void)?
     private let resourcesURL: URL
     private var nodeExecutable: URL?
@@ -189,12 +194,14 @@ private final class RunningCommand {
         return result
     }
     public func control(action: ControlAction, configPath: URL, expectedContext: ActivationContext) async throws -> ControlResult {
-        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
+        guard !mutationInFlight, !needsReconciliation, !assignmentInFlight,
+              action == .rollback || uncertainAssignment == nil else { throw CompanionError.mutationBusy }
         if action == .activate {
             let inspection = try await inspect(configPath: configPath, browseHome: URL(fileURLWithPath: expectedContext.codexHome))
             guard inspection.context == expectedContext, inspection.configuration.setupState == "ready" else { throw CompanionError.mutationBusy }
         }
-        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
+        guard !mutationInFlight, !needsReconciliation, !assignmentInFlight,
+              action == .rollback || uncertainAssignment == nil else { throw CompanionError.mutationBusy }
         mutationInFlight = true
         mutationGeneration = UUID()
         defer { if mutationProcess == nil { mutationInFlight = false } }
@@ -220,7 +227,7 @@ private final class RunningCommand {
         return result
     }
     public func commitSetup(_ change: SetupChange, context: ActivationContext, revision: String, operationID: String) async throws -> SetupCommitResult {
-        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.mutationBusy }
+        guard !mutationInFlight, !needsReconciliation, !assignmentInFlight, uncertainAssignment == nil else { throw CompanionError.mutationBusy }
         guard UUID(uuidString: operationID) != nil, validRevision(revision) else { throw CompanionError.protocolFailure }
         let encodedContext = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
         let encodedChange = try JSONSerialization.jsonObject(with: JSONEncoder().encode(change))
@@ -273,7 +280,7 @@ private final class RunningCommand {
               !isDirectory.boolValue, FileManager.default.isReadableFile(atPath: path.path) else { throw CompanionError.resourcesUnavailable }
         return path
     }
-    private func requestResult<Result: Codable>(_ request: [String: Any], mutating: Bool, deadline: Date? = nil) async throws -> Result {
+    private func requestResult<Result: Codable>(_ request: [String: Any], mutating: Bool, deadline: Date? = nil, assignment: Bool = false, validateAssignment: ((Any) -> Bool)? = nil) async throws -> Result {
         let deadline = deadline ?? Date().addingTimeInterval(5)
         let script = try resource("companion-cli.js")
         let executable = try await runtime(deadline: deadline)
@@ -284,13 +291,33 @@ private final class RunningCommand {
         try requireTime(before: deadline)
         let command = try launch(executable: executable, arguments: ["--use-system-ca", script.path], input: input)
         if mutating { mutationProcess = command }
-        let bytes = try await wait(command, mutating: mutating, deadline: deadline)
+        let bytes = try await wait(command, mutating: mutating, deadline: deadline, assignment: assignment)
         if mutating { mutationProcess = nil }
+        if assignment {
+            guard let envelope = try? JSONDecoder().decode(WireEnvelope<Result>.self, from: bytes), envelope.schemaVersion == 1,
+                  let raw = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
+                throw mutating ? CompanionError.assignmentUncertain : CompanionError.assignmentUnavailable
+            }
+            if !envelope.ok {
+                guard AssignmentWire.exact(raw, ["schemaVersion", "ok", "error"]), let failure = raw["error"] as? [String: Any],
+                      AssignmentWire.exact(failure, ["code", "message"]), let code = failure["code"] as? String,
+                      AssignmentWire.codes.contains(code), failure["message"] is String else {
+                    throw mutating ? CompanionError.assignmentUncertain : CompanionError.assignmentUnavailable
+                }
+                if code == "ASSIGNMENT_UNCERTAIN" { throw CompanionError.assignmentUncertain }
+                throw code == "ASSIGNMENT_CONFLICT" ? CompanionError.assignmentConflict : CompanionError.assignmentUnavailable
+            }
+            guard AssignmentWire.exact(raw, ["schemaVersion", "ok", "result"]), let result = raw["result"],
+                  validateAssignment?(result) == true else {
+                throw mutating ? CompanionError.assignmentUncertain : CompanionError.assignmentUnavailable
+            }
+        }
         do {
             let envelope = try JSONDecoder().decode(WireEnvelope<Result>.self, from: bytes)
             guard envelope.schemaVersion == 1, envelope.ok, envelope.error == nil, let result = envelope.result else { throw CompanionError.protocolFailure }
             return result
         } catch {
+            if assignment { throw mutating ? CompanionError.assignmentUncertain : CompanionError.assignmentUnavailable }
             if mutating { needsReconciliation = true; throw CompanionError.mutationUncertain }
             throw CompanionError.protocolFailure
         }
@@ -347,17 +374,17 @@ private final class RunningCommand {
         }
         return child
     }
-    private func wait(_ command: RunningCommand, mutating: Bool, deadline: Date? = nil) async throws -> Data {
+    private func wait(_ command: RunningCommand, mutating: Bool, deadline: Date? = nil, assignment: Bool = false) async throws -> Data {
         let deadline = deadline ?? Date().addingTimeInterval(5)
         while command.process.isRunning || !command.drained {
             if Task.isCancelled || Date() >= deadline || command.overflow || command.inputFailed {
                 if mutating {
-                    needsReconciliation = true
+                    if !assignment { needsReconciliation = true }
                     Task { [self, command] in
                         while command.process.isRunning || !command.drained { await pause(0.02) }
                         command.discard(); mutationProcess = nil; mutationInFlight = false
                     }
-                    throw CompanionError.mutationUncertain
+                    throw assignment ? CompanionError.assignmentUncertain : CompanionError.mutationUncertain
                 }
                 await terminateReadOnly(command)
                 if command.overflow || command.inputFailed { throw CompanionError.protocolFailure }
@@ -367,7 +394,11 @@ private final class RunningCommand {
         }
         defer { command.discard() }
         guard command.process.terminationStatus == 0, !command.overflow, !command.inputFailed else {
-            if mutating { mutationProcess = nil; needsReconciliation = true; throw CompanionError.mutationUncertain }
+            if mutating {
+                mutationProcess = nil
+                if !assignment { needsReconciliation = true }
+                throw assignment ? CompanionError.assignmentUncertain : CompanionError.mutationUncertain
+            }
             throw command.overflow || command.inputFailed ? CompanionError.protocolFailure : CompanionError.commandFailed
         }
         return command.stdout.snapshot.data
@@ -414,6 +445,82 @@ private final class RunningCommand {
               tracked.child.context == child.context, child.process.isRunning else { throw CompanionError.unownedChild }
         return tracked.channel
     }
+    public func readAssignment(_ child: OwnedRouter, projectID: String?, operationID: String?) async throws -> AssignmentState {
+        let channel = try modeChannel(for: child)
+        let state: AssignmentState
+        do { state = try await channel.readAssignment(projectID: projectID, operationID: operationID) }
+        catch { _ = try modeChannel(for: child); throw error }
+        guard try modeChannel(for: child) === channel else { throw CompanionError.unownedChild }
+        if let uncertainAssignment, uncertainAssignment.childID == child.id,
+           operationID == uncertainAssignment.change.operationId,
+           AssignmentWire.reconciles(state, change: uncertainAssignment.change, live: true) { self.uncertainAssignment = nil }
+        return state
+    }
+    public func applyAssignment(_ change: AssignmentChange, to child: OwnedRouter) async throws -> AssignmentCommit {
+        let channel = try modeChannel(for: child)
+        guard change.expectedContext == child.context, AssignmentWire.change(change, live: true) else { throw CompanionError.assignmentConflict }
+        guard uncertainAssignment == nil, !assignmentInFlight else { throw CompanionError.assignmentUncertain }
+        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.assignmentUnavailable }
+        assignmentInFlight = true
+        defer { assignmentInFlight = false }
+        do {
+            let commit = try await channel.applyAssignment(change)
+            guard try modeChannel(for: child) === channel else {
+                uncertainAssignment = (change, child.id); throw CompanionError.assignmentUncertain
+            }
+            return commit
+        } catch {
+            guard (try? modeChannel(for: child)) === channel else {
+                uncertainAssignment = (change, child.id); throw CompanionError.assignmentUncertain
+            }
+            if error as? CompanionError == .assignmentUncertain { uncertainAssignment = (change, child.id) }
+            throw error
+        }
+    }
+    public func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState {
+        guard AssignmentWire.context(context), AssignmentWire.uuid(projectID), operationID.map(AssignmentWire.uuid) ?? true else { throw CompanionError.assignmentUnavailable }
+        // Reads begun before exit/drain cannot establish a possibly writing helper's outcome.
+        guard !owned.values.contains(where: { $0.child.context == context }) else { throw CompanionError.assignmentUnavailable }
+        guard !mutationInFlight, mutationProcess == nil, !assignmentInFlight else { throw CompanionError.assignmentUncertain }
+        if let id = uncertainAssignment?.childID, owned[id] != nil { throw CompanionError.assignmentUncertain }
+        let observed = uncertainAssignment
+        let generation = mutationGeneration
+        let request: [String: Any] = ["schemaVersion": 1, "action": "assignment_state", "configPath": context.configPath,
+            "expectedContext": try JSONSerialization.jsonObject(with: JSONEncoder().encode(context)),
+            "projectId": projectID, "operationId": operationID as Any? ?? NSNull()]
+        let state: AssignmentState = try await requestResult(request, mutating: false, assignment: true) {
+            AssignmentWire.state($0, context: context, projectID: projectID, operationID: operationID, live: false) != nil
+        }
+        guard !owned.values.contains(where: { $0.child.context == context }) else { throw CompanionError.assignmentUnavailable }
+        guard !mutationInFlight, mutationProcess == nil, !assignmentInFlight else { throw CompanionError.assignmentUncertain }
+        if let observed, operationID == observed.change.operationId,
+           observed.childID.map({ owned[$0] == nil }) ?? true,
+           generation == mutationGeneration,
+           uncertainAssignment?.change.operationId == observed.change.operationId,
+           AssignmentWire.reconciles(state, change: observed.change, live: false) { uncertainAssignment = nil }
+        return state
+    }
+    public func saveStoppedAssignment(_ change: AssignmentChange) async throws -> AssignmentCommit {
+        guard AssignmentWire.change(change, live: false) else { throw CompanionError.assignmentConflict }
+        guard !owned.values.contains(where: { $0.child.context == change.expectedContext }) else { throw CompanionError.assignmentUnavailable }
+        guard uncertainAssignment == nil, !assignmentInFlight else { throw CompanionError.assignmentUncertain }
+        guard !mutationInFlight, !needsReconciliation else { throw CompanionError.assignmentUnavailable }
+        var request = try JSONSerialization.jsonObject(with: JSONEncoder().encode(change)) as! [String: Any]
+        request.removeValue(forKey: "expectedRunningRevision")
+        request["schemaVersion"] = 1; request["action"] = "assignment_commit"
+        mutationInFlight = true; assignmentInFlight = true; mutationGeneration = UUID()
+        defer { assignmentInFlight = false; if mutationProcess == nil { mutationInFlight = false } }
+        do {
+            let commit: AssignmentCommit = try await requestResult(request, mutating: true, assignment: true) {
+                AssignmentWire.commit($0, change: change, live: false) != nil
+            }
+            return commit
+        } catch {
+            if error as? CompanionError == .assignmentUncertain { uncertainAssignment = (change, nil) }
+            throw error
+        }
+    }
+    public func probeAssignmentPort(_ context: ActivationContext) async -> StopOutcome.PortState { await probe(port: context.listenPort) }
     public func stop(_ child: OwnedRouter) async throws -> StopOutcome {
         guard let tracked = owned[child.id], tracked.child === child, tracked.child.process === child.process,
               child.process.isRunning else { throw CompanionError.unownedChild }
@@ -454,7 +561,10 @@ private final class RunningCommand {
               inspection.catalog.entries.allSatisfy({ ["mapped", "unmapped", "target_missing", "catalog_missing"].contains($0.routeState) &&
                   ($0.assignmentKind == nil || ["override", "inherited", "legacy_inherited", "target_missing"].contains($0.assignmentKind!)) && validSummary($0.account) }),
               inspection.configuration.setupState == nil || ["ready", "required", "migration_required", "invalid"].contains(inspection.configuration.setupState!),
-              validSummary(inspection.configuration.defaultAccount) else { return false }
+              validSummary(inspection.configuration.defaultAccount),
+              inspection.configuration.accounts?.allSatisfy({ validSummary($0) }) ?? true,
+              inspection.configuration.accounts.map({ Set($0.map(\.id)).count == $0.count }) ?? true,
+              [inspection.configurationRevision, inspection.configurationIdentity, inspection.routingFingerprint, inspection.recoveryRevision, inspection.catalog.revision].allSatisfy({ $0.map(validRevision) ?? true }) else { return false }
         if let context = inspection.context {
             guard context.configPath.hasPrefix("/"), context.codexHome.hasPrefix("/"), (1...65535).contains(context.listenPort),
                   context.providerId.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil else { return false }
