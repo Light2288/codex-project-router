@@ -174,8 +174,7 @@ function accountRouting(value) {
     throw new RouterError("ACCOUNT_SETUP_INVALID");
   }
 }
-export async function inspectRouterConfiguration(configPath) {
-  const { value, source } = await readConfiguration(configPath);
+export function inspectRouterConfigurationValue(value) {
   const core = operationalConfig(value);
   let config, setupState;
   if (value.schemaVersion === 1) {
@@ -189,13 +188,18 @@ export async function inspectRouterConfiguration(configPath) {
       if (error.code !== "ACCOUNT_SETUP_INVALID") throw error;
       // Unsafe account metadata is neither exposed nor hashed. Core validation
       // remains authoritative for browsing and restoring the original provider.
-      return Object.freeze({ config: core, setupState: "invalid", configurationRevision: null });
+      return Object.freeze({ config: core, setupState: "invalid" });
     }
     config = Object.freeze({ ...core, accountRouting: routing });
     setupState = routing.incomingCredential !== null && routing.defaultAccountId !== null ? "ready" : "required";
   }
-  return Object.freeze({ config, setupState,
-    configurationRevision: createHash("sha256").update(source).digest("hex") });
+  return Object.freeze({ config, setupState });
+}
+export async function inspectRouterConfiguration(configPath) {
+  const { value, source } = await readConfiguration(configPath);
+  const inspection = inspectRouterConfigurationValue(value);
+  return Object.freeze({ ...inspection, configurationRevision: inspection.setupState === "invalid"
+    ? null : createHash("sha256").update(source).digest("hex") });
 }
 export async function loadRouterConfig(configPath) {
   const inspection = await inspectRouterConfiguration(configPath);
