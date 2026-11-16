@@ -129,8 +129,9 @@ async function nextFrame(tracked) {
   }
   assert.fail('Managed reply deadline exceeded: '+tracked.stderr);
 }
-async function managedModes(tracked, context, sessionId, unchanged, {ready=true} = {}) {
-  if (ready) assert.deepEqual(await nextFrame(tracked), {schemaVersion:1,type:'ready',sessionId,context,mode:'off'});
+async function managedModes(tracked, context, sessionId, unchanged, {ready=true,assignments=false} = {}) {
+  if (ready) assert.deepEqual(await nextFrame(tracked), {schemaVersion:1,type:'ready',sessionId,context,mode:'off',
+    ...(assignments ? {capabilities:['project_assignments_v1']} : {})});
   const pid = tracked.child.pid;
   async function listener() {
     const response = await fetch(`http://127.0.0.1:${context.listenPort}/healthz`);
@@ -421,7 +422,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     assert.deepEqual(await readFile(configPath),configBytes);
     assert.equal(await readFile(providerPath,'utf8'),original);
     assert.equal(upstream.connections(),0,'control-time upstream connections are forbidden');
-  });
+  },{assignments:true});
   let ready;
   for(let i=0;i<100;i++) {ready=await bridge({action:'inspect',configPath});if(ready.provider.proxyReady)break;await new Promise(r=>setTimeout(r,25));}
   assert.equal(ready.provider.proxyReady,true);
@@ -570,7 +571,7 @@ test('native relocated app and bundled controls work with checkout reads denied 
     assert.deepEqual(await readFile(configPath),configBytes);
     assert.equal(await readFile(providerPath,'utf8'),original);
     assert.equal(upstream.connections(),0,'control-time upstream connections are forbidden');
-  });
+  },{assignments:true});
   let ready;
   for (let i=0;i<100;i++) {
     ready = await bridge({action:'inspect',configPath}); if (ready.provider.proxyReady) break;
