@@ -125,6 +125,10 @@ Add channel `readAssignment(projectID:operationID:)` and `applyAssignment(_:)`; 
 
 Controller API: `canEditAssignment(_ project: Inspection.Entry) -> Bool`, `loadAssignment(projectID: String) async -> AssignmentState?`, `saveAssignment(projectID: String, accountID: String?) async`, plus read-only selected/pending assignment state and assignment-specific error/status. Save owns its operation through completion independently of sheet lifetime. Reserve the existing action/inspection slot for fresh preflight → mutation → compound reconciliation, without adding another polling framework.
 
+## Execution ruling: package verification ordering
+
+After execution preflight, the controller moved mechanical production source-allowlist maintenance forward to Tasks 1/3 and requires rebuilding the ignored app before per-task full Node checks when executable resources change. The existing package checks compare bundled sources against the checkout, so deferring those additions until Task 8 would manufacture stale-package failures during TDD verification. Task 8 still owns final package feature coverage, live acceptance, documentation and closeout. This changes dependency ordering only; requirements and execution endpoint are unchanged. The ignored SDD ledger records the ruling and evidence.
+
 ## Execution preflight — only after separate plan approval
 
 - [x] Identify this approved pair and quote the separate specification and plan approval messages. Preserve the selected execution method; load `personal-workflows:spec-implement` and its selected base then, not while planning. Mark the plan approved only from actual approval evidence.
