@@ -284,12 +284,18 @@ export async function commitProjectAssignment(input = {}, {running, publish, fs 
         const intentInfo=await writeExclusive(intentPath,JSON.stringify(commit.intent)+"\n");
         const syncDirectory=async()=>{const dir=await fs.open(directory,"r");try {await dir.sync();} finally {await dir.close();}};
         await syncDirectory();
-        const candidateNow=await privateFile(tempPath,fs);
-        if(!sameFile(candidateNow.info,tempInfo) || !candidateNow.bytes.equals(Buffer.from(prepared.source))) throw assignmentError("CONFLICT");
-        const checkpointNow=await privateFile(commit.checkpointPath,fs), intentNow=await privateFile(intentPath,fs);
-        if(!sameFile(checkpointInfo,checkpointNow.info) || !checkpointNow.bytes.equals(Buffer.from(initial.source)) ||
-          !sameFile(intentInfo,intentNow.info) || !intentNow.bytes.equals(Buffer.from(JSON.stringify(commit.intent)+"\n"))) throw assignmentError("CONFLICT");
+        const assertPersistenceArtifacts=async()=>{
+          const candidateNow=await privateFile(tempPath,fs);
+          if(!sameFile(candidateNow.info,tempInfo) || !candidateNow.bytes.equals(Buffer.from(prepared.source))) throw assignmentError("CONFLICT");
+          const checkpointNow=await privateFile(commit.checkpointPath,fs), intentNow=await privateFile(intentPath,fs);
+          if(!sameFile(checkpointInfo,checkpointNow.info) || !checkpointNow.bytes.equals(Buffer.from(initial.source)) ||
+            !sameFile(intentInfo,intentNow.info) || !intentNow.bytes.equals(Buffer.from(JSON.stringify(commit.intent)+"\n"))) throw assignmentError("CONFLICT");
+        };
+        await assertPersistenceArtifacts();
         await fresh();
+        // Preflight awaits external state; its checks cannot attest artifacts
+        // validated before it. Retain the early check and verify them again.
+        await assertPersistenceArtifacts();
         replacementAttempted=true;
         await fs.rename(tempPath,input.configPath);replaced=true;tempCreated=false;
         await syncDirectory();

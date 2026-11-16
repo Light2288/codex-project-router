@@ -515,3 +515,27 @@ test("a rejected asynchronous publication is reported uncertain without an unhan
   await assert.rejects(assignments.commitProjectAssignment({...input,expectedRunningRevision:running.configurationRevision},{running,async publish(){throw new Error("SYNTHETIC_ASYNC_PUBLICATION");}}),{code:"ASSIGNMENT_UNCERTAIN"});
   await new Promise(resolve=>setImmediate(resolve));
 });
+
+// Evidence checked before preflight can be replaced while that preflight awaits.
+// Such replacement must never publish or replace the canonical configuration.
+test("late candidate checkpoint or intent replacement during preflight rejects before publication",async t=>{
+  for(const kind of ["candidate","checkpoint","intent"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t),input=await f.input(),source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+    const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"on"};
+    const before=await readFile(f.configPath);
+    let synced=false,candidateVerified=false,replaced=false,published=false;
+    const artifact=join(f.dir,kind === "candidate" ? `.assignment-${OP}.tmp` : `assignment-${kind}-${OP}.json`);
+    const io=injectedFS(()=>false,async(method,path)=>{
+      if(method==="sync" && path===f.dir) synced=true;
+      if(synced && method==="open" && String(path).endsWith(".tmp")) candidateVerified=true;
+      if(!candidateVerified || replaced || method!=="open" || path!==f.configPath) return;
+      replaced=true;await fs.unlink(artifact);await writeFile(artifact,"{}\n",{mode:0o600});
+    });
+    await assert.rejects(assignments.commitProjectAssignment({...input,expectedRunningRevision:running.configurationRevision},
+      {running,fs:io,publish(){published=true;}}),{code:"ASSIGNMENT_CONFLICT"});
+    assert.equal(replaced,true);assert.equal(published,false);
+    assert.deepEqual(await readFile(f.configPath),before);
+    assert.equal(await readFile(artifact,"utf8"),"{}\n");
+    assert.equal(running.config.projectRoutes[P1],"route-a");
+  });
+});
