@@ -515,3 +515,20 @@ test("managed startup rejects setup state and every existing lock before binding
     if (!["required", "invalid"].includes(kind)) await lstat(lockPath);
   }
 });
+
+test("shared configuration lock retains startup compatibility alias and rejects canonical directory replacement",async t=>{
+  const {withConfigurationLock}=await import("../src/configuration-lock.js");
+  const {withRouterStartupLock}=await import("../src/managed-serve.js");
+  assert.equal(withRouterStartupLock,withConfigurationLock);
+  const f=await prepare(t), moved=f.dir+"-moved";
+  const fs=await import("node:fs/promises");
+  t.after(()=>fs.rm(moved,{recursive:true,force:true}));
+  await assert.rejects(withConfigurationLock(f.configPath,async(config,lease)=>{
+    assert.equal(config.listenPort,f.config.listenPort);
+    await fs.rename(f.dir,moved);await fs.mkdir(f.dir,{mode:0o700});
+    await writeFile(join(f.dir,".activation.lock"),"replacement",{mode:0o600});
+    await lease.assertUnchanged();
+  }),{code:"ACTIVATION_CONFLICT"});
+  assert.equal(await readFile(join(f.dir,".activation.lock"),"utf8"),"replacement");
+  assert.ok((await lstat(join(moved,".activation.lock"))).isFile());
+});

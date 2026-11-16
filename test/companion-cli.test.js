@@ -159,3 +159,29 @@ test("CLI missing selected configuration accepts explicit browse home under exis
   const overflow=await run(JSON.stringify(input)+" ".repeat(16*1024));
   assert.equal(overflow.code,1); assert.equal(overflow.envelope.error.code,"CONFIG_INVALID");
 });
+
+test("stopped assignment bridge returns selected evidence and rejects caller live authority",async t=>{
+  const {accountRouting,A1}=await import("./helpers/fixtures.js");
+  const {inspectProjectCatalog}=await import("../src/project-catalog.js");
+  const f=await fixture(t);
+  f.dir=await realpath(f.dir);f.configPath=join(f.dir,"router.json");f.config.codexHome=f.dir;
+  f.config.schemaVersion=2;f.config.accountRouting=accountRouting();
+  for(const project of Object.values(f.state["local-projects"])) project.name="Synthetic project";
+  await f.saveState();await f.saveConfig();
+  await writeFile(join(f.dir,"config.toml"),`model_provider = "test_gateway"\n[model_providers.test_gateway]\nbase_url = "${f.config.upstreamBaseUrl}"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.test_gateway.auth]\ncommand = "/synthetic/must-not-run"\n`,{mode:0o600});
+  const expectedContext={configPath:f.configPath,codexHome:f.dir,providerId:f.config.providerId,listenPort:f.config.listenPort};
+  const read={schemaVersion:1,action:"assignment_state",configPath:f.configPath,expectedContext,projectId:P1,operationId:null};
+  const initial=await run(read);
+  assert.equal(initial.code,0);assert.equal(initial.envelope.result.savedState,"ready");
+  assert.equal(initial.envelope.result.runningRevision,null);
+  const input={schemaVersion:1,action:"assignment_commit",configPath:f.configPath,expectedContext,
+    expectedSavedRevision:initial.envelope.result.savedRevision,expectedConfigurationIdentity:initial.envelope.result.savedIdentity,
+    expectedCatalogRevision:(await inspectProjectCatalog(f.dir)).revision,operationId:"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",projectId:P1,accountId:A1};
+  for(const extra of [{running:{}},{publish:true},{expectedRunningRevision:"a".repeat(64)},{mode:"off"}]) {
+    const result=await run({...input,...extra});assert.equal(result.code,1);assert.equal(result.envelope.error.code,"CONFIG_INVALID");
+  }
+  const result=await run(input);assert.equal(result.code,0);assert.equal(result.envelope.result.changed,true);
+  assert.equal(result.envelope.result.runningRevision,null);
+  assert.doesNotMatch(result.stdout,/keychainPath|upstreamBaseUrl|routeAccounts/);
+  const fresh=await run({...read,operationId:input.operationId});assert.deepEqual(fresh.envelope.result.intent,result.envelope.result.intent);
+});

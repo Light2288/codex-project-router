@@ -210,3 +210,308 @@ test("missing own prototype-named binding can be repaired or inherited safely", 
   s = await f.source();
   assert.deepEqual(prepareProjectAssignment(s, change(null)).before, { kind: "target_missing", routeAlias: "toString" });
 });
+
+// These persistence tests fail if a writer trusts a stale UI source, a port's mode,
+// or evidence created after replacement as proof of a certain rejection.
+const assignments = await import("../src/project-assignments.js");
+const fs = await import("node:fs/promises");
+const { join } = await import("node:path");
+const { default: net } = await import("node:net");
+const { once } = await import("node:events");
+async function persistenceSetup(t) {
+  const f = await setup(t);
+  f.dir=await fs.realpath(f.dir);f.configPath=join(f.dir,"router.json");f.config.codexHome=f.dir;
+  const reserve = net.createServer(); reserve.listen(0, "127.0.0.1"); await once(reserve, "listening");
+  f.config.listenPort = reserve.address().port;
+  await new Promise(resolve => reserve.close(resolve));
+  await f.source();
+  const providerPath = join(f.dir, "config.toml");
+  await writeFile(providerPath, `model_provider = "test_gateway"\n[model_providers.test_gateway]\nbase_url = "${f.config.upstreamBaseUrl}"\nwire_api = "responses"\nsupports_websockets = false\n[model_providers.test_gateway.auth]\ncommand = "/synthetic/must-never-run"\nargs = ["PRIVATE_AUTH_SENTINEL"]\n`, {mode:0o600});
+  const context = {configPath:f.configPath,codexHome:f.dir,providerId:f.config.providerId,listenPort:f.config.listenPort};
+  return {...f,providerPath,context, async input(accountId = A1, operationId = OP) {
+    const state = await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:context,projectId:P1,operationId:null});
+    return {configPath:f.configPath,expectedContext:context,expectedSavedRevision:state.savedRevision,
+      expectedConfigurationIdentity:state.savedIdentity,expectedCatalogRevision:state.catalogRevision,operationId,projectId:P1,accountId};
+  }};
+}
+function injectedFS(fail, intercept = async () => {}) {
+  return {...fs,
+    async open(path, ...args) {
+      await intercept("open",path);
+      if (fail("open",path)) throw Object.assign(new Error("SYNTHETIC_IO_FAILURE"),{code:"EIO"});
+      const handle = await fs.open(path,...args);
+      return new Proxy(handle,{get(target,key) {
+        if (["sync","writeFile","close"].includes(key)) return async (...values) => {
+          await intercept(key,path);
+          if (fail(key,path)) { if (key === "close") await target.close(); throw Object.assign(new Error("SYNTHETIC_IO_FAILURE"),{code:"EIO"}); }
+          return target[key](...values);
+        };
+        const value = target[key]; return typeof value === "function" ? value.bind(target) : value;
+      }});
+    },
+    async rename(from,to) {
+      await intercept("rename",from,to);
+      if (fail("rename",from)) throw Object.assign(new Error("SYNTHETIC_IO_FAILURE"),{code:"EIO"});
+      return fs.rename(from,to);
+    },
+    async unlink(path) {
+      await intercept("unlink",path);
+      if (fail("unlink",path)) throw Object.assign(new Error("SYNTHETIC_IO_FAILURE"),{code:"EIO"});
+      return fs.unlink(path);
+    }};
+}
+
+test("stopped Direct save checkpoints and preserves provider", async t => {
+  const f = await persistenceSetup(t), input = await f.input();
+  const before = await readFile(f.configPath), providerBefore = await readFile(f.providerPath);
+  const result = await assignments.commitProjectAssignment(input);
+  const persisted = await readFile(f.configPath);
+  assert.equal(result.changed,true);
+  assert.deepEqual(await readFile(result.checkpointPath),before);
+  assert.deepEqual(await readFile(f.providerPath),providerBefore);
+  assert.equal(result.savedRevision,digest(persisted));
+  assert.equal(result.intent.candidateRevision,result.savedRevision);
+  assert.equal(result.intent.candidateIdentity,result.savedIdentity);
+  assert.equal(result.runningRevision,null);
+  const state = await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:f.context,projectId:P1,operationId:OP});
+  assert.equal(state.savedState,"ready");
+  assert.equal(state.savedIdentity,result.savedIdentity);
+  assert.deepEqual(state.savedAssignment,{kind:"override",account:{id:A1,displayName:"Default account"},routeAlias:NEW_ALIAS});
+  assert.deepEqual(state.intent,result.intent);
+  assert.equal(state.lastAttempt,null);
+  assert.doesNotMatch(JSON.stringify(state),/PRIVATE_AUTH_SENTINEL|keychainPath|upstreamBaseUrl|routeAccounts/);
+  await assert.rejects(fs.access(join(f.dir,".activation.lock")),{code:"ENOENT"});
+});
+
+test("semantic no-op preserves exact bytes and creates no persistence artifacts", async t => {
+  const f = await persistenceSetup(t), input = await f.input(A2), before = await readFile(f.configPath);
+  const result = await assignments.commitProjectAssignment(input);
+  assert.equal(result.changed,false); assert.equal(result.checkpointPath,null); assert.equal(result.intent,null);
+  assert.deepEqual(await readFile(f.configPath),before);
+  assert.equal(result.beforeIdentity,result.savedIdentity);
+  assert.deepEqual((await fs.readdir(f.dir)).filter(name=>name.startsWith("assignment-")),[]);
+});
+
+test("Off or occupied unknown port never authorizes stopped write", async t => {
+  for (const provider of ["direct","router"]) await t.test(provider,async t => {
+    const f = await persistenceSetup(t), input = await f.input(), before = await readFile(f.configPath);
+    if (provider === "router") await writeFile(f.providerPath,(await readFile(f.providerPath,"utf8")).replace(f.config.upstreamBaseUrl,`http://127.0.0.1:${f.config.listenPort}/v1`));
+    const server = net.createServer(); t.after(()=>new Promise(resolve=>server.close(resolve)));
+    server.listen(f.config.listenPort,"127.0.0.1"); await once(server,"listening");
+    await assert.rejects(assignments.commitProjectAssignment(input),{code:"ASSIGNMENT_CONFLICT"});
+    assert.deepEqual(await readFile(f.configPath),before);
+  });
+});
+
+test("stale source catalog replacement or setup lease rejects", async t => {
+  for (const kind of ["source","catalog","same_bytes","setup","stale_lock"]) await t.test(kind,async t => {
+    const f = await persistenceSetup(t), input = await f.input();
+    if (kind === "source") await fs.appendFile(f.configPath,"\n");
+    if (kind === "catalog") { f.state["local-projects"][P1].name="Renamed"; await f.saveState(); }
+    if (kind === "same_bytes") { const replacement=join(f.dir,"replacement"); await writeFile(replacement,await readFile(f.configPath),{mode:0o600}); await fs.rename(replacement,f.configPath); }
+    if (["setup","stale_lock"].includes(kind)) await writeFile(join(f.dir,".activation.lock"),kind === "setup" ? JSON.stringify({pid:process.pid,setupOperationId:OP,configPath:f.configPath}) : JSON.stringify({pid:2147483647}),{mode:0o600});
+    const before=await readFile(f.configPath), lease=["setup","stale_lock"].includes(kind) ? await readFile(join(f.dir,".activation.lock")) : null;
+    await assert.rejects(assignments.commitProjectAssignment(input),{code:"ASSIGNMENT_CONFLICT"});
+    assert.deepEqual(await readFile(f.configPath),before);
+    if(lease) assert.deepEqual(await readFile(join(f.dir,".activation.lock")),lease);
+  });
+});
+
+test("live writer rejects changed static accounts default verifier or optional flags", async t => {
+  for (const kind of ["account","default","incoming","flag"]) await t.test(kind,async t => {
+    const f=await persistenceSetup(t), original=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+    const running={config:original.config,configurationRevision:original.configurationRevision,configurationIdentity:original.configurationIdentity,mode:"off"};
+    if(kind === "account") f.config.accountRouting.accounts[A1].displayName="Changed";
+    if(kind === "default") f.config.accountRouting.defaultAccountId=A2;
+    if(kind === "incoming") f.config.accountRouting.incomingCredential.service="changed";
+    if(kind === "flag") f.config.allowUnassignedThreadTitles=true;
+    await f.saveConfig();
+    const input={...await f.input(),expectedRunningRevision:running.configurationRevision}, before=await readFile(f.configPath);
+    let published=false;
+    await assert.rejects(assignments.commitProjectAssignment(input,{running,publish(){published=true;}}),{code:"ASSIGNMENT_CONFLICT"});
+    assert.equal(published,false); assert.deepEqual(await readFile(f.configPath),before);
+  });
+});
+
+test("live save publishes retained immutable snapshot synchronously after durable persistence", async t => {
+  const f=await persistenceSetup(t), source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+  const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"on"};
+  let published=null;
+  const result=await assignments.commitProjectAssignment({...await f.input(),expectedRunningRevision:running.configurationRevision},{running,publish(next){published=next;}});
+  assert.equal(published.mode,"on"); assert.equal(published.configurationRevision,result.savedRevision);
+  assert.ok(Object.isFrozen(published)); assert.ok(Object.isFrozen(published.config.projectRoutes));
+  assert.equal(result.runningIdentity,result.savedIdentity);
+  assert.equal(running.config.projectRoutes[P1],"route-a");
+});
+
+test("fault phase determines rejection versus uncertainty", async t => {
+  for (const phase of ["temp_create","temp_write","temp_sync","checkpoint_create","checkpoint_sync","intent_create","intent_sync","directory_sync_before","rename","directory_sync_after","publish","release"]) await t.test(phase,async t => {
+    const f=await persistenceSetup(t), input=await f.input(), before=await readFile(f.configPath);
+    let renamed=false;
+    const io=injectedFS((method,path)=> {
+      const temp=String(path).includes(".assignment-") && String(path).endsWith(".tmp"), checkpoint=String(path).includes("assignment-checkpoint-"), intent=String(path).includes("assignment-intent-");
+      return phase === "temp_create" && method === "open" && temp || phase === "temp_write" && method === "writeFile" && temp ||
+        phase === "temp_sync" && method === "sync" && temp || phase === "checkpoint_create" && method === "open" && checkpoint ||
+        phase === "checkpoint_sync" && method === "sync" && checkpoint || phase === "intent_create" && method === "open" && intent ||
+        phase === "intent_sync" && method === "sync" && intent || phase === "directory_sync_before" && method === "sync" && path === f.dir && !renamed ||
+        phase === "rename" && method === "rename" || phase === "directory_sync_after" && method === "sync" && path === f.dir && renamed ||
+        phase === "release" && method === "unlink" && String(path).endsWith(".activation.lock");
+    },async(method)=>{if(method === "rename") renamed=true;});
+    let options={fs:io};
+    if(phase === "publish") {
+      const source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+      options={...options,running:{config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"off"},publish(){throw new Error("SYNTHETIC_PUBLISH_FAILURE");}};
+      input.expectedRunningRevision=source.configurationRevision;
+    }
+    const uncertain=["directory_sync_after","publish","release"].includes(phase);
+    await assert.rejects(assignments.commitProjectAssignment(input,options),{code:uncertain ? "ASSIGNMENT_UNCERTAIN" : "ASSIGNMENT_UNAVAILABLE"});
+    assert.equal((await readFile(f.configPath)).equals(before),!uncertain);
+    if(uncertain) {
+      assert.deepEqual(await readFile(join(f.dir,`assignment-checkpoint-${OP}.json`)),before);
+      const state=await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:f.context,projectId:P1,operationId:OP});
+      assert.equal(state.intent.candidateRevision,state.savedRevision);
+    }
+  });
+});
+
+test("unsafe configuration paths never grant assignment authority", async t => {
+  for(const kind of ["symlink","hardlink","mode","directory_mode"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t), input=await f.input();
+    if(kind === "symlink") {await fs.rename(f.configPath,join(f.dir,"original")); await fs.symlink(join(f.dir,"original"),f.configPath);}
+    if(kind === "hardlink") await fs.link(f.configPath,join(f.dir,"extra-link"));
+    if(kind === "mode") await fs.chmod(f.configPath,0o644);
+    if(kind === "directory_mode") await fs.chmod(f.dir,0o755);
+    const before=await readFile(f.configPath);
+    await assert.rejects(assignments.commitProjectAssignment(input),{code:"ASSIGNMENT_CONFLICT"});
+    assert.deepEqual(await readFile(f.configPath),before);
+  });
+});
+
+test("pre-replacement revalidation preserves replaced lock and rejects source directory or provider races",async t=>{
+  for(const kind of ["lock","source","catalog","directory","provider"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t), input=await f.input(); let changed=false;
+    const before=await readFile(f.configPath);
+    const io=injectedFS(()=>false,async(method,path)=>{
+      if(changed || method!=="sync" || !String(path).includes("assignment-intent-")) return;
+      changed=true;
+      if(kind === "lock") {await fs.rename(join(f.dir,".activation.lock"),join(f.dir,"old-lock"));await writeFile(join(f.dir,".activation.lock"),"replacement",{mode:0o600});}
+      if(kind === "source") {await writeFile(join(f.dir,"replacement"),before,{mode:0o600});await fs.rename(join(f.dir,"replacement"),f.configPath);}
+      if(kind === "catalog") {f.state["local-projects"][P1].name="Replaced";await f.saveState();}
+      if(kind === "directory") {await fs.rename(f.dir,f.dir+"-moved");await fs.mkdir(f.dir,{mode:0o700});t.after(()=>fs.rm(f.dir+"-moved",{recursive:true,force:true}));}
+      if(kind === "provider") await fs.appendFile(f.providerPath,"\n");
+    });
+    await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_CONFLICT"});
+    if(kind!=="directory") assert.deepEqual(await readFile(f.configPath),before);
+    if(kind === "lock") assert.equal(await readFile(join(f.dir,".activation.lock"),"utf8"),"replacement");
+  });
+});
+
+test("read reconciliation observes intent without replay and preserves running evidence on unavailable source",async t=>{
+  const f=await persistenceSetup(t), source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+  const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"off"};
+  await fs.unlink(f.configPath);
+  const state=await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:f.context,projectId:P1,operationId:OP},running);
+  assert.equal(state.savedState,"unavailable"); assert.equal(state.savedRevision,null);
+  assert.equal(state.runningRevision,running.configurationRevision); assert.equal(state.mode,"off");
+  assert.deepEqual(state.runningAssignment,{kind:"override",account:{id:A2,displayName:"Project account"},routeAlias:"route-a"});
+  await assert.rejects(fs.access(f.configPath),{code:"ENOENT"});
+});
+
+test("immutable intent and checkpoint replacement before rename rejects without changing source",async t=>{
+  for(const kind of ["intent","checkpoint"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath);let changed=false;
+    const io=injectedFS(()=>false,async(method,path)=>{
+      if(changed || method!=="sync" || path!==f.dir) return;
+      changed=true;
+      const artifact=join(f.dir,kind === "intent" ? `assignment-intent-${OP}.json` : `assignment-checkpoint-${OP}.json`);
+      await fs.unlink(artifact);await writeFile(artifact,"{}\n",{mode:0o600});
+    });
+    await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_CONFLICT"});
+    assert.deepEqual(await readFile(f.configPath),before);
+  });
+});
+
+test("late source replacement during candidate verification rejects before rename",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath);let synced=false,replaced=false;
+  const io=injectedFS(()=>false,async(method,path)=>{
+    if(method==="sync" && path===f.dir) synced=true;
+    if(!synced || replaced || method!=="open" || !String(path).endsWith(".tmp")) return;
+    replaced=true;await writeFile(join(f.dir,"replacement"),before,{mode:0o600});await fs.rename(join(f.dir,"replacement"),f.configPath);
+  });
+  await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_CONFLICT"});
+  assert.deepEqual(await readFile(f.configPath),before);
+});
+
+test("an attempted rename that completes before throwing remains uncertain",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath);
+  const io={...fs,async rename(from,to){await fs.rename(from,to);throw Object.assign(new Error("SYNTHETIC_AFTER_RENAME"),{code:"EIO"});}};
+  await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_UNCERTAIN"});
+  assert.notDeepEqual(await readFile(f.configPath),before);
+  const state=await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:f.context,projectId:P1,operationId:OP});
+  assert.equal(state.savedRevision,state.intent.candidateRevision);
+});
+
+test("unsafe owner and immutable intent evidence cannot be used for reconciliation",async t=>{
+  const f=await persistenceSetup(t),input=await f.input();
+  const io={...fs,async lstat(path){const info=await fs.lstat(path);if(path===f.configPath) info.uid=process.getuid()+1;return info;}};
+  await assert.rejects(assignments.commitProjectAssignment(input,{fs:io}),{code:"ASSIGNMENT_CONFLICT"});
+  await assignments.commitProjectAssignment(input);
+  const intentPath=join(f.dir,`assignment-intent-${OP}.json`),saved=await readFile(f.configPath),intent=JSON.parse(await readFile(intentPath));
+  intent.checkpointName="../outside.json";await writeFile(intentPath,JSON.stringify(intent));
+  const state=await assignments.readProjectAssignmentState({configPath:f.configPath,expectedContext:f.context,projectId:P1,operationId:OP});
+  assert.equal(state.savedState,"conflict");assert.equal(state.intent,null);
+  assert.deepEqual(await readFile(f.configPath),saved);
+});
+
+test("stopped save rejects unsafe provider or restored recovery evidence",async t=>{
+  for(const kind of ["provider_link","provider_symlink","provider_mode","record_link","backup_link"]) await t.test(kind,async t=>{
+    const f=await persistenceSetup(t),input=await f.input(),before=await readFile(f.configPath);
+    if(kind === "provider_link") await fs.link(f.providerPath,join(f.dir,"extra-provider"));
+    if(kind === "provider_symlink") {await fs.rename(f.providerPath,join(f.dir,"provider-original"));await fs.symlink(join(f.dir,"provider-original"),f.providerPath);}
+    if(kind === "provider_mode") await fs.chmod(f.providerPath,0o666);
+    if(["record_link","backup_link"].includes(kind)) {
+      const backupName=`codex-config-${OP}.toml`,backup=join(f.dir,backupName),provider=await readFile(f.providerPath);
+      await writeFile(backup,provider,{mode:0o600});
+      const recordPath=join(f.dir,"activation.json");
+      await writeFile(recordPath,JSON.stringify({schemaVersion:1,routerConfigPath:f.configPath,codexConfigPath:f.providerPath,
+        providerId:f.config.providerId,originalBaseUrl:f.config.upstreamBaseUrl,proxyBaseUrl:`http://127.0.0.1:${f.config.listenPort}/v1`,
+        backupFile:backupName,backupHash:digest(provider),phase:"restored"}),{mode:0o600});
+      await fs.link(kind === "record_link" ? recordPath : backup,join(f.dir,"unsafe-link"));
+    }
+    await assert.rejects(assignments.commitProjectAssignment(input),{code:"ASSIGNMENT_CONFLICT"});
+    assert.deepEqual(await readFile(f.configPath),before);
+  });
+});
+
+test("a changed source during descriptor read cannot yield editing authority",async t=>{
+  const f=await persistenceSetup(t),{readRouterConfigurationSource}=await import("../src/config.js");let changed=false;
+  const io={...fs,async open(path,...args){const handle=await fs.open(path,...args);if(path!==f.configPath) return handle;
+    return new Proxy(handle,{get(target,key){if(key==="readFile") return async(...values)=>{const bytes=await target.readFile(...values);if(!changed){changed=true;await fs.appendFile(f.configPath,"\n");}return bytes;};const value=target[key];return typeof value==="function" ? value.bind(target) : value;}});}};
+  await assert.rejects(readRouterConfigurationSource(f.configPath,{fs:io}),{code:"ACTIVATION_CONFLICT"});
+});
+
+test("existing operation evidence is preserved and never reused for another save",async t=>{
+  const f=await persistenceSetup(t),input=await f.input();await assignments.commitProjectAssignment(input);
+  const intentPath=join(f.dir,`assignment-intent-${OP}.json`),intent=await readFile(intentPath),before=await readFile(f.configPath);
+  await assert.rejects(assignments.commitProjectAssignment(await f.input(A2)),{code:"ASSIGNMENT_CONFLICT"});
+  assert.deepEqual(await readFile(f.configPath),before);assert.deepEqual(await readFile(intentPath),intent);
+});
+
+test("post-rename source replacement before publication reports uncertainty and retains running snapshot",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+  const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"on"};
+  let renamed=false,published=false;
+  const io=injectedFS(()=>false,async(method,path)=>{
+    if(method==="rename") renamed=true;
+    if(renamed && method==="sync" && path===f.dir) await fs.appendFile(f.configPath,"\n");
+  });
+  await assert.rejects(assignments.commitProjectAssignment({...input,expectedRunningRevision:running.configurationRevision},{running,fs:io,publish(){published=true;}}),{code:"ASSIGNMENT_UNCERTAIN"});
+  assert.equal(published,false);assert.equal(running.config.projectRoutes[P1],"route-a");
+});
+
+test("a rejected asynchronous publication is reported uncertain without an unhandled rejection",async t=>{
+  const f=await persistenceSetup(t),input=await f.input(),source=await (await import("../src/config.js")).readRouterConfigurationSource(f.configPath);
+  const running={config:source.config,configurationRevision:source.configurationRevision,configurationIdentity:source.configurationIdentity,mode:"off"};
+  await assert.rejects(assignments.commitProjectAssignment({...input,expectedRunningRevision:running.configurationRevision},{running,async publish(){throw new Error("SYNTHETIC_ASYNC_PUBLICATION");}}),{code:"ASSIGNMENT_UNCERTAIN"});
+  await new Promise(resolve=>setImmediate(resolve));
+});

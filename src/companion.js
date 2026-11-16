@@ -101,3 +101,6 @@ export async function runCompanionControl({ action, configPath, expectedContext 
 
 // Setup remains a one-shot metadata boundary, separate from managed mode control.
 export { previewAccountSetup, commitAccountSetup } from "./account-setup.js";
+
+// Stopped assignment helpers accept no running-child or publication authority.
+export { readProjectAssignmentState, commitProjectAssignment } from "./project-assignments.js";

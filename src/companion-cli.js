@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { inspectCompanion, runCompanionControl, previewAccountSetup, commitAccountSetup } from "./companion.js";
+import { inspectCompanion, runCompanionControl, previewAccountSetup, commitAccountSetup, readProjectAssignmentState, commitProjectAssignment } from "./companion.js";
 import { RouterError, safeError } from "./errors.js";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -17,6 +17,17 @@ function validate(input) {
     if (!exact(input, fields) || (input.configPath === null ? !hasBrowseHome : !absolute(input.configPath)) ||
       hasBrowseHome && !absolute(input.browseHome))
       throw new RouterError("CONFIG_INVALID");
+  } else if (["assignment_state", "assignment_commit"].includes(input.action)) {
+    const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const token = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+    const read = input.action === "assignment_state";
+    const fields = ["schemaVersion","action","configPath","expectedContext","projectId","operationId",
+      ...(read ? [] : ["expectedSavedRevision","expectedConfigurationIdentity","expectedCatalogRevision","accountId"])];
+    if (!exact(input,fields) || !absolute(input.configPath) || !context(input.expectedContext) ||
+      input.expectedContext.configPath !== input.configPath ||
+      !(read && input.projectId === null || uuid(input.projectId)) || !(read && input.operationId === null || uuid(input.operationId)) ||
+      !read && (![input.expectedSavedRevision,input.expectedConfigurationIdentity,input.expectedCatalogRevision].every(token) ||
+        input.accountId !== null && !uuid(input.accountId))) throw new RouterError("CONFIG_INVALID");
   } else if (input.action === "setup_preview") {
     const fields = Object.hasOwn(input,"browseHome") ? ["schemaVersion","action","configPath","browseHome"] : ["schemaVersion","action","configPath"];
     if (!exact(input,fields) || !absolute(input.configPath) || Object.hasOwn(input,"browseHome") && !absolute(input.browseHome)) throw new RouterError("CONFIG_INVALID");
@@ -55,6 +66,10 @@ async function main() {
   const input = await readInput();
   let result;
   if (input.action === "inspect") result = await inspectCompanion(input);
+  else if (["assignment_state", "assignment_commit"].includes(input.action)) {
+    const {schemaVersion,action,...assignment} = input;
+    result = await (action === "assignment_state" ? readProjectAssignmentState(assignment) : commitProjectAssignment(assignment));
+  }
   else if (input.action === "setup_preview") result = await previewAccountSetup({configPath:input.configPath,...(Object.hasOwn(input,"browseHome")?{browseHome:input.browseHome}:{})});
   else if (input.action === "setup_commit") {
     const {schemaVersion,action,...commit} = input;

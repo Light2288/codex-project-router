@@ -1,4 +1,8 @@
 const definitions = {
+  ASSIGNMENT_INVALID: [400, "Project assignment is invalid or unsupported."],
+  ASSIGNMENT_CONFLICT: [409, "Project assignment state changed; no overwrite was performed."],
+  ASSIGNMENT_UNAVAILABLE: [503, "Project assignment could not be safely saved."],
+  ASSIGNMENT_UNCERTAIN: [503, "Project assignment outcome is unconfirmed; inspect saved and running state before continuing."],
   CONFIG_INVALID: [400, "Router configuration is invalid or unsupported."],
   CONFIG_UNAVAILABLE: [503, "Router configuration could not be read."],
   ACCOUNT_SETUP_REQUIRED: [422, "Account setup must be completed before routing can start."],

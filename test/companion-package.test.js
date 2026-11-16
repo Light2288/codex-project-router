@@ -15,7 +15,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
 const brandingNames = ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff'];
 const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
-const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
+const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
   t.after(() => rm(path, {recursive:true,force:true}));
