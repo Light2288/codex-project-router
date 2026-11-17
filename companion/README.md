@@ -548,7 +548,9 @@ selected port and no unresolved recovery/mutation. Valid ready schema 2, fresh
 catalog/source authority and a working owned channel are required for live writes.
 An external listener or unsupported/unavailable channel stays browse-only. Off
 alone never grants stopped-save authority. Each new explicit Start loads the
-actual saved assignments in Off.
+actual saved assignments in Off. Incomplete setup shows account-setup actions and
+an explicit warning before Start; assignment Save remains disabled until setup is
+ready, without presenting unavailable evidence as a saved/running conflict.
 
 The named default remains an explicit override when selected by name. Use default
 removes the exact mapping. Legacy inheritance remains distinct until changed;
@@ -562,8 +564,9 @@ overrides; On alone cannot prove a saved assignment is applied. Missing proof sa
 come from the retained runtime, even after external saved-account edits. Technical
 aliases remain in Advanced; private comparison tokens are never rendered there.
 Opening or explicit Refresh loads an editor baseline; background refresh cannot
-silently rebase it. Rejection preserves the unsaved choice. Sheet dismissal cannot
-cancel, retry or settle the controller-owned mutation.
+silently rebase it. Save leaves the editor open for inspection. Rejection preserves
+the unsaved choice. Sheet dismissal cannot cancel, retry or settle the
+controller-owned mutation.
 
 For ready schema-2 configurations, the schema-1 ready frame advertises
 `project_assignments_v1`.
@@ -589,10 +592,13 @@ uncertainty/divergence blocks assignment writes while preserving guarded Direct
 recovery. A stopped read after the exact child/helper exits may settle persistence,
 but cannot prove prior live application. No stale lock or unowned process is adopted.
 Restore direct, manually restart Codex, confirm a working direct response and then
-Stop under existing guards. No fallback, redirect or model-request retry is added.
+Stop under existing guards. An external equal-content provider rewrite can change
+recovery metadata and reopen Direct confirmation; follow the renewed confirmation
+guidance. No fallback, redirect or model-request retry is added.
 
 The [assignment validation record](../docs/validation/companion-project-assignment-editing.md)
-separates automated results from pending human native/live observations and final
-review. Readiness and configured labels do not prove gateway/account acceptance,
+separates automated results, bounded human native/live observations and exact
+recovery/cleanup from the pending final whole-branch review. Readiness and
+configured labels do not prove gateway/account acceptance,
 billing attribution or general cross-account continuation. Existing viewport and
 off-screen Tab observations remain; broader UI simplification is deferred.

@@ -1,22 +1,24 @@
 # Companion project assignment editing validation
 
 Created: 2026-11-17
-Updated: 2026-11-17
+Updated: 2026-11-18
 
-Status: automated verification passed. Task 8 automated-partition review found
-specification compliance and quality Approved with a minor schema-wording
-correction. Overall Task 8 remains open: human native/live acceptance and the sole
-final whole-branch sequential specification/quality review remain **PENDING**. This
-record does not close the increment or approve the final branch. Work remains
-local; no push or merge.
+Status: Stage 4 remains open. Implementation, task reviews, bounded human
+native/live observations, exact operational recovery and private fixture cleanup
+are recorded below. Final affected verification passed: 310 native tests, a
+matching signed build, 958 Node tests and exactly 3 package cases. A separate
+post-OS native/Node/package supplement also passed on the unchanged signed app.
+The sole final whole-branch sequential specification/quality gate and final
+controller report remain **PENDING**. Task reviews do not close the increment.
+Work remains local; no push or merge.
 
 Scope: the approved `companion-project-assignment-editing` increment, governed by
 the [specification](../superpowers/specs/2026-11-16-companion-project-assignment-editing.md)
 and separate [implementation plan](../superpowers/plans/2026-11-16-companion-project-assignment-editing.md).
 Wider account editing/deletion, hiding, UI redesign, startup automation and
-distribution remain deferred. The endpoint is this single guarded assignment flow
-with its verification, native/live observations, exact recovery and final review;
-no later increment is authorized by this record.
+distribution remain deferred. Execution stops after this guarded assignment flow,
+verification, exact recovery, documentation and final review; no later increment
+is authorized.
 
 ## Delivered behavior and boundaries
 
@@ -38,7 +40,8 @@ Saved and running state are separate. Off suspends overrides. On or saved data
 alone cannot prove application. Runtime account names come from the retained
 snapshot; unavailable reads show unconfirmed state. Explicit opening/Refresh loads
 the editor baseline; background updates do not silently rebase unsaved intent.
-Controller ownership survives sheet dismissal. No mutation is retried automatically.
+Save deliberately leaves the editor open for inspection. Controller ownership
+survives sheet dismissal. No mutation is retried automatically.
 
 Requests synchronously capture mode and configured assignment at receipt, before
 incoming authentication or other awaits. Existing requests keep their selection;
@@ -52,152 +55,302 @@ manual restart/response confirmation before Stop/Quit where required.
 
 ## Automated verification
 
-All Task 8 test/build commands run with process-scoped `caffeinate -i`; the
-underlying approved commands and deadlines are unchanged. Logs stay outside
-tracked documentation in the ignored task evidence directory. No private actual
-configuration, credential, mapping, endpoint, comparison token or checkpoint is
-included here.
+Test/build commands used process-scoped `caffeinate -i`; approved product deadlines
+remain unchanged. Detailed reports, logs and exact byte/signature proofs remain
+in ignored evidence. No private actual configuration, credential, mapping,
+endpoint, comparison token or checkpoint is reproduced here.
 
-The new package assertions initially passed against already-landed production:
-`npm run companion:build`, exit 0, followed by `npm run companion:package-test`,
-exit 0, **3 tests / 3 pass / 0 fail / 0 cancelled / 0 skipped / 0 todo**,
-27081.981459 ms. This is positive integration coverage, not a manufactured RED.
-The source allowlists already included project-catalog.js, project-assignments.js
-and configuration-lock.js under the dependency-order ruling, and the schema-2
-ready capability expectation already landed in Task 4.
+### Historical Task 8 and acceptance correction evidence
 
-Final required order, with each command wrapped in `caffeinate -i`:
+Task 8 added package assertions against already-landed production. The initial
+build and package run passed, exactly 3/3 with zero failures/cancellations/skips.
+This is positive integration coverage. Under the recorded dependency-order ruling,
+production allowlists landed in Tasks 1/3 and the ready-schema-2 capability
+expectation in Task 4; no missing-module RED was manufactured.
 
-| Command | Fresh result |
+The original Task 8 chain was 298 native (224 core + 74 app) → signed build →
+958 Node → 3 package, all exit 0. Subsequent causal editor-stability corrections
+included an initial scoped review requiring changes and an approved negative-state
+follow-up; the amended chain was 304 native (225 core + 79 app) → signed build →
+958 Node → 3 package, all exit 0. These counts are historical, superseded by the
+310-test native evidence below.
+
+The later unavailable-state regression had meaningful RED: six tests and 16
+expected classification/guidance assertion failures, followed by focused 122/122
+and full native 310/310 passing. Authoritative unavailable evidence now displays
+setup guidance without a false saved/running conflict; genuine conflicts, read
+failures, pending uncertainty and retained runtime evidence remain distinct.
+
+The first full Node 958 run passed, then two explicit package runs each failed
+2/3, one failure and zero skips. Their single window samples reported, respectively,
+regular native app with missing on-screen window, then missing regular policy and
+window. Later assignment/lifecycle checks in that third case were not reached.
+A separate instrumented same-binary diagnostic reproduced a failed sample while
+the app remained alive: its on-screen window was present, temporarily absent,
+then returned within the original 20-second budget. That observation establishes
+the captured diagnostic's transient visibility failure; the exact internals of
+the earlier uninstrumented failures, especially the second, remain unobserved.
+
+The authorized package probe correction waits for the same regular-activation,
+exact-PID, on-screen layer-0 predicate within the same absolute 20-second budget,
+including Swift startup, and fails promptly on owned-child exit. It adds no case,
+skip, off-screen fallback, fixed readiness delay or product launch/window change.
+The two historical failures and diagnostic remain retained as separate evidence.
+
+### Final affected ordered verification
+
+The native and matching build inputs stayed unchanged through the package-probe
+correction. The original ordered evidence is native 310 → matching signed build →
+final Node 958 → explicit package 3; affected Node/package checks were repeated after
+the test correction, while the unchanged native/build evidence was retained.
+
+| Command, each under `caffeinate -i` | Actual result |
 | --- | --- |
-| `npm run companion:test` | Exit 0; 298/298 (224 core + 74 app), zero failures; core 99.987 s, app 0.699 s |
-| `npm run companion:build` | Exit 0; built and ad-hoc signed current app |
-| `npm test` | Exit 0; 958/958, zero failures/cancellations/skips/todo; 58201.244959 ms |
-| `npm run companion:package-test` | Exit 0; exactly 3/3, zero failures/cancellations/skips/todo; 27487.636708 ms |
+| `npm run companion:test` | Exit 0; 310/310 (230 core + 80 app), zero failures; no native warning/error diagnostics |
+| `npm run companion:build` | Exit 0; matching app built and ad-hoc signed; strict signature verification exit 0 |
+| `npm test` | Exit 0; 958/958, zero failures/cancellations/skips/todo; 58151.69975 ms |
+| `npm run companion:package-test` | Exit 0; exactly 3/3, zero failures/cancellations/skips/todo; 26662.765208 ms |
 
-The native log has no warning/error diagnostics. The release build emits seven
-pre-existing KeychainStore Security API deprecation warnings (each repeated in
-source annotation), with no assignment warning/error. The Node package harness
-emits 13 intentional file-backed Security API deprecation diagnostics and no
-other warnings. Its synthetic unresponsive probe requires SIGKILL and verifies
-reaping; EPERM/ERR_MODULE_NOT_FOUND are intentional source-denial checks.
+Executable source endpoint: `1a1fc687002d6e4df338945e6933555a9cb296f1`.
+The matching `dist/Codex Project Router.app` is arm64, ad-hoc signed, with 19
+explicit production modules and Node 24.21.0. Original build host: macOS 27.0.1.
+Ignored private proofs bind source inputs, packaged modules, executable bytes and
+signature.
 
-Build identity: `dist/Codex Project Router.app`, ad-hoc signature, 19 production
-source modules, arm64, Node 24.21.0, macOS 27.0.1. Native executable SHA-256:
-`59442082c13e2bfd28fafc26041248212a1875b1a205a8a26a9b40a4f74ac146`.
-Code-signature CDHash: `efb0f01b0401a87b6bdfb9a1da82bed1aca4c11f`.
-These identify build code; configuration comparison tokens remain private.
+The original release build emits seven existing KeychainStore Security API
+deprecation warnings, each repeated in source annotations, with no new assignment
+warning/error. Node/package harnesses emit 13 intentional file-backed Security API
+deprecation diagnostics and no other warnings. The bounded synthetic unresponsive
+probe requires SIGKILL and verifies reaping/process-group absence; deliberate
+stalled-reader cleanup and Seatbelt EPERM/ERR_MODULE_NOT_FOUND source denial are
+expected passing observations. No warning suppression or deadline relaxation was
+introduced.
 
-Exactly three package cases are retained. They cover explicit resource allowlists,
-dependency drift, relocated ad-hoc signature verification using
-`codesign --verify --deep --strict`, arm64 metadata, branding decoding, minimal GUI
-PATH and source equality. Both relocated fixtures exercise real bundled stopped
-Save/checkpoint/readback, next Start Off, owned live assign/switch/remove, exact
-listener ownership, saved/running coherence, applied health fingerprints, retained
-account/default/incoming settings and bindings, unchanged provider/recovery,
-zero upstream connections and byte-exact Direct rollback. The third case runs
-under macOS Seatbelt checkout/source denial, checks lexical/resolved/symlink denial,
-and confines synthetic native stores. Its automated visible-window proof does not
-establish human interaction with the assignment editor.
+### Post-OS supplement on unchanged source and signed app
 
-Existing native Keychain/branding checks and exact synthetic cleanup remain.
-An owned disposable Keychain contains a public fixture; production metadata/create
-and bundled reader comparison run without printing secret values. Cleanup checks
-owned files/search-list entry/default-handle preservation. The harness identity
-differs from the packaged app ACL identity. The deliberately unresponsive synthetic
-probe reaches its hard deadline and verifies reaping/process-group absence.
-Security API deprecation diagnostics and intentional source-denial errors are
-disclosed above; no warning suppression or weakened deadline is introduced.
+After the OS-update reboot, a separate once-only sequence ran on macOS 27.2.1,
+build 26B131. This supplements OS-dependent evidence; it is not a rebuild or a
+new human live run.
+
+| Command, each under `caffeinate -i` | Actual result |
+| --- | --- |
+| `npm run companion:test` | Exit 0; 310/310 (230 core + 80 app), zero failures; core 98.952 s, app 0.834 s; no native warning/error diagnostics |
+| `npm test` | Exit 0; 958/958, zero failures/cancellations/skips/todo; 57851.554458 ms |
+| `npm run companion:package-test` | Exit 0; exactly 3/3, zero failures/cancellations/skips/todo; 27045.762792 ms |
+
+Before and after, all native/build/test inputs, all 19 bundled modules and signed
+executable bytes matched the final correction proof; fresh deep/strict signature
+verification exited 0. Fresh current filesystem identity was recorded privately.
+The reboot changed the filesystem device number: unchanged source bytes do not
+imply an unchanged pre-reboot physical identity token. Fresh context reads supplied
+current authority. The seven original build warnings remain historical because
+this supplement ran no build; the 13 intentional harness diagnostics and expected
+synthetic cleanup/source-denial observations were retained. No unexpected failure
+or retry occurred.
+
+### Package coverage and limits
+
+Exactly three package cases cover explicit resource allowlists, dependency drift,
+relocated `codesign --verify --deep --strict`, arm64 metadata, branding decoding,
+minimal GUI PATH and source equality. Both relocated fixtures exercise bundled
+stopped Save/checkpoint/readback, next Start Off, owned live assign/switch/remove,
+listener ownership, saved/running coherence, applied health fingerprints,
+retained account/default/incoming settings and bindings, unchanged provider/recovery,
+zero upstream connections and byte-exact Direct rollback. The source-denied native
+case retains lexical/resolved/symlink checkout denial, synthetic private-store
+confinement and all downstream assignment/lifecycle/recovery assertions.
+
+An owned disposable Keychain contains only a public fixture. Production
+metadata/create and bundled-reader comparisons run without printing secret values;
+cleanup verifies owned files/search-list entry and default-handle preservation.
+The harness identity differs from the packaged app ACL identity. Automated window
+proof is separate from the human observations below.
+
+## Bounded human native and private live observations
+
+The human independently launched the signed app and selected a freshly validated
+isolated ready-schema-2 copy with two available existing named accounts. The
+normal configuration remained legacy and was not migrated. Stopped Save assigned
+the alternate account; independent reads proved the exact selected mapping change,
+all other mappings/prior bindings/accounts/default/incoming/optional fields
+preserved, Direct state and independently empty port. Save stayed open. After the
+causal stability correction and matching rebuild, the human reopened the amended
+app and confirmed no repeated editor resizing. Existing accepted selection-scroll
+and off-screen Tab limitations remain.
+
+### Original partial run
+
+Start was human-observed Off with the saved override suspended. Exact owned
+native/Node child/session/listener/health/recorder attribution passed. The Off
+initiator recorded `499/CANCELLED`; a separate ancillary 200 is not its result.
+The human then saved the named default explicitly, observed correct saved/running
+labels and a fresh phase-A reply. Its initiating transport is **UNOBSERVED**:
+the controller-selected 20-minute private retention had expired. That partial run
+is retained without an inferred HTTP result.
+
+Original Direct recovery was byte-exact; exact owned child/logger exit and an
+independently empty port were verified. The original logger had no closing footer,
+so its forwarding/drain outcome remains unobserved. The retry fixture extended
+private retention to two hours with the same 2 MiB bound and added managed-group
+SIGTERM/EOF drain handling. Synthetic fixture PID/control/output/bound/truncation/
+drain/exit checks passed. Product deadlines did not change.
+
+### Completed retry on one exact owned child/session
+
+Native stopped Use default first removed the exact selected mapping, preserving
+other configuration and all bindings. The next explicit Start was human-observed
+Off with inheritance. The human activated/restarted Codex once before the sequence;
+no per-assignment Codex restart occurred. The initial Off/global initiator again
+recorded `499/CANCELLED`, separate from visible response.
+
+| Phase | Human native/visible observation | Independent saved/runtime and initiating evidence |
+| --- | --- | --- |
+| A | On; select named default explicitly; Save and apply; correct saved/running labels; fresh A reply visible | Explicit named-default override, matching saved/running health, same owned child/session; one unique fresh project thread; On/override initiator **200**, no error |
+| B | On; switch to alternate; Save and apply; correct saved/running labels; fresh B reply visible; then Off | Expected alternate override, matching saved/running health, same child/session; one unique fresh project thread; On/override initiator **499/CANCELLED** |
+| B Off | Human turned Off after fresh B finished | Alternate still saved; a distinct later controller request correlated after B used Off/global and recorded **200**; it does not replace B's cancelled initiator |
+| C | Return On; Use default; Save and apply; correct inheritance/default labels; fresh C reply visible | Exact selected mapping removed, matching saved/running health, same child/session; one unique fresh project thread; On/global/no override initiator **200**, no error |
+
+Every save preserved other mappings, all prior bindings, accounts/default/incoming
+settings and optional fields. The unrelated phase-A prompt in the controller chat
+was excluded; the fresh sample was independently identified. An earlier mistaken
+B-Off correlation to an older On event was corrected and both observations were
+retained privately, without a product retry. The final capture was 798 seconds and
+124,885 bytes with zero malformed lines, within the two-hour/2-MiB fixture bound.
+
+Visible replies and initiating transport remain separate facts. These observations
+do not establish independent billing attribution, general cross-account
+continuation or a live request held across an assignment change. Deterministic
+automated authentication/identity/credential/stream barriers establish request
+snapshot invariants.
+
+### Configured-only and unavailable presentation
+
+In an isolated ready-schema-2 configured-only fixture, the human opened the absent
+project, saw the absent-current-discovery warning and closed without Save.
+Independent reads showed unchanged source revision/identity, pending nil,
+Direct/no recovery/no activation record, empty port and unchanged normal settings.
+
+The original unavailable fixture exposed a false conflict while Save was disabled;
+that observation led to the scoped correction, not a retroactive pass. After the
+OS reboot the human reopened the exact corrected signed app and confirmed account
+setup guidance, no false conflict and Save disabled. The main section showed no
+designated default, setup actions and an explicit incomplete-setup warning before
+Start. Setup gates Start by presenting those actions rather than a disabled Start
+button. No Save, Start or activation occurred. Independent reads established the
+correct setup-required context, healthy catalog, pending nil, Direct/no recovery,
+no runtime/readiness, empty port and original normal configuration/provider bytes.
+
+## Exact recovery and private cleanup
+
+After the retry, the human set Off, restored Direct and manually restarted Codex.
+Independent inspection verified the entire provider file and context-local backup
+byte-exact against both original and retry checkpoints, correctly bound restored
+record, no recovery required, unchanged normal router configuration and removed
+selected mapping. The same exact child/logger remained alive for response
+confirmation. After a working Direct reply, the human confirmed and guarded-Stopped.
+Independent inspection verified exact owned Node/logger exit, empty port, absent
+health and original provider/backup bytes. The retry logger's actual closing
+footer confirmed successful forwarding/capture with no exceeded duration.
+
+A later pending Direct obligation was investigated rather than weakened. A bounded
+100-ms trace observed a settled confirmation, 66 seconds stable, then an equal-content
+provider mtime/ctime change followed about one second later by context-bound Direct
+confirmation reopening. Provider content and the other checked record/configuration
+bytes and metadata were unchanged. External writer identity remains unobserved;
+a coincident Codex reply does not identify the writer. The conservative
+recovery-metadata guard remains in place. The human confirmed again and selected
+an isolated presentation context, where normal-provider activity did not disturb
+its stable checks.
+
+Finally, the human selected the original normal configuration and guarded-Quit.
+Independent inspection verified no native companion, pending nil, empty actual
+validation port, original normal configuration/provider bytes and the actual
+activation context Direct/restored with no recovery. Under the companion instance
+flock and secure descriptor/identity/byte guards, the controller restored only the
+original absence of the temporary runtime-path field, preserving other journal
+fields and a private exact prewrite backup. Original selection and automatic
+runtime are restored. A fresh post-OS operational check again verified native and
+owned-context process absence, the empty port, whole-provider equality against
+both initial/retry snapshots, exact context-local backup and correctly bound
+Direct/restored recovery record, with no recovery required.
+
+The positively owned private launcher was disabled with unchanged bytes. The exact
+inactive presentation-fixture tree was archived after ownership, expected-tree,
+source, no-activation-record and no-lock checks. The actual activation context,
+configuration, backup and recovery record remain in place for their binding;
+raw captures and original partial-run history are retained privately. Normal
+legacy configuration and the desktop catalog/new human chats are preserved.
+All recorded private cleanup checks passed. The controller performed no real-app
+Start/activation, authentication-helper action or normal configuration migration.
 
 ## Acceptance traceability
 
-These automated observations support the criteria; pending human/final gates
-remain required before full acceptance.
+These observations support the approved criteria. Criterion acceptance and the
+increment remain subject to the sole final whole-branch gate.
 
-| Criteria | Current automated evidence | Remaining observation |
+| Criteria | Recorded evidence | Qualification / remaining gate |
 | --- | --- | --- |
-| AC-01 assignment actions | Pure transforms, native editor actions, both bundled assign/switch/remove flows | Human native/live request/UI sequence |
-| AC-02 durable application | Guarded persistence, request snapshot barriers, owned command publication and package health coherence | Live initiating transport and UI |
-| AC-03 stopped Save/Start Off | Stopped helper/controller and both package fixtures | Human stopped Save/Start Off |
-| AC-04 truthful state | Native saved/running/Off/unconfirmed/divergence presentation and authoritative package reads | Human presentation |
-| AC-05 identity/catalog/repair | Catalog exact/conflicting identity, configured-only baseline and native unresolved selection tests | Configured-only/unavailable-control human display |
-| AC-06 isolation/presence | Pure/persistence exact-key and optional-presence tests; package binding/account preservation | Final review |
-| AC-07 request consistency | Full Node auth, identity, credential, stream and reused-connection snapshot barriers | Final review; no billing/general continuation inference |
-| AC-08 stale authority | Source identity/catalog/lease and native generation/exact-child/editor-baseline tests | Final review |
-| AC-09 ambiguity | Injected writer phases, ordered control, lost-ack/helper and native no-retry presentation tests | Final review |
-| AC-10 reconciliation/recovery | Serialized observations, retained runtime and guarded Direct/native uncertainty tests | Human recovery/response confirmation |
-| AC-11 confirmation continuity | Native exact transition versus provider/recovery drift and account/default regressions | Final review and human integration |
-| AC-12 process lifetime | Helper exit/drain, owned child, queued preflight/relaunch/start authority tests | Human package lifetime observations |
-| AC-13 routing safeguards | Incoming auth/paired destinations/no fallback; ownership/Stop/Quit; package zero control-time destination contact | Human exact Direct restoration and guarded Stop |
-| AC-14 package/live/docs | Fresh native/build/Node/package chain, package confinement and docs | Human live and sole final review |
+| AC-01 assignment actions | Pure/native actions, both package flows and human A/B/C sequence | Final review |
+| AC-02 durable application | Persistence, exact-child publication, package health and live saved/runtime matches | B initiator cancelled; visible result separate; final review |
+| AC-03 stopped Save/Start Off | Guarded helper/controller/package checks and human stopped Save/next Start Off | Final review |
+| AC-04 truthful state | Saved/runtime/Off/unconfirmed tests; human labels, stable editor and unavailable retest | Human observed bounded states; automated dismissal/Refresh coverage; final review |
+| AC-05 identity/catalog/repair | Catalog/unresolved tests and human configured-only warning/unavailable guidance | No unsafe editing authority; final review |
+| AC-06 isolation/presence | Exact-key/optional-presence tests, package and independent live preservation reads | All prior bindings retained; final review |
+| AC-07 request consistency | Deterministic auth/identity/credential/stream/reused-connection barriers | No live in-flight/billing/general continuation claim; final review |
+| AC-08 stale authority | Source/catalog/lease, generation/exact-child/editor-baseline tests | Fresh authority after reboot; final review |
+| AC-09 ambiguity | Injected writer phases, ordered/lost-ack/helper/no-retry tests | B cancellation is transport evidence, not an inferred assignment rollback; final review |
+| AC-10 reconciliation/recovery | Serialized reads, retained runtime, guarded Direct and exact human recovery | Metadata invalidation caveat retained; final review |
+| AC-11 confirmation continuity | Exact-transition versus recovery-drift tests and observed conservative invalidation | Account/default boundary unchanged; final review |
+| AC-12 process lifetime | Helper/child/drain/relaunch/ownership tests; exact live child/logger exit and final Quit | Original partial drain unobserved; retry drain verified; final review |
+| AC-13 routing safeguards | Auth/pairing/no fallback, Stop/Quit, zero control-time upstream package checks and exact Direct restoration | Final review |
+| AC-14 package/live/docs | Final native/build/Node/package chain, post-OS supplement, bounded human evidence and recovery | Sole sequential final specification then quality review **PENDING** |
 
 ## Task reviews and implementation rulings
 
 Tasks 1, 2, 4, 5 and 7 received approved task specification/quality reviews.
-Task 3's artifact/source authority findings were addressed in two scoped rounds;
-the final scoped review approved both specification compliance and quality.
-Task 6's queued live-to-stopped child-capture finding was addressed and approved
-in scoped review; its deferred delayed-divergence presentation finding was fixed
-and reviewed in Task 7. Existing unchanged Security API warnings remain a separate
-cleanup concern. Task 8's automated-partition review found specification
-compliance and quality Approved with a minor correction distinguishing the
-schema-1 ready frame from ready schema-2 configurations. The correction has not
-received a scoped re-review in this record. These are task reviews; overall Task 8,
-human native/live acceptance and the sole final whole-branch gate remain pending.
+Task 3's artifact/source-authority findings were corrected through two scoped
+rounds and approved. Task 6's queued live-to-stopped child-capture finding was
+corrected and approved; its deferred divergence presentation finding was fixed
+and reviewed in Task 7.
 
-Recorded implementation rulings preserve the existing checkout/no-worktree
-preference, earlier synchronized source allowlists and matching builds, temporary
-idle-sleep assertions, pure transformation/source-identity separation, exact flat
-wire evidence with explicit nulls, narrow internal filesystem fault seams and a
-no-yield final authority guard. Native editing authority uses validated exact-child
-reads and an explicit-load baseline; stopped initial eligibility may use a real
-configured-only catalog entry without inventing selection. The queued-save fix
-retains the intended child before waiting for the shared slot. Delayed divergence
-classification reuses existing authority without granting new writes.
+Task 8's automated partition was specification-compliant, quality Approved with a
+minor ready-frame schema wording correction. That correction subsequently received
+scoped specification PASS and quality Approved. The initial editor-stability review
+requested changes for returned negative saved evidence; the follow-up received
+scoped specification/quality PASS. The unavailable-state and bounded package-probe
+correction at `1a1fc68` received scoped specification PASS and task quality Approved,
+with no Critical/Important findings. Seven existing build and 13 intentional
+harness Security diagnostics remain disclosed warning debt. None of these reviews
+is the sole final whole-branch gate.
+
+Recorded rulings include earlier synchronized source allowlists/matching builds,
+process-scoped idle-sleep assertions, pure transformation/source-identity separation,
+exact flat wire evidence with explicit nulls, narrow internal filesystem fault
+seams and a no-yield final authority guard. Editor baselines advance only on
+explicit load or verified save. Negative evidence revokes authority before a later
+await; positive authority requires the complete fresh proof. The queued-save fix
+retains the intended child before waiting for the shared slot.
 
 One bounded lastAttempt and immutable changed-operation artifacts are retained;
-there is no unbounded replay history or exactly-once mutation service. No-op
-operations create no artifact. A stopped read after the exact helper/child exits
-can settle persistence only; it cannot attest prior live application. Locks and
-fresh source checks cannot provide an atomic multi-file snapshot or filesystem
-compare-and-swap against external writers ignoring the shared lease.
-
-## Native and private live acceptance — PENDING
-
-No human assignment-editor launch/interaction, live account request or operational
-recovery sequence has been performed for this increment in this record. A
-preliminary controller read-only check found normal setup legacy/migration-required,
-Direct/restored and no named accounts or companion process. That is not empty-port
-proof or evidence about another context. Normal setup is not silently migrated.
-An existing private ready-schema-2 context with freshly verified available named
-accounts remains a live prerequisite.
-
-| Required observation | Current evidence |
-| --- | --- |
-| Human native layout, selection, Save labels and dismissal/refresh behavior | PENDING; synthetic native/presentation tests are separate |
-| On: assign → switch → remove on one project, saved/running UI and initiating request for each, no per-change restart | PENDING |
-| Off suspension, safely stopped Save and next Start Off | Automated fixture coverage; human/private live observation PENDING |
-| Configured-only warning and unavailable-control presentation | Synthetic presentation/controller coverage; human observation PENDING |
-| Exact original Direct restoration, manual restart and confirmed direct response, guarded owned Stop and private cleanup | PENDING; no operational change made by this automated phase |
-| Sole sequential final specification then quality review against resulting complete branch/package | PENDING; not dispatched by this task worker |
-
-Before live work, freshly establish selected context, actual saved setup, exact
-ownership, provider, listener, tested package and recovery records. Keep original
-private context and exact recovery data outside Git. Required human launch,
-activation/restart/response confirmations remain explicit. Record initiating
-transport separately from visible replies: 499/CANCELLED is cancelled transport.
-No independent billing attribution or general cross-account continuation claim
-follows from configured account labels, readiness, a visible reply or synthetic
-tests. Existing accepted viewport/off-screen Tab limitations remain.
+no unbounded replay history or exactly-once service is claimed. No-op operations
+create no artifact. A stopped read after exact helper/child exit settles persistence
+only. Shared locks and fresh checks do not provide atomic multi-file snapshots or
+filesystem compare-and-swap against external writers ignoring the shared lease.
 
 ## Local branch and completion boundary
 
-Branch: `feat/companion-project-assignment-editing`. Task 8 starts at
-`ac627cdc5b87b3e0ecf94fb8c2bb496e63ea8732`. The implementation branch was created
-from local main `c0a5a53d8c41a6c394f28497fa39133d68a79683`; the separate branding
-closeout branch remains at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73` and is not
-merged here. The Task 8 package/docs commit containing this record changes no
-production source; executable source remains at the Task 7 endpoint above. The
-final reviewed commit/package endpoint remains pending. The controller owns human
-live follow-through, supplied observations, final sole review and closeout. This report must be updated from actual outcomes before any
-claim of full increment acceptance.
+Branch: `feat/companion-project-assignment-editing`. Implementation base remains
+`c0a5a53d8c41a6c394f28497fa39133d68a79683`. The separate branding closeout remains
+on its own branch at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73` and is not merged
+here. Current executable source is `1a1fc68`; this acceptance documentation closeout
+changes prose and lifecycle checklists only. Exact code/package proof remains
+private; final reviewed branch/package endpoint is pending.
+
+Evidence sources are the retained Task 1–8 reports/reviews, scoped editor-stability
+and unavailable-correction reports/reviews, sanitized controller live summary and
+latest progress, and completed post-OS verification report. Their historical
+pending statements describe their original observation time; this record adds
+later actual observations without rewriting that history. No new full test/build
+run accompanies prose-only updates. The controller owns the frozen whole-branch
+specification-first then quality gate, actual final lifecycle results and final
+report. Stage 4 and Task 8 remain open until those steps are actually completed.

@@ -14,11 +14,11 @@
 
 **Status:** APPROVED — implementation in progress
 
-**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 automated native/build/Node/package verification passed (298 native, 958 Node, exactly 3 package cases, zero failures/skips); human native/live acceptance and the sole final sequential whole-branch specification/quality gate remain pending. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final sequential whole-branch specification/quality gate and final controller report remain PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
 
 **Created:** 2026-11-16
 
-**Updated:** 2026-11-17
+**Updated:** 2026-11-18
 
 **Provenance:** The separately presented Stage 2 specification, approved by the user's subsequent `Please implement the plan.` message. At that approval no assignment implementation plan existed. Stage 1 had separately been confirmed with `confirmed`. This separate plan was then saved and presented; the user's subsequent `approved` explicitly approves it. The execution-method question was not answered by that message; the user subsequently selected Subagent-driven through the native interactive control. This plan is grounded in the existing checkout at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73`; artifact lookup alone does not establish approval.
 
@@ -148,7 +148,7 @@ Execution preflight observed: implementation base `c0a5a53d8c41a6c394f28497fa391
 
 **Interfaces:** Produce inspectProjectCatalog, prepareProjectAssignment and the source/summary structures defined above; persistence functions arrive in Task 3. Consume existing UUID/configuration validators. Re-exporting the extracted catalog is unnecessary.
 
-- [ ] **Step 1 — write RED tests.** Add `assign switch and inherit preserve exact unrelated data`, `shared alias never retargets`, `new alias avoids unresolved labels and own constructor binding`, `legacy inheritance and missing target repair remain distinct`, `configured-only row requires a healthy catalog`, and `catalog identity or revision conflict rejects`. Start with fixture/accountRouting synthetic data, add required project names, clone raw source before transformation, and assert unrelated object equality plus optional own-property presence. Pin the selected alias algorithm and no-op source preservation.
+- [x] **Step 1 — write RED tests.** Add `assign switch and inherit preserve exact unrelated data`, `shared alias never retargets`, `new alias avoids unresolved labels and own constructor binding`, `legacy inheritance and missing target repair remain distinct`, `configured-only row requires a healthy catalog`, and `catalog identity or revision conflict rejects`. Start with fixture/accountRouting synthetic data, add required project names, clone raw source before transformation, and assert unrelated object equality plus optional own-property presence. Pin the selected alias algorithm and no-op source preservation.
 
 ```js
 assert.deepEqual(saved.projectRoutes[P2], before.projectRoutes[P2]);
@@ -157,10 +157,10 @@ assert.equal(Object.hasOwn(removed.projectRoutes, P1), false);
 assert.equal(Object.hasOwn(saved, "allowUnassignedThreadTitles"), Object.hasOwn(before, "allowUnassignedThreadTitles"));
 ```
 
-- [ ] **Step 2 — run RED.** `node --test test/project-assignments.test.js test/companion.test.js test/config-identity.test.js`. Expected: new import/function/assignment assertions fail before product edits; preserve pre-existing passes.
-- [ ] **Step 3 — implement the catalog extraction and pure transformation.** Preserve existing catalog collision behavior and healthy configured-only rows. Clone raw configuration, change only the selected exact key/necessary new binding, validate a ready schema-2 result, and retain missing-target/null/explicit-default distinctions.
-- [ ] **Step 4 — run GREEN.** Repeat Step 2. Expected: all listed cases pass, no private operational reads, schema-1 browsing unchanged and no unrelated changes.
-- [ ] **Step 5 — commit.** Stage Task 1 paths only; `git commit -m "feat: define isolated project assignment changes"`. Follow the selected workflow's ordinary task gate.
+- [x] **Step 2 — run RED.** `node --test test/project-assignments.test.js test/companion.test.js test/config-identity.test.js`. Expected: new import/function/assignment assertions fail before product edits; preserve pre-existing passes.
+- [x] **Step 3 — implement the catalog extraction and pure transformation.** Preserve existing catalog collision behavior and healthy configured-only rows. Clone raw configuration, change only the selected exact key/necessary new binding, validate a ready schema-2 result, and retain missing-target/null/explicit-default distinctions.
+- [x] **Step 4 — run GREEN.** Repeat Step 2. Expected: all listed cases pass, no private operational reads, schema-1 browsing unchanged and no unrelated changes.
+- [x] **Step 5 — commit.** Stage Task 1 paths only; `git commit -m "feat: define isolated project assignment changes"`. Follow the selected workflow's ordinary task gate.
 
 ### Task 2: Capture immutable request configuration and mode together [size: M | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,auth]
 
@@ -170,7 +170,7 @@ assert.equal(Object.hasOwn(saved, "allowUnassignedThreadTitles"), Object.hasOwn(
 
 **Interfaces:** Add optional `createProxy(startupConfig, {getRequestRoutingSnapshot, ...existingOptions})`; getter synchronously returns immutable `{config, mode}`. Capture once at callback entry before async work. Preserve getProjectRoutingMode compatibility for existing callers, but reject supplying both getters. Absence retains standalone behavior. Health uses the captured applied configFingerprint.
 
-- [ ] **Step 1 — write RED tests.** Add `assignment snapshot precedes incoming authentication`, `assignment snapshot survives identity retry and outgoing credential wait`, `stream and reused connection capture independent snapshots`, and `compact background and failure never reroute`. Use existing synthetic origins/credential reader and explicit barriers; replace the current snapshot while an earlier request waits. Assert exactly the old pair for that request and new pair for the next, unchanged bodies/prefixes/continuation, Off inheritance and zero fallback after denied credentials/402/429/5xx/3xx. Retain fresh desktop membership checks.
+- [x] **Step 1 — write RED tests.** Add `assignment snapshot precedes incoming authentication`, `assignment snapshot survives identity retry and outgoing credential wait`, `stream and reused connection capture independent snapshots`, and `compact background and failure never reroute`. Use existing synthetic origins/credential reader and explicit barriers; replace the current snapshot while an earlier request waits. Assert exactly the old pair for that request and new pair for the next, unchanged bodies/prefixes/continuation, Off inheritance and zero fallback after denied credentials/402/429/5xx/3xx. Retain fresh desktop membership checks.
 
 ```js
 assert.equal(oldRequest.headers.authorization, "Bearer synthetic-project");
@@ -179,10 +179,10 @@ assert.deepEqual(oldRequest.bodyBytes, originalBodyBytes);
 assert.equal(alternateAccountCalls.length, 0);
 ```
 
-- [ ] **Step 2 — run RED.** `node --test test/proxy.test.js test/config-identity.test.js`. Expected: new snapshot/boundary cases fail, rather than depending on sleeps.
-- [ ] **Step 3 — implement the snapshot getter contract.** Use the captured config throughout auth, identity/retry, selection, credential reads and response lifecycle. Never mutate earlier frozen maps or account pairs. Keep mode-only and standalone callers compatible.
-- [ ] **Step 4 — run GREEN.** Repeat Step 2. Expected: all boundary/auth/transport cases pass without abandoned barriers or duplicate attempts/completions.
-- [ ] **Step 5 — commit.** `git add src/proxy.js test/proxy.test.js` plus any explicitly changed fixture; `git commit -m "feat: snapshot assignments at request receipt"`.
+- [x] **Step 2 — run RED.** `node --test test/proxy.test.js test/config-identity.test.js`. Expected: new snapshot/boundary cases fail, rather than depending on sleeps.
+- [x] **Step 3 — implement the snapshot getter contract.** Use the captured config throughout auth, identity/retry, selection, credential reads and response lifecycle. Never mutate earlier frozen maps or account pairs. Keep mode-only and standalone callers compatible.
+- [x] **Step 4 — run GREEN.** Repeat Step 2. Expected: all boundary/auth/transport cases pass without abandoned barriers or duplicate attempts/completions.
+- [x] **Step 5 — commit.** `git add src/proxy.js test/proxy.test.js` plus any explicitly changed fixture; `git commit -m "feat: snapshot assignments at request receipt"`.
 
 ### Task 3: Persist assignment changes under the existing safety boundary [size: L | risk: data | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: data,concurrency]
 
@@ -192,7 +192,7 @@ assert.equal(alternateAccountCalls.length, 0);
 
 **Interfaces:** Produce withConfigurationLock, commitProjectAssignment and readProjectAssignmentState. Add one-shot `assignment_state` and `assignment_commit` actions with exact input keys; stopped commits cannot contain live running authority. Add fixed safe `ASSIGNMENT_INVALID`, `ASSIGNMENT_CONFLICT`, `ASSIGNMENT_UNAVAILABLE`, `ASSIGNMENT_UNCERTAIN` errors. Source reading binds validated raw bytes/revision to unchanged file and directory identities; no arbitrary provider TOML/authentication hashing.
 
-- [ ] **Step 1 — write RED cases.** Add `stopped Direct save checkpoints and preserves provider`, `Off or occupied unknown port never authorizes stopped write`, `stale source catalog replacement or setup lease rejects`, `live writer rejects changed static accounts default verifier or optional flags`, and `fault phase determines rejection versus uncertainty`. Cover checkpoint/temp/intent creation, file and directory sync, rename, synchronous publication and lock-release boundaries using injected filesystem/publish functions passed as internal test dependencies, never environment/production fault switches. Test symlinks, hard links, unsafe ownership/modes, replaced directory/lock and stale lock preservation.
+- [x] **Step 1 — write RED cases.** Add `stopped Direct save checkpoints and preserves provider`, `Off or occupied unknown port never authorizes stopped write`, `stale source catalog replacement or setup lease rejects`, `live writer rejects changed static accounts default verifier or optional flags`, and `fault phase determines rejection versus uncertainty`. Cover checkpoint/temp/intent creation, file and directory sync, rename, synchronous publication and lock-release boundaries using injected filesystem/publish functions passed as internal test dependencies, never environment/production fault switches. Test symlinks, hard links, unsafe ownership/modes, replaced directory/lock and stale lock preservation.
 
 ```js
 assert.deepEqual(await readFile(checkpointPath), beforeBytes);
@@ -204,11 +204,11 @@ assert.equal(preWriteConflict.code, "ASSIGNMENT_CONFLICT");
 assert.equal(postRenameFailure.code, "ASSIGNMENT_UNCERTAIN");
 ```
 
-- [ ] **Step 2 — run RED.** `node --test test/project-assignments.test.js test/companion-cli.test.js test/managed-serve.test.js`. Expected: missing writer/bridge or fault-safety assertions fail.
-- [ ] **Step 3 — implement persistence and stopped bridge.** Acquire the exclusive shared lock; read/validate source/catalog/context and expected revisions; reject unready schema/static drift. Stopped path freshly requires compatible Direct provider, settled activation evidence and an independent exclusive empty-port check; native also supplies no-owned-child authority. Validate prospective temp, fsync temp and exact checkpoint/immutable intent plus directory, recheck source/provider/catalog/file identities immediately before rename, rename and fsync directory. Live publication follows durable persistence synchronously; retain the previous snapshot on pre-publication failure. Release only owned unchanged lock. Return certain rejection only when replacement is known not to have occurred; cleanup/release failures never fabricate success or remove unsafe evidence. No-op skips replacement and preserves source bytes.
-- [ ] **Step 4 — implement read reconciliation.** Read actual saved revision/identity and requested intent with containment/identity checks. A stopped outcome can settle only after its helper has exited: matching candidate revision and identity confirm saved, unchanged baseline revision and identity confirm no effect, any other state remains conflicting/unconfirmed. Never replay, restore a checkpoint or infer runtime application from intent. Start/relaunch still use actual saved state and preserve stale locks.
-- [ ] **Step 5 — run GREEN.** Repeat Step 2, then `node --test test/account-setup.test.js test/activation.test.js`. Expected: writer/fault and existing setup/recovery tests pass; no broadened account/default save guard, no credential retrieval or provider change.
-- [ ] **Step 6 — commit.** Stage Task 3 paths only; `git commit -m "feat: persist guarded project assignment changes"`.
+- [x] **Step 2 — run RED.** `node --test test/project-assignments.test.js test/companion-cli.test.js test/managed-serve.test.js`. Expected: missing writer/bridge or fault-safety assertions fail.
+- [x] **Step 3 — implement persistence and stopped bridge.** Acquire the exclusive shared lock; read/validate source/catalog/context and expected revisions; reject unready schema/static drift. Stopped path freshly requires compatible Direct provider, settled activation evidence and an independent exclusive empty-port check; native also supplies no-owned-child authority. Validate prospective temp, fsync temp and exact checkpoint/immutable intent plus directory, recheck source/provider/catalog/file identities immediately before rename, rename and fsync directory. Live publication follows durable persistence synchronously; retain the previous snapshot on pre-publication failure. Release only owned unchanged lock. Return certain rejection only when replacement is known not to have occurred; cleanup/release failures never fabricate success or remove unsafe evidence. No-op skips replacement and preserves source bytes.
+- [x] **Step 4 — implement read reconciliation.** Read actual saved revision/identity and requested intent with containment/identity checks. A stopped outcome can settle only after its helper has exited: matching candidate revision and identity confirm saved, unchanged baseline revision and identity confirm no effect, any other state remains conflicting/unconfirmed. Never replay, restore a checkpoint or infer runtime application from intent. Start/relaunch still use actual saved state and preserve stale locks.
+- [x] **Step 5 — run GREEN.** Repeat Step 2, then `node --test test/account-setup.test.js test/activation.test.js`. Expected: writer/fault and existing setup/recovery tests pass; no broadened account/default save guard, no credential retrieval or provider change.
+- [x] **Step 6 — commit.** Stage Task 3 paths only; `git commit -m "feat: persist guarded project assignment changes"`.
 
 ### Task 4: Apply and reconcile through the bounded owned-child protocol [size: L | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,concurrency]
 
@@ -218,7 +218,7 @@ assert.equal(postRenameFailure.code, "ASSIGNMENT_UNCERTAIN");
 
 **Interfaces:** Consume Tasks 2/3. Hold one immutable current snapshot `{config, configurationRevision, configurationIdentity, mode}` initialized under startup lock in Off. Mode commands replace only mode; assignment publication replaces config/revision/identity without changing mode. Implement the private channel contract above and one bounded last-attempt record; no general reload API or HTTP mutation endpoint.
 
-- [ ] **Step 1 — write RED tests.** Add `owned assignment command acknowledges durable published snapshot`, `queued read waits for uncertain write to settle`, `stale revisions context account or catalog reject unchanged`, `control loss does not cancel accepted write or listener`, `saved static drift never reloads`, and `runtime summary retains running account name after disk edit`. Include get_mode/set_mode ordering, capability absence, wrong/excess fields, null encoding, UTF-8, split/coalesced/flooded input, blocked output and repeated operation IDs. Read health after publication and assert it matches the applied configuration, not startup or an unapplied saved candidate.
+- [x] **Step 1 — write RED tests.** Add `owned assignment command acknowledges durable published snapshot`, `queued read waits for uncertain write to settle`, `stale revisions context account or catalog reject unchanged`, `control loss does not cancel accepted write or listener`, `saved static drift never reloads`, and `runtime summary retains running account name after disk edit`. Include get_mode/set_mode ordering, capability absence, wrong/excess fields, null encoding, UTF-8, split/coalesced/flooded input, blocked output and repeated operation IDs. Read health after publication and assert it matches the applied configuration, not startup or an unapplied saved candidate.
 
 ```js
 assert.equal(reply.outcome, "applied");
@@ -228,10 +228,10 @@ assert.equal(health.configFingerprint, reply.state.runningFingerprint);
 assert.equal(reconciliationWasReturnedBeforeWriteSettled, false);
 ```
 
-- [ ] **Step 2 — run RED.** `node --test test/managed-serve.test.js test/proxy.test.js`. Expected: new assignment protocol/application assertions fail.
-- [ ] **Step 3 — implement serialized commands and authoritative reads.** Pause parsing during each async command while preserving existing retained-byte/output bounds; close/drain invalid channels safely. Mutation requires expected saved and running baseline coherence, exact static baseline and fresh catalog. A fresh get_assignment runs after preceding attempts settle and describes actual saved versus current runtime state, even on mismatch; unavailable saved reads leave runtime evidence intact. Lost channel/reply never rolls back, resets mode or retries. Applied acknowledgment follows durable write, publication and safe lock completion; uncertain cleanup remains uncertain.
-- [ ] **Step 4 — run GREEN.** Repeat Step 2 and `node --test test/project-assignments.test.js test/companion-cli.test.js`. Expected: all cases pass, bounded memory retained, zero secret/preflight access and listener continues after control loss.
-- [ ] **Step 5 — commit.** Stage Task 4 paths only; `git commit -m "feat: apply assignments on the owned router"`.
+- [x] **Step 2 — run RED.** `node --test test/managed-serve.test.js test/proxy.test.js`. Expected: new assignment protocol/application assertions fail.
+- [x] **Step 3 — implement serialized commands and authoritative reads.** Pause parsing during each async command while preserving existing retained-byte/output bounds; close/drain invalid channels safely. Mutation requires expected saved and running baseline coherence, exact static baseline and fresh catalog. A fresh get_assignment runs after preceding attempts settle and describes actual saved versus current runtime state, even on mismatch; unavailable saved reads leave runtime evidence intact. Lost channel/reply never rolls back, resets mode or retries. Applied acknowledgment follows durable write, publication and safe lock completion; uncertain cleanup remains uncertain.
+- [x] **Step 4 — run GREEN.** Repeat Step 2 and `node --test test/project-assignments.test.js test/companion-cli.test.js`. Expected: all cases pass, bounded memory retained, zero secret/preflight access and listener continues after control loss.
+- [x] **Step 5 — commit.** Stage Task 4 paths only; `git commit -m "feat: apply assignments on the owned router"`.
 
 ### Task 5: Extend the native capability and uncertainty handling [size: L | risk: security | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: security,concurrency]
 
@@ -241,7 +241,7 @@ assert.equal(reconciliationWasReturnedBeforeWriteSettled, false);
 
 **Interfaces:** Produce the native contracts above and fixed CompanionError assignmentUnavailable/assignmentUncertain/assignmentConflict messages. Retain exact Process object/session/context lookup both before and after awaited child operations. Keep one reader/writer/pending request on the existing channel queue. Provider/setup reconciliation remains distinct.
 
-- [ ] **Step 1 — write RED tests.** Add `testAssignmentTypesEncodeExplicitInheritanceNull`, `testAssignmentRequiresCapabilityAndExactChild`, `testAssignmentTimeoutNeedsFreshAssignmentRead`, `testModeReadCannotReconcileAssignment`, `testQueuedFreshReadIgnoresRetiredMutationReply`, `testPartialFrameDisablesChannelWithoutSignalling`, and `testStoppedHelperMustExitBeforeReconciliation`. Extend the synthetic process fixture to exchange actual compact assignment frames, delayed/failed outcomes and unsupported capability; retain all earlier flood/stall/port-reuse/environment/ownership cases.
+- [x] **Step 1 — write RED tests.** Add `testAssignmentTypesEncodeExplicitInheritanceNull`, `testAssignmentRequiresCapabilityAndExactChild`, `testAssignmentTimeoutNeedsFreshAssignmentRead`, `testModeReadCannotReconcileAssignment`, `testQueuedFreshReadIgnoresRetiredMutationReply`, `testPartialFrameDisablesChannelWithoutSignalling`, and `testStoppedHelperMustExitBeforeReconciliation`. Extend the synthetic process fixture to exchange actual compact assignment frames, delayed/failed outcomes and unsupported capability; retain all earlier flood/stall/port-reuse/environment/ownership cases.
 
 ```swift
 XCTAssertEqual(command["action"] as? String, "set_assignment")
@@ -250,10 +250,10 @@ XCTAssertTrue(command["accountId"] is NSNull)
 XCTAssertEqual(peer.commands.filter { $0["action"] as? String == "set_assignment" }.count, 1)
 ```
 
-- [ ] **Step 2 — run RED.** `swift test --package-path companion --filter AssignmentTypesTests`, then the existing `RouterModeChannelTests` and `ProcessBackendTests` filters. Expected: missing types/APIs or new capability/outcome tests fail before implementation.
-- [ ] **Step 3 — implement channel/backend changes.** Validate exact protocol variants, context/revisions/selected project/operation and attested before/candidate pairs. Preserve five-second absolute deadlines and bounded nonblocking I/O. Timeout/cancellation/loss retires observation, never the accepted child mutation; no mode read or late reply clears assignment uncertainty. Fresh ordered assignment read can settle only matching evidence. Stopped helpers use the existing retained mutating-process mechanism, never terminate a possibly writing helper, and read intent/state only after exit/drain; do not let generic provider inspect clear assignment uncertainty accidentally.
-- [ ] **Step 4 — run GREEN.** Repeat all Step 2 commands. Expected: all focused tests pass with no signal/adoption/retry or protocol payload leakage; old mode-only ready remains usable for mode but not assignment editing.
-- [ ] **Step 5 — commit.** Stage Task 5 paths only; `git commit -m "feat: bind native assignment control to owned child"`.
+- [x] **Step 2 — run RED.** `swift test --package-path companion --filter AssignmentTypesTests`, then the existing `RouterModeChannelTests` and `ProcessBackendTests` filters. Expected: missing types/APIs or new capability/outcome tests fail before implementation.
+- [x] **Step 3 — implement channel/backend changes.** Validate exact protocol variants, context/revisions/selected project/operation and attested before/candidate pairs. Preserve five-second absolute deadlines and bounded nonblocking I/O. Timeout/cancellation/loss retires observation, never the accepted child mutation; no mode read or late reply clears assignment uncertainty. Fresh ordered assignment read can settle only matching evidence. Stopped helpers use the existing retained mutating-process mechanism, never terminate a possibly writing helper, and read intent/state only after exit/drain; do not let generic provider inspect clear assignment uncertainty accidentally.
+- [x] **Step 4 — run GREEN.** Repeat all Step 2 commands. Expected: all focused tests pass with no signal/adoption/retry or protocol payload leakage; old mode-only ready remains usable for mode but not assignment editing.
+- [x] **Step 5 — commit.** Stage Task 5 paths only; `git commit -m "feat: bind native assignment control to owned child"`.
 
 ### Task 6: Reconcile assignment transitions without weakening recovery [size: L | risk: concurrency | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: concurrency,auth]
 
@@ -263,7 +263,7 @@ XCTAssertEqual(peer.commands.filter { $0["action"] as? String == "set_assignment
 
 **Interfaces:** Produce the Inspection evidence fields and controller API above. Introduce assignment-specific uncertainty/write-block state, distinct from provider/setup mutation authority. Compare compound observations in the existing serialized slot before applying generic reconcile. Only the exact expected assignment transition may preserve the prior DesktopConfirmation enum and existing journal obligation; it never grants a new confirmation.
 
-- [ ] **Step 1 — write RED cases.** Add `testVerifiedAssignmentPreservesConfirmedRoutedAndDirectAuthority`, `testSameChoiceWithChangedRecoveryRevisionInvalidates`, `testUncertainAssignmentRetainsRestoreDirectAndGuardedStop`, `testAssignmentReadDoesNotRequireMatchingReadiness`, `testStaleInspectionGenerationOrReplacedChildCannotApply`, `testDismissedEditorRetainsPendingOperation`, and `testStoppedSaveAndAccountSetupBoundariesRemainIndependent`. Test active legitimate recovery obligations versus prepared/conflicting evidence, pending initial response confirmation, repeated edits, mode transitions, shutdown/relaunch, external listener and normal legacy setup.
+- [x] **Step 1 — write RED cases.** Add `testVerifiedAssignmentPreservesConfirmedRoutedAndDirectAuthority`, `testSameChoiceWithChangedRecoveryRevisionInvalidates`, `testUncertainAssignmentRetainsRestoreDirectAndGuardedStop`, `testAssignmentReadDoesNotRequireMatchingReadiness`, `testStaleInspectionGenerationOrReplacedChildCannotApply`, `testDismissedEditorRetainsPendingOperation`, and `testStoppedSaveAndAccountSetupBoundariesRemainIndependent`. Test active legitimate recovery obligations versus prepared/conflicting evidence, pending initial response confirmation, repeated edits, mode transitions, shutdown/relaunch, external listener and normal legacy setup.
 
 ```swift
 XCTAssertEqual(controller.desktopConfirmation, .confirmedRouted)
@@ -272,11 +272,11 @@ XCTAssertTrue(controller.canRestoreDirect) // recovery remains available
 XCTAssertFalse(controller.canBeginAccountSetup) // live account/default save remains blocked
 ```
 
-- [ ] **Step 2 — run RED.** `node --test test/activation.test.js test/companion.test.js`, `swift test --package-path companion --filter RouterControllerTests`, and `swift test --package-path companion --filter ProcessBackendTests`. Expected: new compound-evidence/controller assertions fail.
-- [ ] **Step 3 — implement inspection and action reconciliation.** Obtain consistent source/catalog/account/provider evidence and reject mixed revisions. Before editing/save, freshly validate identity, selected configuration, exact child/capability, lock/setup safety and saved/running baseline. Live provider evidence may be healthy Direct or active Router with its legitimate existing recovery obligation; prepared/conflicting/unavailable evidence blocks. Preserve pending/confirmed desktop state rather than invent a new confirmation requirement. Stopped save additionally requires no owned child, no recovery obligation/pending journal, fresh Direct and independently empty port.
-- [ ] **Step 4 — implement verified continuity and recovery.** Capture before source/activation/recovery evidence, exact child and requested operation. Gather after disk and ordered runtime evidence before generic reconcile; suppress revision/readiness invalidation only when exact attested candidate, applied fingerprint, same context/child and unchanged recoveryRevision agree. Any unexpected revision/provider/recovery change invalidates conservatively. Use exact-child lookup independent of matching health for reads; require coherent readiness for writes. On confirmed divergence block further edits and retain Restore direct/manual confirmation/guarded Stop/Start Off. Assignment uncertainty alone must not reuse the provider mutation flag that would block those recovery actions. Child exit, relaunch, unsafe lock or an unowned survivor retains conservative recovery; no replay.
-- [ ] **Step 5 — run GREEN.** Repeat Step 2, then `swift test --package-path companion --filter AccountSetupControllerTests`. Expected: new reconciliation tests and existing account/default/recovery guards pass, including no gratuitous restart for verified success.
-- [ ] **Step 6 — commit.** Stage Task 6 paths only; `git commit -m "feat: reconcile assignments with guarded recovery"`.
+- [x] **Step 2 — run RED.** `node --test test/activation.test.js test/companion.test.js`, `swift test --package-path companion --filter RouterControllerTests`, and `swift test --package-path companion --filter ProcessBackendTests`. Expected: new compound-evidence/controller assertions fail.
+- [x] **Step 3 — implement inspection and action reconciliation.** Obtain consistent source/catalog/account/provider evidence and reject mixed revisions. Before editing/save, freshly validate identity, selected configuration, exact child/capability, lock/setup safety and saved/running baseline. Live provider evidence may be healthy Direct or active Router with its legitimate existing recovery obligation; prepared/conflicting/unavailable evidence blocks. Preserve pending/confirmed desktop state rather than invent a new confirmation requirement. Stopped save additionally requires no owned child, no recovery obligation/pending journal, fresh Direct and independently empty port.
+- [x] **Step 4 — implement verified continuity and recovery.** Capture before source/activation/recovery evidence, exact child and requested operation. Gather after disk and ordered runtime evidence before generic reconcile; suppress revision/readiness invalidation only when exact attested candidate, applied fingerprint, same context/child and unchanged recoveryRevision agree. Any unexpected revision/provider/recovery change invalidates conservatively. Use exact-child lookup independent of matching health for reads; require coherent readiness for writes. On confirmed divergence block further edits and retain Restore direct/manual confirmation/guarded Stop/Start Off. Assignment uncertainty alone must not reuse the provider mutation flag that would block those recovery actions. Child exit, relaunch, unsafe lock or an unowned survivor retains conservative recovery; no replay.
+- [x] **Step 5 — run GREEN.** Repeat Step 2, then `swift test --package-path companion --filter AccountSetupControllerTests`. Expected: new reconciliation tests and existing account/default/recovery guards pass, including no gratuitous restart for verified success.
+- [x] **Step 6 — commit.** Stage Task 6 paths only; `git commit -m "feat: reconcile assignments with guarded recovery"`.
 
 ### Task 7: Deliver the one-project native editor and truthful state [size: M | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 
@@ -286,7 +286,7 @@ XCTAssertFalse(controller.canBeginAccountSetup) // live account/default save rem
 
 **Interfaces:** `ProjectAssignmentView(controller: RouterController, project: Inspection.Entry)` uses the controller-owned load/save APIs; local state holds only the unsaved selection. Add focused `AssignmentPresentation` projection in that file with `savedText`, `runningText`, `actionTitle`, `canSave` and `warning`. Controls rows open one sheet and use runtime summaries only when verified; otherwise show saved state with unconfirmed/not-running explanation.
 
-- [ ] **Step 1 — write RED presentation/action cases.** Add `testAssignSwitchAndUseDefaultUseStableIDs`, `testNamedDefaultRemainsExplicitOverride`, `testSavedAndRunningDivergenceNeverLooksApplied`, `testConfiguredOnlyWarningAndMissingTargetRepair`, `testOffSuspensionAndUnavailableControlRemainClear`, and `testDismissalDoesNotRetryOrOwnMutation`. Assert button labels Save and apply versus Save, explicit pending state, preserved unsaved selection on rejection, account names from the correct snapshot, no key/billing claims and technical alias details only in Advanced.
+- [x] **Step 1 — write RED presentation/action cases.** Add `testAssignSwitchAndUseDefaultUseStableIDs`, `testNamedDefaultRemainsExplicitOverride`, `testSavedAndRunningDivergenceNeverLooksApplied`, `testConfiguredOnlyWarningAndMissingTargetRepair`, `testOffSuspensionAndUnavailableControlRemainClear`, and `testDismissalDoesNotRetryOrOwnMutation`. Assert button labels Save and apply versus Save, explicit pending state, preserved unsaved selection on rejection, account names from the correct snapshot, no key/billing claims and technical alias details only in Advanced.
 
 ```swift
 XCTAssertEqual(presentation.actionTitle, "Save and apply")
@@ -294,10 +294,10 @@ XCTAssertEqual(stoppedPresentation.actionTitle, "Save")
 XCTAssertEqual(unconfirmedPresentation.runningText, "Running assignment unconfirmed")
 ```
 
-- [ ] **Step 2 — run RED.** `swift test --package-path companion --filter ProjectAssignmentPresentationTests` and `swift test --package-path companion --filter ControlsPresentationTests`. Expected: new presentation/action assertions fail.
-- [ ] **Step 3 — implement the focused UI.** Provide existing account picker plus Use default, saved/running explanations, absent-discovery warning, pending/error guidance and appropriate disabled reasons. Keep operation ownership in the controller so sheet dismissal never cancels tracking or repeats saves. Keep routing/default controls prominent; do not fix the accepted selection-scroll/Tab issues or redesign unrelated setup/recovery navigation.
-- [ ] **Step 4 — run GREEN.** Repeat Step 2, then `npm run companion:test`. Expected: focused and complete native tests pass, including account setup, Quit guidance, Dock/window lifetime and existing presentation regressions.
-- [ ] **Step 5 — commit.** Stage Task 7 paths only; `git commit -m "feat: add companion project assignment editor"`.
+- [x] **Step 2 — run RED.** `swift test --package-path companion --filter ProjectAssignmentPresentationTests` and `swift test --package-path companion --filter ControlsPresentationTests`. Expected: new presentation/action assertions fail.
+- [x] **Step 3 — implement the focused UI.** Provide existing account picker plus Use default, saved/running explanations, absent-discovery warning, pending/error guidance and appropriate disabled reasons. Keep operation ownership in the controller so sheet dismissal never cancels tracking or repeats saves. Keep routing/default controls prominent; do not fix the accepted selection-scroll/Tab issues or redesign unrelated setup/recovery navigation.
+- [x] **Step 4 — run GREEN.** Repeat Step 2, then `npm run companion:test`. Expected: focused and complete native tests pass, including account setup, Quit guidance, Dock/window lifetime and existing presentation regressions.
+- [x] **Step 5 — commit.** Stage Task 7 paths only; `git commit -m "feat: add companion project assignment editor"`.
 
 ### Task 8: Package, validate and close the increment [size: M | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 
@@ -307,13 +307,57 @@ XCTAssertEqual(unconfirmedPresentation.runningText, "Running assignment unconfir
 
 **Interfaces:** Add the three new production modules (project-catalog.js, project-assignments.js, configuration-lock.js) to both explicit allowlists. Extend existing package cases to use bundled assignment state/commit and owned managed capability in relocated/source-denied fixtures without adding authentication helpers or production fault switches. Preserve three package cases; do not weaken source/signature/resource confinement checks.
 
-- [ ] **Step 1 — add package RED assertions.** Extend resource manifests and relocated fixture flow: packaged stopped save, managed assign/switch/remove, applied health fingerprint, no checkout access and unchanged provider/recovery. Assert only synthetic pairs; retain current native Keychain/branding and exact cleanup checks. Run `npm run companion:build`, then `npm run companion:package-test`. Expected: missing new bundled modules or new integration assertion fails before updating allowlists; distinguish an unrelated baseline failure and never accept a skip as success.
-- [ ] **Step 2 — implement package integration and documentation.** Update both source allowlists and any sandbox fixture resource list. Document eligibility, saved versus applied, inherited/default distinction, Off suspension, configured-only warning, safe stopped saves, ambiguity/reconciliation and guarded recovery; retain account/default boundary, privacy and external-editor limitation. Create the report with pending evidence explicitly pending, not invented counts.
-- [ ] **Step 3 — complete final automated verification.** Run `npm run companion:test`, `npm run companion:build`, `npm test`, then `npm run companion:package-test` in that order. Expected: complete native and Node suites pass; fresh signed package passes all three cases with zero failures/cancellations/skips. Existing package tests invoke `/usr/bin/codesign --verify --deep --strict` and compare resources. Record actual counts/commands/build identity. Rebuild/retest only when subsequent changes affect those results.
-- [ ] **Step 4 — bounded native and private live acceptance.** Freshly inspect selected context, actual saved setup, ownership, provider, listener, package and exact recovery records before live work. Use bounded private ready-schema-2 fixtures and already configured named accounts whose availability is freshly established; do not silently migrate normal legacy configuration. Coordinate explicit human launch/activation/restart/response confirmations where the existing workflow requires them. With On, assign → switch → remove on one identified project and show saved/running state plus initiating request evidence for each; successful assignment changes themselves require no Codex restart. Verify Off suspension, stopped Save/next Start Off, configured-only warning and unavailable-control presentation. Keep original recovery context and perform exact Direct restoration/manual response confirmation/guarded Stop and private fixture cleanup. Record human observations separately from automated transport evidence; qualify cancelled initiating requests and do not claim independent billing or general cross-account continuation. If a required live prerequisite/observation is unavailable, report it as incomplete and do not claim full acceptance.
-- [ ] **Step 5 — finish documentation and commit.** Record only performed checks, actual outcomes, exact recovery and limitations. Verify artifact/local Markdown references and `git diff --check`; stage Task 8 paths only and commit with `git commit -m "feat: verify companion assignment editing"`. Preserve private raw evidence outside Git, completed branding branch and historical reports. No push/merge.
+- [x] **Step 1 — add package RED assertions.** Extend resource manifests and relocated fixture flow: packaged stopped save, managed assign/switch/remove, applied health fingerprint, no checkout access and unchanged provider/recovery. Assert only synthetic pairs; retain current native Keychain/branding and exact cleanup checks. Run `npm run companion:build`, then `npm run companion:package-test`. Expected: missing new bundled modules or new integration assertion fails before updating allowlists; distinguish an unrelated baseline failure and never accept a skip as success.
+- [x] **Step 2 — implement package integration and documentation.** Update both source allowlists and any sandbox fixture resource list. Document eligibility, saved versus applied, inherited/default distinction, Off suspension, configured-only warning, safe stopped saves, ambiguity/reconciliation and guarded recovery; retain account/default boundary, privacy and external-editor limitation. Create the report with pending evidence explicitly pending, not invented counts.
+- [x] **Step 3 — complete final automated verification.** Run `npm run companion:test`, `npm run companion:build`, `npm test`, then `npm run companion:package-test` in that order. Expected: complete native and Node suites pass; fresh signed package passes all three cases with zero failures/cancellations/skips. Existing package tests invoke `/usr/bin/codesign --verify --deep --strict` and compare resources. Record actual counts/commands/build identity. Rebuild/retest only when subsequent changes affect those results.
+- [x] **Step 4 — bounded native and private live acceptance.** Freshly inspect selected context, actual saved setup, ownership, provider, listener, package and exact recovery records before live work. Use bounded private ready-schema-2 fixtures and already configured named accounts whose availability is freshly established; do not silently migrate normal legacy configuration. Coordinate explicit human launch/activation/restart/response confirmations where the existing workflow requires them. With On, assign → switch → remove on one identified project and show saved/running state plus initiating request evidence for each; successful assignment changes themselves require no Codex restart. Verify Off suspension, stopped Save/next Start Off, configured-only warning and unavailable-control presentation. Keep original recovery context and perform exact Direct restoration/manual response confirmation/guarded Stop and private fixture cleanup. Record human observations separately from automated transport evidence; qualify cancelled initiating requests and do not claim independent billing or general cross-account continuation. If a required live prerequisite/observation is unavailable, report it as incomplete and do not claim full acceptance.
+- [x] **Step 5 — finish documentation and commit.** Record only performed checks, actual outcomes, exact recovery and limitations. Verify artifact/local Markdown references and `git diff --check`; stage Task 8 paths only and commit with `git commit -m "feat: verify companion assignment editing"`. Preserve private raw evidence outside Git, completed branding branch and historical reports. No push/merge.
 - [ ] **Step 6 — sole sequential final gate.** Use `personal-workflows:code-review` on the complete assignment branch against its recorded implementation base and the approved pair. Dispatch specification review first; dispatch quality only after specification PASS. Follow the current workflow for findings/re-review and archive only actual reviews/results. Do not reopen completed predecessor reviews or count task checks/builder completeness as final approval. Commit required fixes/documentation locally, run affected checks and finalize the current gate against the actual resulting branch/package.
 - [ ] **Step 7 — report and stop.** Verify final local commits/status, main unchanged since execution preflight, the separate branding branch, actual package/evidence match and exact recovered operational state. Report delivered behavior, commands/results, human observations, incomplete evidence/limitations and local commit IDs. Stop before another increment, push or merge.
+
+## Execution checklist evidence — 2026-11-18
+
+The checked steps record actual execution reported in the retained Task 1–8
+reports and task reviews, including scoped fixes; original step text remains for
+traceability. They do not claim that every proposed test name or intermediate
+expected failure occurred verbatim. Task 8 Steps 6 and 7 remain pending, and
+Stage 4 is open until the sole final gate and final controller report finish.
+
+- Tasks 1/3 moved mechanical production allowlists forward under the recorded
+  dependency-order ruling. Task 8 Step 1 added and ran positive package coverage
+  against those landed producers; the expected missing-module RED did not occur
+  and was not manufactured. Task 4 had already added the capability expectation.
+- Tasks 1–7 recorded actual RED/GREEN and local commits, with additional scoped
+  artifact/source-authority fixes in Task 3, queued-child capture in Task 6 and
+  the deferred divergence classification in Task 7. Task 3's no-yield guard
+  coordinates participating writers without promising filesystem compare-and-swap.
+- Task 8 Step 3's historical native 298/build/Node 958/package 3 chain was followed
+  by acceptance correction chains. The final affected chain retains unchanged
+  native 310 and its matching signed build, then final Node 958/package 3 after the
+  package observer correction. Two prior explicit package 2/3 failures and the
+  causal diagnostic remain recorded; the same window predicate and absolute
+  20-second budget were retained. A separate post-OS native 310/Node 958/package 3
+  supplement ran once without rebuilding the unchanged signed app.
+- Task 8 Step 4 is executed with bounded evidence: human stopped Save/next Start
+  Off, stable open editor, correct saved/running A/B/C, configured-only warning
+  and corrected unavailable/setup guidance. Same-child On assign/switch/remove
+  initiators were A 200, B 499/CANCELLED and C 200. The distinct later Off/global 200
+  did not replace cancelled B; the original partial run's expired transport and
+  missing drain footer remain unobserved. No billing, general continuation or
+  live in-flight snapshot claim follows.
+- Exact whole-provider/context-local-backup restoration, manual restart, working
+  Direct confirmation, guarded Stop, exact child/logger exit, retry logger drain
+  and empty port were observed. Equal-content provider metadata later reopened
+  Direct confirmation conservatively; writer identity remains unobserved. The
+  human re-confirmed, restored original selection and guarded-Quit. The controller
+  restored automatic runtime and completed positively owned private cleanup,
+  retaining actual context/configuration/backup/recovery records, raw history and
+  new desktop chats. Normal legacy configuration was not migrated.
+- Task 8 Step 5 records the existing package/docs commit and this evidence-led
+  documentation closeout with local Markdown/reference/privacy/diff checks.
+  Subsequent final-gate bookkeeping remains with Steps 6/7; no final PASS is
+  pre-recorded. See the [validation record](../../validation/companion-project-assignment-editing.md)
+  for actual results, historical review outcomes and limits.
 
 ## Criterion traceability
 

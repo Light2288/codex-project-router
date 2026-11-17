@@ -8,11 +8,11 @@
 
 **Created:** 2026-11-16
 
-**Updated:** 2026-11-17
+**Updated:** 2026-11-18
 
 **Stage:** 4 — specification and plan separately approved; Subagent-driven implementation selected
 
-**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 automated native/build/Node/package verification passed (298 native, 958 Node, exactly 3 package cases, zero failures/skips); human native/live acceptance and the sole final sequential whole-branch specification/quality gate remain pending. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final sequential whole-branch specification/quality gate and final controller report remain PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
 
 **Storage:** Saved in the existing checkout on `feat/companion-project-assignment-editing`; the approved pair was committed together before product changes. Current lifecycle updates remain local to this branch.
 

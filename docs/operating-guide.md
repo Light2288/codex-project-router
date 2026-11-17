@@ -97,6 +97,9 @@ changed. A missing target stays an error until you select an account or Use defa
 opening the editor never converts it silently. Projects found only in saved
 configuration show a warning and remain editable by their exact saved identity
 when discovery is otherwise healthy. There is no manual ID entry or bulk editor.
+Incomplete setup shows account-setup guidance and keeps assignment Save unavailable
+without a false saved/running conflict. The main controls present setup actions and
+an incomplete-setup warning before Start until setup is ready.
 
 Editing requires a valid, ready schema-2 setup and fresh matching project/catalog
 and configuration evidence. With the exact owned supported router and functioning
@@ -113,7 +116,7 @@ particular assignment is running. Unconfirmed control reads say **Running assign
 unconfirmed**. An external listener or unavailable/unsupported channel permits
 browsing but blocks writes. Unsaved choices remain local to the editor; explicit
 **Refresh** reloads its baseline. Background refresh does not silently rebase an
-old selection.
+old selection. Save leaves the editor open so the result can be inspected.
 
 A rejected save leaves the selection available for inspection. An ambiguous result
 may have persisted: do not repeat it, assume rollback, or issue a second command
@@ -122,7 +125,9 @@ unresolved or divergent evidence keeps assignment writes blocked. Closing the
 editor does not cancel or repeat an accepted save. Direct recovery remains
 available subject to its own checks: **Restore direct**, manually restart Codex,
 confirm a working direct response, then guarded Stop. No process or stale lock is
-adopted automatically.
+adopted automatically. A provider rewrite with identical content can still change
+recovery metadata and conservatively reopen Direct confirmation. Follow the renewed
+confirmation guidance before Stop/Quit; a healthy poll alone does not confirm it.
 
 Each request captures its immutable configured assignment and mode at receipt,
 before authentication or other asynchronous lookup. Later changes affect later
@@ -135,9 +140,10 @@ lock. Avoid concurrent external edits. Keep comparison tokens, actual mappings,
 references, checkpoints and raw evidence private; they are not UI diagnostics.
 
 See the [assignment validation record](validation/companion-project-assignment-editing.md)
-for current automated evidence and pending native/live observations. Readiness
-and configured account labels do not establish credential access, gateway
-acceptance, billing attribution or general cross-account continuation.
+for automated evidence, bounded native/live observations, exact recovery/cleanup
+and the pending final whole-branch review. Readiness and configured account labels
+do not establish credential access, gateway acceptance, billing attribution or
+general cross-account continuation.
 
 ## Schema-1 project credential routing compatibility
 

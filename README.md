@@ -144,8 +144,8 @@ selection, Keychain access, desktop-loaded settings, gateway acceptance, and bil
 attribution are separate facts.
 
 The [assignment-editing validation](docs/validation/companion-project-assignment-editing.md)
-records automated coverage separately from pending human native/live acceptance
-and the final whole-branch review.
+records automated coverage, bounded human native/live observations, exact recovery
+and cleanup separately from the pending final whole-branch review.
 
 The listener is loopback-only. Keep actual endpoints, mappings, credentials,
 Keychain references, backups, and runtime evidence outside Git. Unresolved or
