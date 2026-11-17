@@ -21,6 +21,33 @@ import Darwin
     public private(set) var routingModeError: String?
     public private(set) var uncertainSetupOperationID: String?
     public private(set) var configurationLockRequiresResolution = false
+    public enum AssignmentStatus: Equatable { case unavailable, ready, uncertain, diverged }
+    public private(set) var selectedAssignment: AssignmentState?
+    public private(set) var pendingAssignmentOperationID: String?
+    public private(set) var assignmentRequiresReconciliation = false
+    public private(set) var assignmentError: String?
+    public private(set) var assignmentStatus: AssignmentStatus = .unavailable
+    public var assignmentActionTitle: String { ownedRouter == nil ? "Save" : "Save and apply" }
+    private var assignmentInspection: Inspection?
+    private var assignmentBaseline: AssignmentState?
+    private var assignmentChild: OwnedRouter?
+    private var assignmentPortEmpty = false
+    private var assignmentStorageSafe = false
+    private var selectedAssignmentProjectID: String?
+    private struct PendingAssignment {
+        let change: AssignmentChange
+        let before: Inspection
+        let child: OwnedRouter?
+        let confirmation: DesktopConfirmation
+    }
+    private var pendingAssignment: PendingAssignment?
+    private struct AssignmentEditorBaseline {
+        let projectID: String
+        let state: AssignmentState
+        let inspection: Inspection
+        let child: OwnedRouter?
+    }
+    private var assignmentEditor: AssignmentEditorBaseline?
     private var setupReserved = false
 
     @ObservationIgnored private let backend: any CompanionBackend
@@ -51,12 +78,12 @@ import Darwin
         ownedRouter == nil && (lastStopOutcome?.portState == .occupied || inspection?.provider.proxyReady == true)
     }
     public var canSelectNode: Bool { usable && !busy && !mutationRequiresReconciliation }
-    public var canSelectConfiguration: Bool { usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && !recoveryObligation }
+    public var canSelectConfiguration: Bool { usable && !busy && !mutationRequiresReconciliation && !assignmentRequiresReconciliation && ownedRouter == nil && !recoveryObligation }
     public var canStart: Bool {
-        usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil && matchingContext != nil && inspection?.provider.proxyReady == false && inspection?.configuration.setupState == "ready"
+        usable && !busy && !mutationRequiresReconciliation && !assignmentRequiresReconciliation && ownedRouter == nil && matchingContext != nil && inspection?.provider.proxyReady == false && inspection?.configuration.setupState == "ready"
     }
     public var canActivate: Bool {
-        guard usable, !busy, !mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let child = ownedRouter, child.process.isRunning, matchingContext == child.context,
+        guard usable, !busy, !mutationRequiresReconciliation, !assignmentRequiresReconciliation, inspection?.configuration.setupState == "ready", let child = ownedRouter, child.process.isRunning, matchingContext == child.context,
               let provider = inspection?.provider else { return false }
         return provider.proxyReady == true && ["direct", "router"].contains(provider.state) &&
             !provider.recoveryRequired && !["prepared", "unavailable"].contains(provider.recordPhase)
@@ -80,13 +107,13 @@ import Darwin
     }
     public var canStop: Bool { !busy && stopPermitted }
     public var canQuit: Bool {
-        secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && ownedRouter == nil &&
+        secondInstance || initializationFailed || (usable && !busy && !mutationRequiresReconciliation && !assignmentRequiresReconciliation && ownedRouter == nil &&
             ((!recoveryObligation && journal.pending == nil) || (idleQuitAuthorized && hasIdleDirectQuitContext)))
     }
     public var quitBlockReason: QuitBlockReason? {
         // Presentation follows existing authority without refreshing or changing recovery evidence.
         if secondInstance || initializationFailed { return nil }
-        if busy || mutationRequiresReconciliation || backend.mutationRequiresReconciliation { return .operationInProgress }
+        if busy || mutationRequiresReconciliation || backend.mutationRequiresReconciliation || assignmentRequiresReconciliation { return .operationInProgress }
         if canQuit { return nil }
         if idleQuitJournalUnavailable { return .contextUnavailable }
         guard usable, let context = matchingContext, let provider = inspection?.provider, revision != nil,
@@ -170,7 +197,7 @@ import Darwin
     }
 
     public var canBeginAccountSetup: Bool {
-        usable && !busy && !mutationRequiresReconciliation && !backend.mutationRequiresReconciliation &&
+        usable && !busy && !mutationRequiresReconciliation && !backend.mutationRequiresReconciliation && !assignmentRequiresReconciliation &&
             ownedRouter == nil && selectedConfiguration != nil && !recoveryObligation && journal.pending == nil
     }
     /// Reserves the action and inspection boundary until finishAccountSetup, including OS consent.
@@ -231,6 +258,8 @@ import Darwin
             var next = journal; next.selectedConfigurationPath = canonical.path
             try persist(next)
             selectedConfiguration = canonical; inspection = nil; revision = nil
+            assignmentEditor = nil; selectedAssignment = nil; selectedAssignmentProjectID = nil
+            assignmentInspection = nil; assignmentBaseline = nil; assignmentChild = nil; assignmentPortEmpty = false
             loadSetupEvidence()
             projectRoutingStatus = .notRunning; routingModeError = nil
             dependencyContext = nil; hasDepended = false; desktopConfirmation = .unknown
@@ -239,7 +268,7 @@ import Darwin
     }
 
     public func selectNode(_ path: URL) async {
-        guard begin() else { return }
+        guard canSelectNode, begin() else { return }
         defer { finish() }
         do {
             let validated = try await backend.validateNode(path)
@@ -251,7 +280,7 @@ import Darwin
     }
 
     public func start() async {
-        guard begin() else { return }
+        guard !assignmentRequiresReconciliation, begin() else { return }
         defer { finish() }
         guard await inspectNow() else { return }
         guard !backend.mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let context = matchingContext, ownedRouter == nil, inspection?.provider.proxyReady == false else { reject(); return }
@@ -277,7 +306,7 @@ import Darwin
     }
 
     public func activate() async {
-        guard begin() else { return }
+        guard !assignmentRequiresReconciliation, begin() else { return }
         defer { finish() }
         guard await inspectNow() else { return }
         guard !backend.mutationRequiresReconciliation, inspection?.configuration.setupState == "ready", let context = matchingContext, let child = ownedRouter, child.process.isRunning,
@@ -344,6 +373,258 @@ import Darwin
         }
     }
 
+    public func canEditAssignment(_ project: Inspection.Entry) -> Bool {
+        guard usable, !busy, !assignmentRequiresReconciliation, !mutationRequiresReconciliation, assignmentStorageSafe,
+              !backend.mutationRequiresReconciliation, !configurationLockRequiresResolution, !setupReserved,
+              uncertainSetupOperationID == nil, let value = assignmentInspection, let state = assignmentBaseline,
+              value.catalog.entries.contains(where: { $0.id == project.id && $0.name == project.name }),
+              AssignmentWire.uuid(project.id),
+              assignmentEvidenceMatches(state, value: value), assignmentProviderSafe(value),
+              value.configuration.mode == "accounts", value.configuration.setupState == "ready",
+              value.configuration.accounts != nil, value.catalog.state == "ready" else { return false }
+        if let child = ownedRouter {
+            return assignmentChild === child && child.process.isRunning && value.provider.proxyReady == true &&
+                state.savedRevision == state.runningRevision && state.savedIdentity == state.runningIdentity &&
+                state.savedFingerprint == state.runningFingerprint
+        }
+        return assignmentChild == nil && assignmentPortEmpty && value.provider.proxyReady == false &&
+            !recoveryObligation && journal.pending == nil && state.runningRevision == nil
+    }
+
+    public func loadAssignment(projectID: String) async -> AssignmentState? {
+        guard AssignmentWire.uuid(projectID), !busy,
+              pendingAssignment == nil || pendingAssignment?.change.projectId == projectID, begin() else { return nil }
+        defer { finish() }
+        await acquireInspectionSlot()
+        defer { releaseInspectionSlot() }
+        selectedAssignmentProjectID = projectID
+        guard await inspectInSlot(queryRoutingMode: false) else { return nil }
+        guard let state = assignmentBaseline, state.projectId == projectID, let value = assignmentInspection else { return nil }
+        assignmentEditor = .init(projectID: projectID, state: state, inspection: value, child: ownedRouter)
+        return state
+    }
+
+    public func saveAssignment(projectID: String, accountID: String?) async {
+        guard let project = assignmentInspection?.catalog.entries.first(where: { $0.id == projectID }),
+              canEditAssignment(project), accountID.map(AssignmentWire.uuid) ?? true,
+              accountID == nil || assignmentInspection?.configuration.accounts?.contains(where: { $0.id == accountID }) == true,
+              let currentState = assignmentBaseline, let currentInspection = assignmentInspection else { return }
+        let editor = assignmentEditor?.projectID == projectID ? assignmentEditor : nil
+        guard editor.map({ sameAssignmentChild($0.child) }) ?? true else {
+            assignmentError = CompanionError.assignmentConflict.rawValue; return
+        }
+        let displayed = editor?.state ?? currentState
+        let displayedInspection = editor?.inspection ?? currentInspection
+        guard begin() else { return }
+        defer { finish() }
+        await acquireInspectionSlot()
+        defer { releaseInspectionSlot() }
+        selectedAssignmentProjectID = projectID
+        guard await inspectInSlot(queryRoutingMode: false), let value = assignmentInspection, let state = assignmentBaseline,
+              displayed.context == state.context, displayed.savedRevision == state.savedRevision, displayed.savedIdentity == state.savedIdentity,
+              displayed.catalogRevision == state.catalogRevision, displayedInspection.recoveryRevision == value.recoveryRevision,
+              displayedInspection.configuration == value.configuration,
+              assignmentProviderSafe(value), assignmentEvidenceMatches(state, value: value),
+              !assignmentRequiresReconciliation, !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation, assignmentStorageSafe,
+              let context = matchingContext, let savedRevision = state.savedRevision, let identity = state.savedIdentity,
+              let catalogRevision = state.catalogRevision, let assignments = backend as? any ProjectAssignmentBackend else {
+            assignmentError = CompanionError.assignmentConflict.rawValue; return
+        }
+        let child = ownedRouter
+        if let child {
+            guard assignmentChild === child, child.process.isRunning, value.provider.proxyReady == true,
+                  state.savedRevision == state.runningRevision, state.savedIdentity == state.runningIdentity,
+                  state.savedFingerprint == state.runningFingerprint else { assignmentError = CompanionError.assignmentConflict.rawValue; return }
+        } else {
+            guard assignmentPortEmpty, !recoveryObligation, journal.pending == nil, cleanDirect(context),
+                  value.provider.proxyReady == false, await assignments.probeAssignmentPort(context) == .empty,
+                  ownedRouter == nil else { assignmentError = CompanionError.assignmentUnavailable.rawValue; return }
+        }
+        let change = AssignmentChange(configPath: context.configPath, expectedContext: context, expectedSavedRevision: savedRevision,
+            expectedConfigurationIdentity: identity, expectedRunningRevision: child == nil ? nil : state.runningRevision,
+            expectedCatalogRevision: catalogRevision, operationId: UUID().uuidString, projectId: projectID, accountId: accountID)
+        let pending = PendingAssignment(change: change, before: value, child: child, confirmation: desktopConfirmation)
+        pendingAssignment = pending; pendingAssignmentOperationID = change.operationId
+        let requestGeneration = generation
+        do {
+            let commit: AssignmentCommit
+            if let child { commit = try await assignments.applyAssignment(change, to: child) }
+            else { commit = try await assignments.saveStoppedAssignment(change) }
+            guard generation == requestGeneration, sameAssignmentChild(child) else { throw CompanionError.assignmentUncertain }
+            guard await inspectAssignmentTransition(pending, commit: commit, allowSettlement: true) else {
+                throw CompanionError.assignmentUncertain
+            }
+        } catch {
+            // A rejected operation cannot have replaced the source. Every other
+            // post-dispatch failure retains its exact operation for observation.
+            let rejected = error as? CompanionError == .assignmentConflict || error as? CompanionError == .assignmentUnavailable
+            if rejected {
+                pendingAssignment = nil; pendingAssignmentOperationID = nil
+                let message = safe(error)
+                _ = await inspectInSlot(queryRoutingMode: false)
+                assignmentError = message
+            } else {
+                assignmentRequiresReconciliation = true; assignmentStatus = .uncertain
+                assignmentError = CompanionError.assignmentUncertain.rawValue
+                // Collect current evidence without treating the failed call as a retry or success.
+                _ = await inspectAssignmentTransition(pending, commit: nil, allowSettlement: false)
+            }
+        }
+    }
+
+    private func sameAssignmentChild(_ child: OwnedRouter?) -> Bool {
+        if let child { return ownedRouter === child && child.process.isRunning }
+        return ownedRouter == nil
+    }
+    private func assignmentProviderSafe(_ value: Inspection) -> Bool {
+        guard !value.provider.recoveryRequired else { return false }
+        if value.provider.state == "direct" { return ["none", "restored"].contains(value.provider.recordPhase) }
+        return value.provider.state == "router" && value.provider.recordPhase == "active" && recoveryObligation &&
+            journal.pending?.context == value.context && dependencyContext == value.context
+    }
+    private func assignmentEvidenceMatches(_ state: AssignmentState, value: Inspection) -> Bool {
+        state.savedState == "ready" && state.context == value.context && state.context.configPath == selectedConfiguration?.path &&
+            state.savedRevision != nil && state.savedIdentity != nil && state.savedFingerprint != nil && state.catalogRevision != nil &&
+            state.savedRevision == value.configurationRevision && state.savedIdentity == value.configurationIdentity &&
+            state.savedFingerprint == value.routingFingerprint && state.catalogRevision == value.catalog.revision && value.recoveryRevision != nil
+    }
+    private func assignmentStorageIsSafe() -> Bool {
+        guard let selectedConfiguration else { return false }
+        let directory = selectedConfiguration.deletingLastPathComponent()
+        var hasEvidence = false
+        for name in [".activation.lock", "account-setup.json"] {
+            var info = stat()
+            if lstat(directory.appendingPathComponent(name).path, &info) == 0 { hasEvidence = true }
+            else if errno != ENOENT { return false }
+        }
+        guard hasEvidence else { return true }
+        do {
+            let transaction = SetupTransactionStore(configPath: selectedConfiguration)
+            guard try transaction.inspectLease() == .absent else { return false }
+            return try transaction.load().map { $0.phase == .complete } ?? true
+        } catch { return false }
+    }
+    private func readAssignmentEvidence(_ value: Inspection) async -> AssignmentState? {
+        // A temporary provider/setup lease removes editing authority. Observing
+        // it must not import another operation's lease as relaunch uncertainty.
+        assignmentStorageSafe = assignmentStorageIsSafe()
+        assignmentPortEmpty = false
+        guard let assignments = backend as? any ProjectAssignmentBackend, let context = value.context,
+              context.configPath == selectedConfiguration?.path else { return nil }
+        // An unselected stopped read supplies source/port proof for editor
+        // eligibility, including configured-only rows, without selecting a sheet.
+        let requestedProjectID = selectedAssignmentProjectID ?? (ownedRouter == nil
+            ? value.catalog.entries.first(where: { AssignmentWire.uuid($0.id) })?.id : nil)
+        do {
+            let state: AssignmentState
+            if let child = ownedRouter, child.process.isRunning, child.context == context {
+                // Pipe ownership, rather than matching HTTP health, authorizes observation.
+                state = try await assignments.readAssignment(child, projectID: requestedProjectID,
+                    operationID: pendingAssignmentOperationID)
+                guard ownedRouter === child, child.process.isRunning else { return nil }
+                assignmentChild = child
+            } else {
+                guard ownedRouter == nil, let projectID = requestedProjectID else { return nil }
+                state = try await assignments.readStoppedAssignment(context: context, projectID: projectID,
+                    operationID: pendingAssignmentOperationID)
+                guard ownedRouter == nil else { return nil }
+                assignmentChild = nil
+                assignmentPortEmpty = await assignments.probeAssignmentPort(context) == .empty
+                guard ownedRouter == nil else { return nil }
+            }
+            guard state.context == context, state.projectId == requestedProjectID else { return nil }
+            return state
+        } catch {
+            assignmentError = safe(error)
+            return nil
+        }
+    }
+    private func installAssignmentEvidence(_ state: AssignmentState?, value: Inspection) {
+        assignmentInspection = value; assignmentBaseline = state
+        if let state, let projectID = selectedAssignmentProjectID, state.projectId == projectID { selectedAssignment = state }
+        if !assignmentRequiresReconciliation {
+            assignmentStatus = state.map {
+                let runtimeMatches = ownedRouter == nil || ($0.savedRevision == $0.runningRevision &&
+                    $0.savedIdentity == $0.runningIdentity && $0.savedFingerprint == $0.runningFingerprint)
+                return assignmentEvidenceMatches($0, value: value) && runtimeMatches ? .ready : .diverged
+            } ?? .unavailable
+            if assignmentStatus == .ready { assignmentError = nil }
+            else if assignmentStatus == .diverged { assignmentError = CompanionError.assignmentConflict.rawValue }
+        }
+    }
+    private func continuity(_ pending: PendingAssignment, value: Inspection, state: AssignmentState, commit: AssignmentCommit?) -> Bool {
+        let change = pending.change
+        guard sameAssignmentChild(pending.child), state.projectId == change.projectId,
+              assignmentStorageSafe, !configurationLockRequiresResolution, uncertainSetupOperationID == nil, !backend.mutationRequiresReconciliation,
+              value.context == pending.before.context,
+              value.configuration == pending.before.configuration, value.catalog.revision == pending.before.catalog.revision,
+              value.recoveryRevision != nil, value.recoveryRevision == pending.before.recoveryRevision,
+              value.provider == pending.before.provider, assignmentProviderSafe(value), assignmentEvidenceMatches(state, value: value) else { return false }
+        let candidateRevision: String, candidateIdentity: String
+        if let commit {
+            guard commit.context == change.expectedContext, commit.operationId == change.operationId, commit.projectId == change.projectId,
+                  commit.beforeRevision == change.expectedSavedRevision, commit.beforeIdentity == change.expectedConfigurationIdentity,
+                  commit.candidateRevision == commit.savedRevision, commit.candidateIdentity == commit.savedIdentity,
+                  state.savedAssignment == commit.after,
+                  pending.child == nil || state.runningAssignment == commit.after,
+                  change.accountId.map({ commit.after.kind == "override" && commit.after.account?.id == $0 }) ?? (commit.after.kind != "override") else { return false }
+            candidateRevision = commit.candidateRevision; candidateIdentity = commit.candidateIdentity
+            if pending.child != nil {
+                guard commit.runningRevision == candidateRevision, commit.runningIdentity == candidateIdentity,
+                      commit.runningFingerprint == state.runningFingerprint else { return false }
+            }
+        } else if let intent = state.intent {
+            guard intent.operationId == change.operationId, intent.projectId == change.projectId, intent.accountId == change.accountId,
+                  intent.context == change.expectedContext, intent.beforeRevision == change.expectedSavedRevision,
+                  intent.beforeIdentity == change.expectedConfigurationIdentity else { return false }
+            candidateRevision = intent.candidateRevision; candidateIdentity = intent.candidateIdentity
+        } else {
+            // A later exact before-pair observation establishes no persisted transition.
+            candidateRevision = change.expectedSavedRevision; candidateIdentity = change.expectedConfigurationIdentity
+        }
+        guard state.savedRevision == candidateRevision, state.savedIdentity == candidateIdentity else { return false }
+        if pending.child != nil {
+            return value.provider.proxyReady == true && state.runningRevision == candidateRevision &&
+                state.runningIdentity == candidateIdentity && state.runningFingerprint == state.savedFingerprint
+        }
+        return state.runningRevision == nil && ownedRouter == nil
+    }
+    private func inspectAssignmentTransition(_ pending: PendingAssignment, commit: AssignmentCommit?, allowSettlement: Bool) async -> Bool {
+        inspectionSequence &+= 1
+        let sequence = inspectionSequence, currentGeneration = generation
+        do {
+            let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
+            let state = await readAssignmentEvidence(value)
+            guard sequence == inspectionSequence, currentGeneration == generation else { return false }
+            let verified = allowSettlement && state.map { continuity(pending, value: value, state: $0, commit: commit) } == true
+            reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == pending.confirmation)
+            installAssignmentEvidence(state, value: value)
+            if verified {
+                pendingAssignment = nil; pendingAssignmentOperationID = nil
+                assignmentRequiresReconciliation = false; assignmentStatus = .ready; assignmentError = nil
+                if assignmentEditor?.projectID == pending.change.projectId, let state {
+                    assignmentEditor = .init(projectID: pending.change.projectId, state: state, inspection: value, child: ownedRouter)
+                }
+            } else {
+                assignmentRequiresReconciliation = true
+                let diverged = state.map {
+                    $0.savedState == "conflict" || ($0.savedState == "ready" &&
+                        (!AssignmentWire.reconciles($0, change: pending.change, live: pending.child != nil) ||
+                         value.context != pending.before.context || value.recoveryRevision != pending.before.recoveryRevision ||
+                         value.provider.state != pending.before.provider.state || value.provider.recordPhase != pending.before.provider.recordPhase))
+                } ?? false
+                assignmentStatus = diverged ? .diverged : .uncertain
+                assignmentError = CompanionError.assignmentUncertain.rawValue
+            }
+            return verified
+        } catch {
+            inspectionFailed(error)
+            assignmentRequiresReconciliation = true; assignmentStatus = .uncertain
+            assignmentError = CompanionError.assignmentUncertain.rawValue
+            return false
+        }
+    }
+
     public func stop() async {
         guard begin() else { return }
         defer { finish() }
@@ -356,7 +637,7 @@ import Darwin
         let inspected: Bool
         if ownedRouter != nil { await stopOwnedChild(); inspected = false }
         else { inspected = await inspectNow() }
-        guard !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation, ownedRouter == nil else { reject(); return }
+        guard !mutationRequiresReconciliation, !backend.mutationRequiresReconciliation, !assignmentRequiresReconciliation, ownedRouter == nil else { reject(); return }
         let normalPermission = !recoveryObligation && journal.pending == nil
         guard normalPermission || (inspected && authorizeIdleDirectQuit()) else { reject(); return }
         quitRequested = true
@@ -478,7 +759,25 @@ import Darwin
         do {
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
-            reconcile(value)
+            let state = await readAssignmentEvidence(value)
+            guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
+            var verified = false
+            let priorConfirmation = pendingAssignment?.confirmation
+            if let pending = pendingAssignment, let state {
+                verified = continuity(pending, value: value, state: state, commit: nil)
+                // Exact exited-child settlement proves saved persistence only. It
+                // cannot preserve a confirmation from the previous live process.
+                if !verified, let exitedChild = pending.child, !exitedChild.process.isRunning, ownedRouter == nil, state.runningRevision == nil,
+                   assignmentEvidenceMatches(state, value: value), AssignmentWire.reconciles(state, change: pending.change, live: false) {
+                    pendingAssignment = nil; pendingAssignmentOperationID = nil
+                    assignmentRequiresReconciliation = false; assignmentError = nil
+                } else if verified {
+                    pendingAssignment = nil; pendingAssignmentOperationID = nil
+                    assignmentRequiresReconciliation = false; assignmentError = nil
+                }
+            }
+            reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == priorConfirmation)
+            installAssignmentEvidence(state, value: value)
             // Mode reads share the disk slot, but recovery actions retain their own evidence authority.
             await reconcileRoutingMode(generation: requestGeneration, sequence: requestSequence, query: !busy || queryRoutingMode)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
@@ -492,6 +791,7 @@ import Darwin
     private func inspectionFailed(_ failure: Error) {
         idleQuitAuthorized = false
         revision = nil
+        assignmentInspection = nil; assignmentBaseline = nil; assignmentPortEmpty = false; assignmentStatus = assignmentRequiresReconciliation ? .uncertain : .unavailable
         if let value = inspection {
             inspection = Inspection(configuration: .init(state: "unavailable"), context: value.context,
                 provider: .init(state: "unavailable", recoveryRequired: recoveryObligation, proxyReady: nil, recordPhase: "unavailable"),
@@ -501,17 +801,25 @@ import Darwin
         discardRoutingMode()
         error = safe(failure)
     }
-    private func reconcile(_ value: Inspection) {
+    private func reconcile(_ value: Inspection, preservingAssignmentConfirmation: Bool = false) {
         if revision != value.revision || inspection?.configuration != value.configuration ||
             inspection?.context != value.context || inspection?.provider != value.provider {
             idleQuitAuthorized = false
         }
-        let changed = revision != nil && revision != value.revision
+        let compoundChanged = assignmentInspection.map { previous in
+            (previous.configurationRevision != nil && previous.configurationRevision != value.configurationRevision) ||
+            (previous.configurationIdentity != nil && previous.configurationIdentity != value.configurationIdentity) ||
+            (previous.recoveryRevision != nil && previous.recoveryRevision != value.recoveryRevision)
+        } ?? false
+        let changed = (revision != nil && revision != value.revision) || compoundChanged
         let readinessLost = inspection?.provider.proxyReady == true && value.provider.proxyReady != true
         if stoppingID != nil, readinessLost { deferredReadinessLoss = true }
         revision = value.revision
-        var presentation = value; presentation.revision = nil; inspection = presentation
-        if changed || (readinessLost && stoppingID == nil) || matchingContext == nil { invalidateConfirmation() }
+        var presentation = value
+        presentation.revision = nil; presentation.configurationRevision = nil; presentation.configurationIdentity = nil
+        presentation.routingFingerprint = nil; presentation.recoveryRevision = nil; presentation.catalog.revision = nil
+        inspection = presentation
+        if (!preservingAssignmentConfirmation && (changed || (readinessLost && stoppingID == nil))) || matchingContext == nil { invalidateConfirmation() }
         if let context = value.context, value.configuration.state == "valid",
            value.provider.recoveryRequired || ["router", "conflict", "unavailable"].contains(value.provider.state) || ["prepared", "active"].contains(value.provider.recordPhase) {
             // Imported recovery is bound once; later mapping/home edits cannot retarget it.
@@ -538,6 +846,7 @@ import Darwin
         guard let child = ownedRouter, child.id == id else { return }
         idleQuitAuthorized = false
         generation &+= 1; ownedRouter = nil; directOnlyChild = nil
+        assignmentBaseline = nil; assignmentChild = nil; assignmentPortEmpty = false
         projectRoutingStatus = .notRunning; routingModeError = nil
         if stoppingID == id { return }
         inspection?.provider.proxyReady = nil

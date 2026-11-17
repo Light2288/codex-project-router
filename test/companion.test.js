@@ -55,7 +55,7 @@ test("inspection projects each mode without secrets", async t => {
     assert.match(result.catalog.revision, /^[a-f0-9]{64}$/);
     assert.deepEqual(result.catalog, { state: "ready", revision: result.catalog.revision, entries: expectedEntries(credential) });
     assert.match(result.revision, /^[a-f0-9]{64}$/);
-    assert.deepEqual(Object.keys(result).sort(), ["catalog", "configuration", "context", "provider", "revision"]);
+    assert.deepEqual(Object.keys(result).sort(), ["catalog", "configuration", "configurationIdentity", "configurationRevision", "context", "provider", "recoveryRevision", "revision", "routingFingerprint"]);
     assert.doesNotMatch(JSON.stringify(result), secret);
     assert.deepEqual(await Promise.all([readFile(f.configPath), readFile(f.providerPath), readFile(f.statePath)]), before);
   }
@@ -241,7 +241,7 @@ test("account inspection summarizes default and exact assignments without privat
   f.config.accountRouting = accountRouting();
   await f.saveConfig();
   const result = await inspectCompanion({ configPath: f.configPath });
-  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" } });
+  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" }, accounts: [{ id: A1, displayName: "Default account" }, { id: A2, displayName: "Project account" }] });
   assert.deepEqual(result.catalog.entries, [
     { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped", assignmentKind: "override", account: { id: A2, displayName: "Project account" } },
     { id: P2, name: "Beta", routeAlias: "route-b", routeState: "mapped", assignmentKind: "legacy_inherited", account: { id: A1, displayName: "Default account" } },
@@ -351,4 +351,53 @@ test("catalog revision binds validated identities and names, excluding routing a
   delete f.state["local-projects"][P2];
   await f.saveState();
   assert.notEqual((await inspectCompanion({ configPath: f.configPath })).catalog.revision, renamed.revision);
+});
+
+
+test("inspection refuses mixed assignment source and catalog observations", async t => {
+  const f = await setup(t);
+  f.config.schemaVersion = 2; f.config.accountRouting = accountRouting(); await f.saveConfig();
+  const originalRead = fs.readFile;
+  let changed = false;
+  t.mock.method(fs, "readFile", async (path, ...args) => {
+    if (!changed && String(path) === f.statePath) {
+      changed = true;
+      f.config.accountRouting.accounts[A2].displayName = "Changed account";
+      await f.saveConfig();
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await inspectCompanion({ configPath: f.configPath });
+    assert.equal(changed, true);
+    assert.equal(result.provider.state, "unavailable");
+    assert.equal(result.configurationRevision, undefined);
+    assert.equal(result.configurationIdentity, undefined);
+    assert.equal(result.revision, undefined);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
+
+test("inspection rejects same-byte source replacement between catalog and provider", async t => {
+  const f = await setup(t);
+  const originalRead = fs.readFile;
+  let replaced = false;
+  t.mock.method(fs, "readFile", async (path, ...args) => {
+    if (!replaced && String(path) === f.statePath) {
+      replaced = true;
+      const bytes = await originalRead(f.configPath);
+      const replacement = f.configPath + ".replacement";
+      await writeFile(replacement, bytes, { mode: 0o600 });
+      await fs.rename(replacement, f.configPath);
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await inspectCompanion({ configPath: f.configPath });
+    assert.equal(replaced, true);
+    assert.equal(result.provider.state, "unavailable");
+    assert.equal(result.configurationIdentity, undefined);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });

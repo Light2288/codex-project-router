@@ -12,7 +12,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import http from "node:http";
 import { parse } from "smol-toml";
-import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, configFingerprint, operationalFingerprint } from "./config.js";
+import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, configFingerprint, operationalFingerprint, readRouterConfigurationSource } from "./config.js";
 import { RouterError } from "./errors.js";
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 const proxyUrl = (cfg) => `http://127.0.0.1:${cfg.listenPort}/v1`;
@@ -333,6 +333,18 @@ export async function inspectActivation(configPath, { probeProxy = true } = {}) 
       p = inspectProviderConfiguration(file.text, c.cfg),
       existing = await readRecord(c.recordPath, c);
     if (operationalFingerprint(inspection.config) !== operationalFingerprint(c.cfg)) throw new RouterError("ACTIVATION_CONFLICT");
+    // Strict assignment evidence is optional; legacy recovery/browsing keeps its
+    // existing source contract when the stricter descriptor read is unavailable.
+    let source;
+    try {
+      source = await readRouterConfigurationSource(c.configPath);
+    } catch {
+      // Missing strict metadata grants no editing authority.
+    }
+    if (source && !isDeepStrictEqual(source.config, inspection.config)) throw new RouterError("ACTIVATION_CONFLICT");
+    const fileIdentity = info => [info.dev, info.ino, info.uid, info.mode, info.nlink, info.size, info.mtimeMs, info.ctimeMs];
+    const providerIdentity = fileIdentity(await lstat(c.codexPath));
+    const recordIdentity = existing ? fileIdentity(await lstat(c.recordPath)) : null;
     const routingReady = inspection.setupState === "ready" || inspection.setupState === "migration_required";
     let proxyReady = false;
     if (routingReady && probeProxy) {
@@ -350,7 +362,25 @@ export async function inspectActivation(configPath, { probeProxy = true } = {}) 
           ? "direct"
           : "conflict";
     const recordPhase = existing?.record.phase ?? "none";
+    const latestProvider = await ownedFile(c.codexPath), latestRecord = await readRecord(c.recordPath, c);
+    if (latestProvider.text !== file.text || latestRecord?.text !== existing?.text ||
+        !isDeepStrictEqual(fileIdentity(await lstat(c.codexPath)), providerIdentity) ||
+        !isDeepStrictEqual(latestRecord ? fileIdentity(await lstat(c.recordPath)) : null, recordIdentity))
+      throw new RouterError("ACTIVATION_CONFLICT");
+    if (source) {
+      const latest = await readRouterConfigurationSource(c.configPath);
+      if (latest.configurationRevision !== source.configurationRevision || latest.configurationIdentity !== source.configurationIdentity)
+        throw new RouterError("ACTIVATION_CONFLICT");
+    }
     return {
+      ...(source ? { configurationRevision: source.configurationRevision, configurationIdentity: source.configurationIdentity,
+        routingFingerprint: routingReady ? configFingerprint(inspection.config) : undefined } : {}),
+      recoveryRevision: digest(JSON.stringify([
+        [c.configPath, c.cfg.codexHome, c.cfg.providerId, c.cfg.listenPort], state,
+        providerIdentity, recordIdentity,
+        existing ? [existing.record.routerConfigPath, existing.record.codexConfigPath, existing.record.providerId,
+          existing.record.backupFile, recordPhase] : null,
+      ])),
       context: {
         configPath: c.configPath,
         codexHome: c.cfg.codexHome,

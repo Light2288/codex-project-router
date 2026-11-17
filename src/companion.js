@@ -1,7 +1,7 @@
 import { readFile, realpath, lstat, readdir } from "node:fs/promises";
 import { isAbsolute, join, dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration } from "./config.js";
+import { loadRouterConfig, loadRecoveryConfig, inspectRouterConfiguration, readRouterConfigurationSource } from "./config.js";
 import { inspectActivation, inspectProviderConfiguration, activate, rollback } from "./activation.js";
 import { inspectProjectCatalog } from "./project-catalog.js";
 import { RouterError } from "./errors.js";
@@ -64,10 +64,20 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
     return { configuration: { state }, provider: unavailable(!(absent && await missingProviderSettled(configPath, browseHome))),
       catalog: absent ? await inspectProjectCatalog(browseHome) : { state: "unavailable", entries: [] } };
   }
+  let source;
+  try {
+    source = await readRouterConfigurationSource(configPath);
+    // Account/catalog summaries must be projected from the descriptor-bound source.
+    inspection = source; cfg = source.config;
+  } catch {
+    // Optional editing authority must not tighten legacy catalog browsing.
+  }
   const result = {
     configuration: { state: "valid", path: configPath,
       mode: cfg.schemaVersion === 2 ? "accounts" : cfg.credentialRouting ? "credential" : "legacy",
       setupState: inspection.setupState,
+      ...(cfg.schemaVersion === 2 && cfg.accountRouting ? { accounts: Object.entries(cfg.accountRouting.accounts)
+        .sort(([a], [b]) => a.localeCompare(b)).map(([id, account]) => ({ id, displayName: account.displayName })) } : {}),
       ...(accountSummary(cfg.accountRouting, cfg.accountRouting?.defaultAccountId)
         ? { defaultAccount: accountSummary(cfg.accountRouting, cfg.accountRouting.defaultAccountId) } : {}) },
     context: activationContext(configPath, cfg),
@@ -78,6 +88,14 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
     const inspection = await inspectActivation(configPath);
     // A concurrent context edit cannot produce a mixed-context projection.
     if (!isDeepStrictEqual(inspection.context, result.context)) return result;
+    if (source && (source.configurationRevision !== inspection.configurationRevision ||
+        source.configurationIdentity !== inspection.configurationIdentity)) return result;
+    if (source) {
+      result.configurationRevision = inspection.configurationRevision;
+      result.configurationIdentity = inspection.configurationIdentity;
+      result.routingFingerprint = inspection.routingFingerprint;
+    }
+    result.recoveryRevision = inspection.recoveryRevision;
     result.revision = inspection.revision;
     result.provider = { ...inspection.status, state: inspection.status.state === "active" ? "router" : inspection.status.state, recordPhase: inspection.recordPhase };
   } catch {

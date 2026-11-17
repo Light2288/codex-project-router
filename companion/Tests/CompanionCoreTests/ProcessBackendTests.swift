@@ -493,6 +493,18 @@ import Darwin
         _ = try await backend.stop(old)
     }
 
+    func testAssignmentReadRetainsOwnedPipeAuthorityAfterInspectionFailure() async throws {
+        let child = try await startFixture()
+        try setMode("malformed")
+        do { _ = try await backend.inspect(configPath: config, browseHome: root); XCTFail("Invalid helper observation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .protocolFailure) }
+        let state = try await backend.readAssignment(child, projectID: AssignmentFixtures.project, operationID: nil)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.token)
+        XCTAssertTrue(child.process.isRunning)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        _ = try await backend.stop(child)
+    }
+
     func testStoppedHelperMustExitBeforeReconciliation() async throws {
         let inspection = try await backend.inspect(configPath: config, browseHome: root)
         let context = try XCTUnwrap(inspection.context), change = AssignmentFixtures.change(context: context)
