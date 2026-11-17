@@ -1828,6 +1828,34 @@ import XCTest
         XCTAssertNil(controller.pendingAssignmentOperationID)
         XCTAssertEqual(backend.assignmentChanges.count, 1)
     }
+    func testStoppedRefreshRetainsEditorBaselineAndSaveRechecksPortAfterQueuedObservation() async {
+        // Presentation continuity cannot rebase an explicit editor or let a queued save reuse a prior empty-port proof.
+        let project = enableAssignments()
+        let controller = makeController(); await controller.refresh()
+        _ = await controller.loadAssignment(projectID: project.id)
+        backend.snapshot.configurationRevision = String(repeating: "8", count: 64)
+        backend.snapshot.configurationIdentity = String(repeating: "9", count: 64)
+        await controller.refresh()
+        await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID)
+        XCTAssertTrue(backend.assignmentChanges.isEmpty)
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
+        _ = await controller.loadAssignment(projectID: project.id)
+        let barrier = Barrier<Void>(); backend.assignmentReadBarrier = barrier
+        let refresh = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        XCTAssertTrue(controller.canEditAssignment(project))
+        let save = Task { await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID) }
+        await waitUntil { controller.busy }
+        XCTAssertTrue(backend.assignmentChanges.isEmpty)
+        backend.assignmentPort = .occupied
+        barrier.release(())
+        await refresh.value
+        await save.value
+        XCTAssertTrue(backend.assignmentChanges.isEmpty)
+        XCTAssertNil(controller.pendingAssignmentOperationID)
+        XCTAssertFalse(controller.canEditAssignment(project))
+        XCTAssertTrue(controller.canRestoreDirect)
+    }
     func testBackgroundPollCannotRebaseExplicitEditorSourceOrAccounts() async {
         let project = enableAssignments()
         let controller = await started()
@@ -1989,6 +2017,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState {
         guard assignmentReady else { throw CompanionError.assignmentUnavailable }
         assignmentReads.append((nil, projectID, operationID))
+        if let barrier = assignmentReadBarrier { assignmentReadBarrier = nil; await barrier.wait() }
         return assignmentState(projectID: projectID, live: false)
     }
     func probeAssignmentPort(_ context: ActivationContext) async -> StopOutcome.PortState { assignmentPort }

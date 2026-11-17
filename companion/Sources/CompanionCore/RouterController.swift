@@ -505,11 +505,12 @@ import Darwin
             return try transaction.load().map { $0.phase == .complete } ?? true
         } catch { return false }
     }
-    private func readAssignmentEvidence(_ value: Inspection) async -> AssignmentState? {
-        // A temporary provider/setup lease removes editing authority. Observing
-        // it must not import another operation's lease as relaunch uncertainty.
-        assignmentStorageSafe = assignmentStorageIsSafe()
-        assignmentPortEmpty = false
+    private typealias AssignmentEvidence = (state: AssignmentState, child: OwnedRouter?, portEmpty: Bool, storageSafe: Bool)
+    private func readAssignmentEvidence(_ value: Inspection) async -> AssignmentEvidence? {
+        // Keep the last coherent proof while observing. Revoke a known unsafe
+        // lease immediately, but publish new authority only with the complete read.
+        let storageSafe = assignmentStorageIsSafe()
+        if !storageSafe { assignmentStorageSafe = false }
         guard let assignments = backend as? any ProjectAssignmentBackend, let context = value.context,
               context.configPath == selectedConfiguration?.path else { return nil }
         // An unselected stopped read supplies source/port proof for editor
@@ -518,30 +519,37 @@ import Darwin
             ? value.catalog.entries.first(where: { AssignmentWire.uuid($0.id) })?.id : nil)
         do {
             let state: AssignmentState
+            let observedChild: OwnedRouter?
+            let portEmpty: Bool
             if let child = ownedRouter, child.process.isRunning, child.context == context {
                 // Pipe ownership, rather than matching HTTP health, authorizes observation.
                 state = try await assignments.readAssignment(child, projectID: requestedProjectID,
                     operationID: pendingAssignmentOperationID)
                 guard ownedRouter === child, child.process.isRunning else { return nil }
-                assignmentChild = child
+                observedChild = child
+                portEmpty = false
             } else {
                 guard ownedRouter == nil, let projectID = requestedProjectID else { return nil }
                 state = try await assignments.readStoppedAssignment(context: context, projectID: projectID,
                     operationID: pendingAssignmentOperationID)
                 guard ownedRouter == nil else { return nil }
-                assignmentChild = nil
-                assignmentPortEmpty = await assignments.probeAssignmentPort(context) == .empty
+                observedChild = nil
+                portEmpty = await assignments.probeAssignmentPort(context) == .empty
                 guard ownedRouter == nil else { return nil }
             }
             guard state.context == context, state.projectId == requestedProjectID else { return nil }
-            return state
+            return (state, observedChild, portEmpty, storageSafe)
         } catch {
             assignmentError = safe(error)
             return nil
         }
     }
-    private func installAssignmentEvidence(_ state: AssignmentState?, value: Inspection) {
+    private func installAssignmentEvidence(_ evidence: AssignmentEvidence?, value: Inspection) {
+        let state = evidence?.state
         assignmentInspection = value; assignmentBaseline = state
+        assignmentChild = evidence?.child
+        assignmentPortEmpty = evidence?.portEmpty ?? false
+        assignmentStorageSafe = evidence?.storageSafe ?? false
         if let state, let projectID = selectedAssignmentProjectID, state.projectId == projectID { selectedAssignment = state }
         if !assignmentRequiresReconciliation {
             assignmentStatus = state.map {
@@ -553,10 +561,10 @@ import Darwin
             else if assignmentStatus == .diverged { assignmentError = CompanionError.assignmentConflict.rawValue }
         }
     }
-    private func continuity(_ pending: PendingAssignment, value: Inspection, state: AssignmentState, commit: AssignmentCommit?) -> Bool {
+    private func continuity(_ pending: PendingAssignment, value: Inspection, state: AssignmentState, storageSafe: Bool, commit: AssignmentCommit?) -> Bool {
         let change = pending.change
         guard sameAssignmentChild(pending.child), state.projectId == change.projectId,
-              assignmentStorageSafe, !configurationLockRequiresResolution, uncertainSetupOperationID == nil, !backend.mutationRequiresReconciliation,
+              storageSafe, !configurationLockRequiresResolution, uncertainSetupOperationID == nil, !backend.mutationRequiresReconciliation,
               value.context == pending.before.context,
               value.configuration == pending.before.configuration, value.catalog.revision == pending.before.catalog.revision,
               value.recoveryRevision != nil, value.recoveryRevision == pending.before.recoveryRevision,
@@ -602,11 +610,12 @@ import Darwin
         let sequence = inspectionSequence, currentGeneration = generation
         do {
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
-            let state = await readAssignmentEvidence(value)
+            let evidence = await readAssignmentEvidence(value)
             guard sequence == inspectionSequence, currentGeneration == generation else { return false }
-            let verified = allowSettlement && state.map { continuity(pending, value: value, state: $0, commit: commit) } == true
+            let state = evidence?.state
+            let verified = allowSettlement && evidence.map { continuity(pending, value: value, state: $0.state, storageSafe: $0.storageSafe, commit: commit) } == true
             reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == pending.confirmation)
-            installAssignmentEvidence(state, value: value)
+            installAssignmentEvidence(evidence, value: value)
             if verified {
                 pendingAssignment = nil; pendingAssignmentOperationID = nil
                 assignmentRequiresReconciliation = false; assignmentStatus = .ready; assignmentError = nil
@@ -761,12 +770,13 @@ import Darwin
         do {
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
-            let state = await readAssignmentEvidence(value)
+            let evidence = await readAssignmentEvidence(value)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
+            let state = evidence?.state
             var verified = false
             let priorConfirmation = pendingAssignment?.confirmation
             if let pending = pendingAssignment, let state {
-                verified = continuity(pending, value: value, state: state, commit: nil)
+                verified = continuity(pending, value: value, state: state, storageSafe: evidence?.storageSafe == true, commit: nil)
                 // Exact exited-child settlement proves saved persistence only. It
                 // cannot preserve a confirmation from the previous live process.
                 if !verified, let exitedChild = pending.child, !exitedChild.process.isRunning, ownedRouter == nil, state.runningRevision == nil,
@@ -779,7 +789,7 @@ import Darwin
                 }
             }
             reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == priorConfirmation)
-            installAssignmentEvidence(state, value: value)
+            installAssignmentEvidence(evidence, value: value)
             if let pending = pendingAssignment, assignmentRequiresReconciliation {
                 assignmentStatus = pendingAssignmentDiverged(pending, state: state, value: value) ? .diverged : .uncertain
             }

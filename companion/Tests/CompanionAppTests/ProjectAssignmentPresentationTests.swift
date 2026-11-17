@@ -19,6 +19,89 @@ import XCTest
         _ = await controller.loadAssignment(projectID: project.id)
         try await body(controller, backend, project)
     }
+    func testHealthyStoppedRefreshKeepsEditorPresentationThroughReadAndPortProbe() async throws {
+        // Clearing prior port proof before a healthy observation completes inserts a sheet-height-changing reason.
+        try await withEditor(live: false) { controller, backend, project in
+            let editor = AssignmentEditor()
+            await editor.load(controller: controller, project: project)
+            editor.selection = .account(backend.work.id)
+            await editor.save(controller: controller, project: project)
+            let saved = controller.selectedAssignment
+            for _ in 0..<2 {
+                let read = AssignmentDisplayBarrier(), probe = AssignmentDisplayBarrier()
+                backend.readBarrier = read; backend.portBarrier = probe
+                let refresh = Task { await controller.refresh() }
+                await read.waitUntilEntered()
+                var display = AssignmentPresentation(controller: controller, project: project, selection: editor.selection)
+                XCTAssertNil(display.disabledReason)
+                XCTAssertTrue(display.canSave)
+                XCTAssertEqual(display.savedText, "Saved: Override — Shared name")
+                XCTAssertEqual(controller.selectedAssignment, saved)
+                read.release()
+                await probe.waitUntilEntered()
+                display = AssignmentPresentation(controller: controller, project: project, selection: editor.selection)
+                XCTAssertNil(display.disabledReason)
+                XCTAssertTrue(display.canSave)
+                XCTAssertNil(controller.selectedAssignment?.runningRevision)
+                probe.release(); await refresh.value
+                XCTAssertNil(AssignmentPresentation(controller: controller, project: project, selection: editor.selection).disabledReason)
+                XCTAssertEqual(editor.selection, .account(backend.work.id))
+            }
+            XCTAssertEqual(backend.changes.count, 1)
+        }
+    }
+    func testStoppedRefreshFailureAndOccupiedPortBlockEditorUntilCompleteHealthyProof() async throws {
+        // Retained presentation during a pending read must not hide a completed failure or grant partial recovery proof.
+        try await withEditor(live: false) { controller, backend, project in
+            let read = AssignmentDisplayBarrier()
+            backend.readBarrier = read
+            let refresh = Task { await controller.refresh() }
+            await read.waitUntilEntered()
+            backend.readError = .assignmentUnavailable
+            read.release(); await refresh.value
+            var display = AssignmentPresentation(controller: controller, project: project, selection: .useDefault)
+            XCTAssertFalse(display.canSave)
+            XCTAssertNotNil(display.disabledReason)
+            XCTAssertNotNil(controller.assignmentError)
+            await controller.saveAssignment(projectID: project.id, accountID: nil)
+            XCTAssertTrue(backend.changes.isEmpty)
+            backend.readError = nil; backend.port = .occupied
+            await controller.refresh()
+            display = AssignmentPresentation(controller: controller, project: project, selection: .useDefault)
+            XCTAssertFalse(display.canSave)
+            XCTAssertNotNil(display.disabledReason)
+            await controller.saveAssignment(projectID: project.id, accountID: nil)
+            XCTAssertTrue(backend.changes.isEmpty)
+            backend.port = .empty
+            let probe = AssignmentDisplayBarrier(); backend.portBarrier = probe
+            let recovering = Task { await controller.refresh() }
+            await probe.waitUntilEntered()
+            XCTAssertFalse(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            probe.release(); await recovering.value
+            XCTAssertTrue(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            XCTAssertTrue(backend.changes.isEmpty)
+        }
+    }
+    func testStoppedRefreshDoesNotRestoreAuthorityFromPartialStorageCheck() async throws {
+        // Removing a known lease must not combine new storage safety with an old read and port proof.
+        try await withEditor(live: false) { controller, backend, project in
+            let lease = URL(fileURLWithPath: backend.context.configPath).deletingLastPathComponent().appendingPathComponent(".activation.lock")
+            try Data("synthetic active lease".utf8).write(to: lease)
+            await controller.refresh()
+            XCTAssertFalse(controller.canEditAssignment(project))
+            try FileManager.default.removeItem(at: lease)
+            let read = AssignmentDisplayBarrier(), probe = AssignmentDisplayBarrier()
+            backend.readBarrier = read; backend.portBarrier = probe
+            let refresh = Task { await controller.refresh() }
+            await read.waitUntilEntered()
+            XCTAssertFalse(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            read.release(); await probe.waitUntilEntered()
+            XCTAssertFalse(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            probe.release(); await refresh.value
+            XCTAssertTrue(controller.canEditAssignment(project))
+            XCTAssertTrue(backend.changes.isEmpty)
+        }
+    }
     func testAssignSwitchAndUseDefaultUseStableIDs() async throws {
         // Duplicate display names must not turn a selection into a different account or project.
         try await withEditor { controller, backend, project in
@@ -182,6 +265,9 @@ import XCTest
     var intent: AssignmentIntent?
     var mode = ProjectRoutingMode.off
     var readError: CompanionError?
+    var readBarrier: AssignmentDisplayBarrier?
+    var portBarrier: AssignmentDisplayBarrier?
+    var port = StopOutcome.PortState.empty
     var saveError: CompanionError?
     var changes: [AssignmentChange] = []
     var starts = 0
@@ -214,8 +300,14 @@ import XCTest
             runningAssignment: live && projectID != nil ? runningSummary : nil, intent: intent, lastAttempt: nil)
     }
     func readAssignment(_ child: OwnedRouter, projectID: String?, operationID: String?) async throws -> AssignmentState { try state(projectID: projectID, live: true) }
-    func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState { try state(projectID: projectID, live: false) }
-    func probeAssignmentPort(_ context: ActivationContext) async -> StopOutcome.PortState { .empty }
+    func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState {
+        if let barrier = readBarrier { readBarrier = nil; await barrier.enter() }
+        return try state(projectID: projectID, live: false)
+    }
+    func probeAssignmentPort(_ context: ActivationContext) async -> StopOutcome.PortState {
+        if let barrier = portBarrier { portBarrier = nil; await barrier.enter() }
+        return port
+    }
     func applyAssignment(_ change: AssignmentChange, to child: OwnedRouter) async throws -> AssignmentCommit { try await save(change, live: true) }
     func saveStoppedAssignment(_ change: AssignmentChange) async throws -> AssignmentCommit { try await save(change, live: false) }
     private func save(_ change: AssignmentChange, live: Bool) async throws -> AssignmentCommit {
@@ -247,3 +339,16 @@ import XCTest
     func releaseSave() { saveContinuation?.resume(); saveContinuation = nil; holdSave = false }
 }
 private final class AssignmentDisplayProcess: Process, @unchecked Sendable { override var isRunning: Bool { true } }
+
+@MainActor private final class AssignmentDisplayBarrier {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var entered: CheckedContinuation<Void, Never>?
+    private var isEntered = false
+    func enter() async {
+        await withCheckedContinuation { continuation = $0; isEntered = true; entered?.resume(); entered = nil }
+    }
+    func waitUntilEntered() async {
+        if !isEntered { await withCheckedContinuation { entered = $0 } }
+    }
+    func release() { continuation?.resume(); continuation = nil }
+}
