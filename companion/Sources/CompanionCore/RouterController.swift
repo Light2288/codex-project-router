@@ -532,7 +532,12 @@ import Darwin
                 guard ownedRouter == nil, let projectID = requestedProjectID else { return nil }
                 state = try await assignments.readStoppedAssignment(context: context, projectID: projectID,
                     operationID: pendingAssignmentOperationID)
-                guard ownedRouter == nil else { return nil }
+                guard ownedRouter == nil, state.context == context, state.projectId == requestedProjectID else { return nil }
+                if state.savedState != "ready" {
+                    // Negative saved evidence revokes the prior proof before a delayed port probe.
+                    assignmentBaseline = state
+                    if selectedAssignmentProjectID == projectID { selectedAssignment = state }
+                }
                 observedChild = nil
                 portEmpty = await assignments.probeAssignmentPort(context) == .empty
                 guard ownedRouter == nil else { return nil }

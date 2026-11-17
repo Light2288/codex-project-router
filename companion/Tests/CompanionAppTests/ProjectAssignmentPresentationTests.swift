@@ -82,6 +82,46 @@ import XCTest
             XCTAssertTrue(backend.changes.isEmpty)
         }
     }
+    func testUnavailableStoppedReadRevokesEditorBeforePortProbeCompletes() async throws {
+        try await assertNegativeStoppedReadRevokesBeforePortProbe(savedState: "unavailable")
+    }
+    func testConflictingStoppedReadRevokesEditorBeforePortProbeCompletes() async throws {
+        try await assertNegativeStoppedReadRevokesBeforePortProbe(savedState: "conflict")
+    }
+    private func assertNegativeStoppedReadRevokesBeforePortProbe(savedState: String) async throws {
+        // A returned negative state is already evidence; a delayed port observation cannot leave Save available.
+        try await withEditor(live: false) { controller, backend, project in
+            XCTAssertTrue(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            backend.returnedSavedState = savedState
+            let negative = try backend.state(projectID: project.id, live: false)
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(negative))
+            XCTAssertNotNil(AssignmentWire.state(object, context: backend.context, projectID: project.id, operationID: nil, live: false))
+            let probe = AssignmentDisplayBarrier(); backend.portBarrier = probe
+            let refresh = Task { await controller.refresh() }
+            await probe.waitUntilEntered()
+            let display = AssignmentPresentation(controller: controller, project: project, selection: .useDefault)
+            XCTAssertFalse(controller.canEditAssignment(project))
+            XCTAssertFalse(display.canSave)
+            XCTAssertNotNil(display.disabledReason)
+            XCTAssertEqual(display.savedText, "Saved assignment unavailable — refresh to check")
+            XCTAssertEqual(controller.selectedAssignment?.savedState, savedState)
+            XCTAssertTrue(backend.changes.isEmpty)
+            probe.release(); await refresh.value
+            await controller.saveAssignment(projectID: project.id, accountID: nil)
+            XCTAssertTrue(backend.changes.isEmpty)
+            backend.returnedSavedState = "ready"
+            let read = AssignmentDisplayBarrier(), healthyProbe = AssignmentDisplayBarrier()
+            backend.readBarrier = read; backend.portBarrier = healthyProbe
+            let recovering = Task { await controller.refresh() }
+            await read.waitUntilEntered()
+            XCTAssertFalse(controller.canEditAssignment(project))
+            read.release(); await healthyProbe.waitUntilEntered()
+            XCTAssertFalse(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            healthyProbe.release(); await recovering.value
+            XCTAssertTrue(AssignmentPresentation(controller: controller, project: project, selection: .useDefault).canSave)
+            XCTAssertTrue(backend.changes.isEmpty)
+        }
+    }
     func testStoppedRefreshDoesNotRestoreAuthorityFromPartialStorageCheck() async throws {
         // Removing a known lease must not combine new storage safety with an old read and port proof.
         try await withEditor(live: false) { controller, backend, project in
@@ -265,6 +305,7 @@ import XCTest
     var intent: AssignmentIntent?
     var mode = ProjectRoutingMode.off
     var readError: CompanionError?
+    var returnedSavedState = "ready"
     var readBarrier: AssignmentDisplayBarrier?
     var portBarrier: AssignmentDisplayBarrier?
     var port = StopOutcome.PortState.empty
@@ -293,11 +334,12 @@ import XCTest
     func stop(_ child: OwnedRouter) async throws -> StopOutcome { throw CompanionError.unownedChild }
     func state(projectID: String?, live: Bool) throws -> AssignmentState {
         if let readError { throw readError }
-        return .init(context: context, savedState: "ready", savedRevision: snapshot.configurationRevision, savedIdentity: snapshot.configurationIdentity,
-            savedFingerprint: snapshot.routingFingerprint, catalogRevision: snapshot.catalog.revision, runningRevision: live ? runningRevision : nil,
+        let ready = returnedSavedState == "ready"
+        return .init(context: context, savedState: returnedSavedState, savedRevision: ready ? snapshot.configurationRevision : nil, savedIdentity: ready ? snapshot.configurationIdentity : nil,
+            savedFingerprint: ready ? snapshot.routingFingerprint : nil, catalogRevision: ready ? snapshot.catalog.revision : nil, runningRevision: live ? runningRevision : nil,
             runningIdentity: live ? runningIdentity : nil, runningFingerprint: live ? runningFingerprint : nil,
-            mode: live ? mode : nil, projectId: projectID, savedAssignment: projectID == nil ? nil : savedSummary,
-            runningAssignment: live && projectID != nil ? runningSummary : nil, intent: intent, lastAttempt: nil)
+            mode: live ? mode : nil, projectId: projectID, savedAssignment: ready && projectID != nil ? savedSummary : nil,
+            runningAssignment: live && projectID != nil ? runningSummary : nil, intent: ready ? intent : nil, lastAttempt: nil)
     }
     func readAssignment(_ child: OwnedRouter, projectID: String?, operationID: String?) async throws -> AssignmentState { try state(projectID: projectID, live: true) }
     func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState {
