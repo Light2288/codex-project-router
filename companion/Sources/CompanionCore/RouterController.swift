@@ -415,12 +415,15 @@ import Darwin
         }
         let displayed = editor?.state ?? currentState
         let displayedInspection = editor?.inspection ?? currentInspection
+        let child = ownedRouter
         guard begin() else { return }
+        let requestGeneration = generation
         defer { finish() }
         await acquireInspectionSlot()
         defer { releaseInspectionSlot() }
         selectedAssignmentProjectID = projectID
-        guard await inspectInSlot(queryRoutingMode: false), let value = assignmentInspection, let state = assignmentBaseline,
+        guard await inspectInSlot(queryRoutingMode: false), requestGeneration == generation, sameAssignmentChild(child),
+              let value = assignmentInspection, let state = assignmentBaseline,
               displayed.context == state.context, displayed.savedRevision == state.savedRevision, displayed.savedIdentity == state.savedIdentity,
               displayed.catalogRevision == state.catalogRevision, displayedInspection.recoveryRevision == value.recoveryRevision,
               displayedInspection.configuration == value.configuration,
@@ -430,7 +433,6 @@ import Darwin
               let catalogRevision = state.catalogRevision, let assignments = backend as? any ProjectAssignmentBackend else {
             assignmentError = CompanionError.assignmentConflict.rawValue; return
         }
-        let child = ownedRouter
         if let child {
             guard assignmentChild === child, child.process.isRunning, value.provider.proxyReady == true,
                   state.savedRevision == state.runningRevision, state.savedIdentity == state.runningIdentity,
@@ -445,7 +447,6 @@ import Darwin
             expectedCatalogRevision: catalogRevision, operationId: UUID().uuidString, projectId: projectID, accountId: accountID)
         let pending = PendingAssignment(change: change, before: value, child: child, confirmation: desktopConfirmation)
         pendingAssignment = pending; pendingAssignmentOperationID = change.operationId
-        let requestGeneration = generation
         do {
             let commit: AssignmentCommit
             if let child { commit = try await assignments.applyAssignment(change, to: child) }

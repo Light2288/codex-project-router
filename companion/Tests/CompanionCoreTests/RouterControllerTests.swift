@@ -1822,6 +1822,49 @@ import XCTest
         XCTAssertTrue(backend.assignmentChanges.isEmpty)
         XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
     }
+    func testQueuedAssignmentSaveCannotSwitchToStoppedAfterExplicitEditorChildExits() async {
+        await queuedAssignmentSave(loadEditor: true, exitChild: true)
+    }
+    func testQueuedAssignmentSaveCannotSwitchToStoppedWithoutExplicitEditor() async {
+        await queuedAssignmentSave(loadEditor: false, exitChild: true)
+    }
+    func testQueuedAssignmentSaveKeepsLivePathForUnchangedChild() async {
+        await queuedAssignmentSave(loadEditor: true, exitChild: false)
+    }
+    private func queuedAssignmentSave(loadEditor: Bool, exitChild: Bool) async {
+        let project = enableAssignments()
+        let controller = await started()
+        if loadEditor { _ = await controller.loadAssignment(projectID: project.id) }
+        let child = controller.ownedRouter
+        XCTAssertEqual(controller.assignmentActionTitle, "Save and apply")
+        let barrier = Barrier<Inspection>(); backend.inspectBarrier = barrier
+        let refresh = Task { await controller.refresh() }
+        await waitUntil { barrier.waiting }
+        let save = Task { await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID) }
+        await waitUntil { controller.busy }
+        XCTAssertTrue(backend.assignmentChanges.isEmpty)
+        XCTAssertNil(controller.pendingAssignmentOperationID)
+        if exitChild {
+            backend.exitChild()
+            backend.snapshot.provider.proxyReady = false // Independent stopped listener observation.
+        }
+        barrier.release(backend.snapshot)
+        await refresh.value; await save.value
+        XCTAssertEqual(backend.maximumConcurrentInspections, 1)
+        if exitChild {
+            XCTAssertNil(controller.ownedRouter)
+            XCTAssertTrue(backend.assignmentChanges.isEmpty)
+            XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
+            XCTAssertNil(controller.pendingAssignmentOperationID)
+            XCTAssertFalse(controller.assignmentRequiresReconciliation)
+            XCTAssertTrue(controller.canRestoreDirect)
+        } else {
+            XCTAssertTrue(controller.ownedRouter === child)
+            XCTAssertEqual(backend.assignmentChanges.count, 1)
+            XCTAssertNotNil(backend.assignmentChanges.first?.expectedRunningRevision)
+            XCTAssertNil(controller.assignmentError)
+        }
+    }
     private func waitUntil(_ predicate: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<1000 {
             if predicate() { return }
