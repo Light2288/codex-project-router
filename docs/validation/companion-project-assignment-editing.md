@@ -5,11 +5,14 @@ Updated: 2026-11-18
 
 Status: Stage 4 remains open. Implementation, task reviews, bounded human
 native/live observations, exact operational recovery and private fixture cleanup
-are recorded below. Final affected verification passed: 310 native tests, a
+are recorded below. Earlier affected verification passed: 310 native tests, a
 matching signed build, 958 Node tests and exactly 3 package cases. A separate
 post-OS native/Node/package supplement also passed on the unchanged signed app.
-The sole final whole-branch sequential specification/quality gate and final
-controller report remain **PENDING**. Task reviews do not close the increment.
+The sole final whole-branch specification review passed; quality requested one
+Important stopped-helper rejection-boundary correction. The combined correction
+passed the full ordered 314 native → matching signed build → 958 Node → exactly 3
+package checks, all exit 0. One scoped sequential follow-up and the final controller
+report remain **PENDING**. Task reviews do not close the increment.
 Work remains local; no push or merge.
 
 Scope: the approved `companion-project-assignment-editing` increment, governed by
@@ -147,6 +150,59 @@ current authority. The seven original build warnings remain historical because
 this supplement ran no build; the 13 intentional harness diagnostics and expected
 synthetic cleanup/source-denial observations were retained. No unexpected failure
 or retry occurred.
+
+### Sole final fix: stopped rejection boundary
+
+The sole final quality review found that the real stopped assignment CLI emits a
+complete safe failure envelope and exits 1, while native wait classified that exit
+as uncertain before its strict parser ran. The fixture exited 0 and masked the
+mismatch. A proven prewrite rejection could therefore retain a phantom pending
+operation and block normal controls. The original quality finding remains recorded;
+no final PASS or increment completion is claimed.
+
+The regression first corrected the fixture to production exit 1. A separate real
+CLI regression uses bounded private synthetic ready-schema-2 files outside the
+checkout and stale source/identity expectations. Before the product edit, the real
+CLI's exact conflict envelope/normal exit 1 and no-intent checks passed, while
+ProcessBackend incorrectly returned uncertainty and blocked a later explicit Save.
+A test-only noncanonical temporary-path setup issue was separately diagnosed and
+corrected before that causal RED; original diagnostic/failure logs are retained.
+
+The native correction lets only a normally exited, fully drained assignment
+mutation status 1 reach the existing exact failure parser. Known conflict is a
+certain conflict; invalid/unavailable are certain unavailability. Success still
+requires normal exit 0. Uncertain/unknown codes, malformed or contradictory data,
+extra keys, invalid schema/message/boolean shapes, success with nonzero exit,
+signal 1, unexpected statuses, incomplete drain, overflow, timeout, cancellation
+and incomplete input retain uncertainty. No retry, signal, credential read,
+preflight or other setup/provider behavior is added.
+
+| Command, each under `caffeinate -i` | Actual result |
+| --- | --- |
+| `swift test --package-path companion --filter ProcessBackendTests` | Exit 0; 40/40, zero failures; 90.581 s |
+| `swift test --package-path companion --filter RouterControllerTests` | Exit 0; 111/111, zero failures; 0.216 s |
+| `npm run companion:test` | Exit 0; 314/314 (234 core + 80 app), zero failures; core 109.670 s, app 0.862 s; no warning/error diagnostics |
+| `npm run companion:build` | Exit 0; rebuilt and ad-hoc signed after the controller's fresh absence/state check and explicit build release; seven existing Security deprecations |
+| `npm test` | Exit 0; 958/958, zero failures/cancellations/skips/todo; 58188.932459 ms |
+| `npm run companion:package-test` | Exit 0; exactly 3/3, zero failures/cancellations/skips/todo; 27059.980834 ms |
+
+The production regression verifies unchanged synthetic configuration/provider,
+no intent/checkpoint/temp/lock, neither backend uncertainty flag, readable fresh
+state and a later explicit no-op Save. Fixture invocation counts prove no retry.
+The stopped-controller source-change regression verifies pending cleared and
+Start, Quit, configuration selection and assignment editing remain available.
+Existing helper lifetime, setup, ownership and Direct recovery cases also passed.
+The native input snapshot remained unchanged through build/Node/package checks.
+Fresh deep/strict signature verification and all 19 bundled module comparisons
+passed; the current exact commit/executable/stat/input proof remains private. The
+single scoped sequential follow-up remains PENDING.
+
+No human/live run was repeated. Prior ready/live/UI acceptance remains historical
+against its identified native source; this correction changes only the stopped
+error path, covered by current deterministic regressions. The original frozen
+review package and reports remain immutable. Seven existing build and 13 harness
+Security diagnostics, earlier package/window failures, partial transport/drain
+limits and cancelled B initiation remain disclosed in their original sections.
 
 ### Package coverage and limits
 
@@ -303,7 +359,7 @@ increment remain subject to the sole final whole-branch gate.
 | AC-11 confirmation continuity | Exact-transition versus recovery-drift tests and observed conservative invalidation | Account/default boundary unchanged; final review |
 | AC-12 process lifetime | Helper/child/drain/relaunch/ownership tests; exact live child/logger exit and final Quit | Original partial drain unobserved; retry drain verified; final review |
 | AC-13 routing safeguards | Auth/pairing/no fallback, Stop/Quit, zero control-time upstream package checks and exact Direct restoration | Final review |
-| AC-14 package/live/docs | Final native/build/Node/package chain, post-OS supplement, bounded human evidence and recovery | Sole sequential final specification then quality review **PENDING** |
+| AC-14 package/live/docs | Final native/build/Node/package chain, post-OS supplement, bounded human evidence and recovery | Original specification PASS; final-fix scoped follow-up **PENDING** |
 
 ## Task reviews and implementation rulings
 
@@ -320,8 +376,11 @@ requested changes for returned negative saved evidence; the follow-up received
 scoped specification/quality PASS. The unavailable-state and bounded package-probe
 correction at `1a1fc68` received scoped specification PASS and task quality Approved,
 with no Critical/Important findings. Seven existing build and 13 intentional
-harness Security diagnostics remain disclosed warning debt. None of these reviews
-is the sole final whole-branch gate.
+harness Security diagnostics remain disclosed warning debt. None of those task
+reviews is the sole final whole-branch gate. The actual sole whole-branch
+specification review subsequently passed; quality requested the one
+Important stopped-helper rejection-boundary correction above. Original reports
+remain immutable. Its single scoped sequential follow-up remains PENDING.
 
 Recorded rulings include earlier synchronized source allowlists/matching builds,
 process-scoped idle-sleep assertions, pure transformation/source-identity separation,
@@ -342,9 +401,11 @@ filesystem compare-and-swap against external writers ignoring the shared lease.
 Branch: `feat/companion-project-assignment-editing`. Implementation base remains
 `c0a5a53d8c41a6c394f28497fa39133d68a79683`. The separate branding closeout remains
 on its own branch at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73` and is not merged
-here. Current executable source is `1a1fc68`; this acceptance documentation closeout
-changes prose and lifecycle checklists only. Exact code/package proof remains
-private; final reviewed branch/package endpoint is pending.
+here. Original human acceptance executable source is `1a1fc68`. The sole final fix
+changes only the stopped assignment rejection boundary and regression tests; its
+current signed build and full ordered checks passed as recorded above. Exact
+code/package proof remains private; the scoped final follow-up and reviewed
+endpoint remain pending.
 
 Evidence sources are the retained Task 1–8 reports/reviews, scoped editor-stability
 and unavailable-correction reports/reviews, sanitized controller live summary and

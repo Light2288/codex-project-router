@@ -143,8 +143,29 @@ if request['action'] in ['assignment_state', 'assignment_commit']:
         if mode == 'assignmentHeld':
             with open(os.path.join(root, 'assignment-started'), 'w') as f: f.write('started')
             while not os.path.exists(os.path.join(root, 'release-assignment')): time.sleep(.01)
-        if mode == 'assignmentRejected':
-            print(json.dumps(dict(schemaVersion=1,ok=False,error=dict(code='ASSIGNMENT_CONFLICT',message='SENTINEL_PRIVATE')))); sys.exit(0)
+        if mode in ['assignmentRejected', 'assignmentInvalid', 'assignmentUnavailable']:
+            code = dict(assignmentRejected='ASSIGNMENT_CONFLICT', assignmentInvalid='ASSIGNMENT_INVALID', assignmentUnavailable='ASSIGNMENT_UNAVAILABLE')[mode]
+            print(json.dumps(dict(schemaVersion=1,ok=False,error=dict(code=code,message='SENTINEL_PRIVATE')))); sys.exit(1)
+        if mode.startswith('assignmentExit'):
+            response = dict(schemaVersion=1,ok=False,error=dict(code='ASSIGNMENT_CONFLICT',message='synthetic'))
+            status = 1
+            if mode == 'assignmentExitUncertain': response['error']['code'] = 'ASSIGNMENT_UNCERTAIN'
+            if mode == 'assignmentExitUnknown': response['error']['code'] = 'ASSIGNMENT_FUTURE'
+            if mode == 'assignmentExitMalformed': print('SENTINEL_PRIVATE'); sys.exit(1)
+            if mode == 'assignmentExitExtra': response['extra'] = True
+            if mode == 'assignmentExitErrorExtra': response['error']['extra'] = True
+            if mode == 'assignmentExitMessage': response['error']['message'] = None
+            if mode == 'assignmentExitSchema': response['schemaVersion'] = True
+            if mode == 'assignmentExitOK': response['ok'] = 0
+            if mode == 'assignmentExitContradictory': response['result'] = assignment_commit(request)
+            if mode == 'assignmentExitSuccess': response = dict(schemaVersion=1,ok=True,result=assignment_commit(request))
+            if mode == 'assignmentExitOther': status = 2
+            os.write(1, (json.dumps(response) + '\n').encode())
+            if mode == 'assignmentExitSignal': os.kill(os.getpid(), signal.SIGHUP)
+            if mode == 'assignmentExitUndrained':
+                if os.fork() == 0: time.sleep(6.3); os._exit(0)
+            if mode == 'assignmentExitOverflow': os.write(2, b'x' * (16 * 1024 + 1))
+            sys.exit(status)
         with open(record, 'w') as f: json.dump(request, f)
         if mode == 'assignmentLostReply': print('SENTINEL_PRIVATE'); sys.exit(0)
         if mode == 'assignmentBooleanSchema':

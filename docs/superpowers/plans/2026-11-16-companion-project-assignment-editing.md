@@ -14,7 +14,7 @@
 
 **Status:** APPROVED — implementation in progress
 
-**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final sequential whole-branch specification/quality gate and final controller report remain PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final whole-branch specification review passed; quality review requested one Important stopped-helper rejection-boundary correction. Its combined final fix passed focused backend 40/controller 111 and the full ordered 314 native → matching signed build → 958 Node → exactly 3 package checks, all exit 0. The one scoped sequential follow-up remains PENDING. The final controller report is PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
 
 **Created:** 2026-11-16
 
@@ -358,6 +358,20 @@ Stage 4 is open until the sole final gate and final controller report finish.
   Subsequent final-gate bookkeeping remains with Steps 6/7; no final PASS is
   pre-recorded. See the [validation record](../../validation/companion-project-assignment-editing.md)
   for actual results, historical review outcomes and limits.
+
+## Sole final fix execution evidence — 2026-11-18
+
+The sole whole-branch specification stage passed. Quality identified one Important
+boundary mismatch: the actual stopped assignment CLI rejects with exit 1, while
+the native wait rejected that status before strict envelope parsing and the fixture
+exited 0. The combined correction changes only the assignment-specific native
+wait/result boundary, preserving exact failure validation and all actual ambiguity.
+Production CLI stale-source/no-intent RED was observed before product edit;
+focused backend 40/controller 111 and the ordered native 314 → newly signed build
+→ Node 958 → exactly 3 package checks passed, all exit 0 with zero skips. The
+existing seven build and 13 harness Security diagnostics remain. Exactly one
+controller-owned scoped sequential follow-up remains PENDING. Original frozen
+package/reports remain historical and unchanged; Task 8 Steps 6/7 remain open. No new human/live run is claimed.
 
 ## Criterion traceability
 

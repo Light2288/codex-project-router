@@ -1915,6 +1915,27 @@ import XCTest
         XCTAssertNil(controller.pendingAssignmentOperationID)
         XCTAssertEqual(backend.assignmentChanges.count, 1)
     }
+    func testRejectedStoppedAssignmentAfterSourceChangeClearsPendingAndKeepsControlsAvailable() async {
+        let project = enableAssignments()
+        let controller = makeController(); await controller.refresh()
+        let barrier = Barrier<Void>(); backend.assignmentBarrier = barrier; backend.assignmentError = .assignmentConflict
+        let save = Task { await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID) }
+        await waitUntil { barrier.waiting }
+        XCTAssertNotNil(controller.pendingAssignmentOperationID)
+        backend.snapshot.configurationRevision = String(repeating: "8", count: 64)
+        backend.snapshot.configurationIdentity = String(repeating: "9", count: 64)
+        barrier.release(()); await save.value
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
+        XCTAssertNil(controller.pendingAssignmentOperationID)
+        XCTAssertFalse(controller.assignmentRequiresReconciliation)
+        XCTAssertFalse(controller.mutationRequiresReconciliation)
+        XCTAssertFalse(controller.busy)
+        XCTAssertTrue(controller.canStart); XCTAssertTrue(controller.canQuit); XCTAssertTrue(controller.canSelectConfiguration)
+        XCTAssertTrue(controller.canEditAssignment(project))
+        XCTAssertEqual(backend.assignmentChanges.count, 1)
+        XCTAssertNil(backend.assignmentIntent)
+        XCTAssertEqual(backend.startCount, 0); XCTAssertTrue(backend.controls.isEmpty)
+    }
     func testStoppedRefreshRetainsEditorBaselineAndSaveRechecksPortAfterQueuedObservation() async {
         // Presentation continuity cannot rebase an explicit editor or let a queued save reuse a prior empty-port proof.
         let project = enableAssignments()

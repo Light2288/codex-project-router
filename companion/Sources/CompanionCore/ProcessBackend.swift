@@ -307,7 +307,8 @@ private final class RunningCommand {
                 if code == "ASSIGNMENT_UNCERTAIN" { throw CompanionError.assignmentUncertain }
                 throw code == "ASSIGNMENT_CONFLICT" ? CompanionError.assignmentConflict : CompanionError.assignmentUnavailable
             }
-            guard AssignmentWire.exact(raw, ["schemaVersion", "ok", "result"]), let result = raw["result"],
+            guard command.process.terminationReason == .exit, command.process.terminationStatus == 0,
+                  AssignmentWire.exact(raw, ["schemaVersion", "ok", "result"]), let result = raw["result"],
                   validateAssignment?(result) == true else {
                 throw mutating ? CompanionError.assignmentUncertain : CompanionError.assignmentUnavailable
             }
@@ -393,7 +394,10 @@ private final class RunningCommand {
             await pause(0.01)
         }
         defer { command.discard() }
-        guard command.process.terminationStatus == 0, !command.overflow, !command.inputFailed else {
+        // The assignment CLI exits 1 for a complete rejection envelope. Only its
+        // strict failure parser may establish certainty; a signal or success cannot.
+        let assignmentFailure = assignment && mutating && command.process.terminationReason == .exit && command.process.terminationStatus == 1
+        guard (command.process.terminationStatus == 0 || assignmentFailure), !command.overflow, !command.inputFailed else {
             if mutating {
                 mutationProcess = nil
                 if !assignment { needsReconciliation = true }
