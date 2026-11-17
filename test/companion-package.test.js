@@ -152,6 +152,107 @@ async function managedModes(tracked, context, sessionId, unchanged, {ready=true,
   }
 }
 
+async function stoppedAssignmentSave(bridge, configPath, context, projectId, accountId, unchanged) {
+  const source = await readFile(configPath);
+  const activationPath = join(dirname(configPath),'activation.json');
+  const recovery = await readFile(activationPath).catch(error=>{ if (error.code === 'ENOENT') return null; throw error; });
+  await reusablePort(context.listenPort);
+  const state = await bridge({action:'assignment_state',configPath,expectedContext:context,projectId,operationId:null});
+  assert.equal(state.savedState,'ready');
+  assert.equal(state.runningRevision,null);
+  assert.equal(state.mode,null);
+  const operationId = randomUUID();
+  const result = await bridge({action:'assignment_commit',configPath,expectedContext:context,projectId,accountId,operationId,
+    expectedSavedRevision:state.savedRevision,expectedConfigurationIdentity:state.savedIdentity,expectedCatalogRevision:state.catalogRevision});
+  assert.equal(result.changed,true);
+  assert.equal(result.runningRevision,null,'stopped save cannot claim live application');
+  assert.equal(result.after.kind,'override');
+  assert.equal(result.after.account.id,accountId);
+  assert.deepEqual(await readFile(result.checkpointPath),source);
+  const fresh = await bridge({action:'assignment_state',configPath,expectedContext:context,projectId,operationId});
+  assert.equal(fresh.savedRevision,result.savedRevision);
+  assert.equal(fresh.savedIdentity,result.savedIdentity);
+  assert.deepEqual(fresh.intent,result.intent);
+  assert.deepEqual(fresh.savedAssignment,result.after);
+  assert.equal(fresh.runningAssignment,null);
+  await assert.rejects(stat(join(dirname(configPath),'.activation.lock')),{code:'ENOENT'});
+  assert.equal((await readdir(dirname(configPath))).some(name=>name.startsWith('.assignment-') && name.endsWith('.tmp')),false);
+  if (recovery === null) await assert.rejects(stat(activationPath),{code:'ENOENT'});
+  else assert.deepEqual(await readFile(activationPath),recovery);
+  await reusablePort(context.listenPort);
+  await unchanged();
+}
+
+// Real bundled persistence and publication must agree without retrieving any fixture credential.
+async function managedAssignmentEdits(tracked, context, sessionId, configPath, projectId, defaultId, otherId, unchanged) {
+  const original = JSON.parse(await readFile(configPath));
+  const pid = tracked.child.pid;
+  async function command(action, fields = {}) {
+    const requestId = randomUUID();
+    tracked.child.stdin.write(JSON.stringify({schemaVersion:1,sessionId,requestId,action,...fields})+'\n');
+    const frame = await nextFrame(tracked);
+    assert.equal(frame.schemaVersion,1); assert.equal(frame.sessionId,sessionId); assert.equal(frame.requestId,requestId);
+    return frame;
+  }
+  async function read(operationId = null) {
+    const frame = await command('get_assignment',{expectedContext:context,projectId,operationId});
+    assert.equal(frame.type,'assignment_state'); assert.equal(frame.state.savedState,'ready');
+    return frame.state;
+  }
+  let state = await read();
+  assert.equal(state.mode,'off','next explicit Start must load the stopped save in Off');
+  assert.equal(state.savedAssignment.account.id,otherId);
+  assert.deepEqual(state.runningAssignment,state.savedAssignment);
+  assert.equal(state.savedRevision,state.runningRevision);
+  assert.equal(state.savedIdentity,state.runningIdentity);
+  assert.equal((await command('set_mode',{mode:'on'})).mode,'on');
+  for (const accountId of [defaultId,otherId,null]) {
+    const beforeBytes = await readFile(configPath);
+    const priorBindings = JSON.parse(beforeBytes).accountRouting.routeAccounts;
+    const reply = await command('set_assignment',{expectedContext:context,projectId,accountId,
+      expectedSavedRevision:state.savedRevision,expectedConfigurationIdentity:state.savedIdentity,
+      expectedRunningRevision:state.runningRevision,expectedCatalogRevision:state.catalogRevision});
+    assert.equal(reply.type,'assignment_result'); assert.equal(reply.outcome,'applied'); assert.equal(reply.code,null);
+    assert.equal(reply.commit.changed,true);
+    assert.equal(reply.commit.operationId,reply.requestId);
+    assert.equal(reply.commit.beforeRevision,state.savedRevision);
+    assert.deepEqual(await readFile(reply.commit.checkpointPath),beforeBytes);
+    const fresh = await read(reply.requestId);
+    assert.deepEqual(fresh,reply.state,'a settled read must attest the published commit');
+    assert.equal(fresh.mode,'on','assignment publication must preserve mode');
+    assert.equal(fresh.savedRevision,reply.commit.candidateRevision);
+    assert.equal(fresh.savedRevision,fresh.runningRevision);
+    assert.equal(fresh.savedIdentity,fresh.runningIdentity);
+    assert.deepEqual(fresh.savedAssignment,fresh.runningAssignment);
+    assert.equal(fresh.runningAssignment.kind,accountId === null ? 'inherited' : 'override');
+    assert.equal(fresh.runningAssignment.account.id,accountId ?? defaultId);
+    assert.notEqual(fresh.runningFingerprint,state.runningFingerprint);
+    const health = await fetch(`http://127.0.0.1:${context.listenPort}/healthz`);
+    assert.equal(health.status,200);
+    assert.equal((await health.json()).configFingerprint,fresh.runningFingerprint);
+    const {stdout} = await run('/usr/sbin/lsof',['-a','-p',String(pid),'-iTCP:'+context.listenPort,'-sTCP:LISTEN','-Fp'],{timeout:5000});
+    assert.ok(stdout.split('\n').includes('p'+pid),'assignment changes must retain the exact listener');
+    const saved = JSON.parse(await readFile(configPath));
+    assert.deepEqual(saved.accountRouting.accounts,original.accountRouting.accounts);
+    assert.equal(saved.accountRouting.defaultAccountId,original.accountRouting.defaultAccountId);
+    assert.deepEqual(saved.accountRouting.incomingCredential,original.accountRouting.incomingCredential);
+    for (const [alias,target] of Object.entries(priorBindings)) assert.equal(saved.accountRouting.routeAccounts[alias],target);
+    if (accountId === null) assert.equal(Object.hasOwn(saved.projectRoutes,projectId),false);
+    else assert.equal(saved.accountRouting.routeAccounts[saved.projectRoutes[projectId]],accountId);
+    for (const [key,value] of Object.entries(original.projectRoutes)) if (key !== projectId) assert.equal(saved.projectRoutes[key],value);
+    for (const [key,value] of Object.entries(original)) if (!['projectRoutes','accountRouting'].includes(key)) assert.deepEqual(saved[key],value);
+    assert.doesNotMatch(JSON.stringify(reply),/keychainPath|upstreamBaseUrl|projectRoutes|routeAccounts/);
+    await assert.rejects(stat(join(dirname(configPath),'.activation.lock')),{code:'ENOENT'});
+    assert.equal((await readdir(dirname(configPath))).some(name=>name.startsWith('.assignment-') && name.endsWith('.tmp')),false);
+    await unchanged();
+    state = fresh;
+  }
+  const finalFingerprint = state.runningFingerprint;
+  assert.equal((await command('set_mode',{mode:'off'})).mode,'off');
+  const off = await read();
+  assert.equal(off.mode,'off'); assert.equal(off.runningFingerprint,finalFingerprint);
+}
+
 // Only synthetic configuration leases are made here; native creation uses the separate owned harness.
 async function setupCommit(bridge, configPath, preview, change) {
   const operationId = randomUUID(), lockPath = join(dirname(configPath),'.activation.lock');
@@ -337,6 +438,8 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   assert.equal(executable.includes(Buffer.from(root)),false,'release binary must not embed a checkout path');
   assert.equal(executable.includes(Buffer.from(process.execPath)),false,'release binary must not embed a selected Node path');
   assert.deepEqual(files.filter(p=>!p.startsWith('node_modules/smol-toml/dist/')), ['node_modules/smol-toml/LICENSE','node_modules/smol-toml/package.json','package.json',...sourceNames.map(n=>'src/'+n)].sort());
+  for (const name of sourceNames) assert.deepEqual(await readFile(join(router,'src',name)),await readFile(join(root,'src',name)),
+    'signed package source must match the current checkout: '+name);
   assert.ok(files.some(p=>p==='node_modules/smol-toml/dist/index.js'));
   assert.equal(JSON.parse(await readFile(join(router,'node_modules/smol-toml/package.json'))).version,'1.9.1');
   const {stdout:plist} = await run('/usr/bin/plutil',['-convert','json','-o','-',join(app,'Contents/Info.plist')]);
@@ -416,6 +519,13 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   const before=await bridge({action:'inspect',configPath});
   assert.equal(before.configuration.mode,'accounts'); assert.equal(before.configuration.setupState,'ready');
   assert.equal(before.configuration.defaultAccount.id,defaultAccount.id);
+  const otherAccount = preview.accounts.find(account=>account.id !== defaultAccount.id);
+  assert.ok(otherAccount);
+  await stoppedAssignmentSave(bridge,configPath,before.context,id,otherAccount.id,async()=>{
+    assert.equal(await readFile(providerPath,'utf8'),original);
+    assert.equal((await bridge({action:'inspect',configPath})).provider.proxyReady,false);
+    assert.equal(upstream.connections(),0);
+  });
   const configBytes=await readFile(configPath), sessionId=randomUUID();
   const child=lifecycle.start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId],{cwd:dir,env});
   await managedModes(child,before.context,sessionId,async()=>{
@@ -437,6 +547,12 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     assert.equal((await bridge({action:'inspect',configPath})).revision,active.revision,'mode alone must preserve activation identity');
     assert.equal(upstream.connections(),0);
   },{ready:false});
+  await managedAssignmentEdits(child,ready.context,sessionId,configPath,id,defaultAccount.id,otherAccount.id,async()=>{
+    assert.deepEqual(await readFile(providerPath),activeProviderBytes);
+    assert.deepEqual(await readFile(activationPath),activationBytes);
+    assert.equal((await bridge({action:'inspect',configPath})).recoveryRevision,active.recoveryRevision);
+    assert.equal(upstream.connections(),0,'assignment controls must not connect to the configured destination');
+  });
   await bridge({action:'rollback',configPath,expectedContext:ready.context});
   assert.equal(await readFile(providerPath,'utf8'),original);
   await lifecycle.stop(child);
@@ -558,13 +674,22 @@ test('native relocated app and bundled controls work with checkout reads denied 
   const completed = await setupCommit(bridge,configPath,completion,{kind:'set_default',defaultAccountId:account.id,
     incomingCredential:syntheticReference('incoming')});
   assert.equal(completed.setupState,'ready');
-  const configBytes = await readFile(configPath);
+  const otherAccount = {id:'44444444-4444-4444-8444-444444444444',displayName:'Synthetic alternative',
+    upstreamBaseUrl:upstream.url+'/alternative',credential:syntheticReference('alternative')};
+  const addition = await bridge({action:'setup_preview',configPath});
+  assert.equal((await setupCommit(bridge,configPath,addition,{kind:'add_account',account:otherAccount})).setupState,'ready');
   const before = await bridge({action:'inspect',configPath});
   assert.equal(before.configuration.mode,'accounts'); assert.equal(before.configuration.setupState,'ready');
   assert.equal(before.configuration.defaultAccount.displayName,'Synthetic default');
   assert.equal(before.provider.state,'direct'); assert.equal(before.provider.proxyReady,false);
   assert.equal(before.catalog.entries[0].name,'Source denied synthetic project');
   assert.equal(before.catalog.entries[0].assignmentKind,'inherited');
+  await stoppedAssignmentSave(bridge,configPath,before.context,id,otherAccount.id,async()=>{
+    assert.equal(await readFile(providerPath,'utf8'),original);
+    assert.equal((await bridge({action:'inspect',configPath})).provider.proxyReady,false);
+    assert.equal(upstream.connections(),0);
+  });
+  let configBytes = await readFile(configPath);
   const sessionId = randomUUID();
   const server = start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId]);
   await managedModes(server,before.context,sessionId,async()=>{
@@ -589,6 +714,13 @@ test('native relocated app and bundled controls work with checkout reads denied 
     assert.equal((await bridge({action:'inspect',configPath})).revision,active.revision,'mode alone must preserve activation identity');
     assert.equal(upstream.connections(),0);
   },{ready:false});
+  await managedAssignmentEdits(server,ready.context,sessionId,configPath,id,account.id,otherAccount.id,async()=>{
+    assert.deepEqual(await readFile(providerPath),activeProviderBytes);
+    assert.deepEqual(await readFile(activationPath),activationBytes);
+    assert.equal((await bridge({action:'inspect',configPath})).recoveryRevision,active.recoveryRevision);
+    assert.equal(upstream.connections(),0);
+  });
+  configBytes = await readFile(configPath);
   await bridge({action:'rollback',configPath,expectedContext:ready.context});
   assert.equal(await readFile(providerPath,'utf8'),original);
   assert.deepEqual(await readFile(configPath),configBytes);
@@ -597,5 +729,5 @@ test('native relocated app and bundled controls work with checkout reads denied 
   await lifecycle.stop(native);
   assert.equal(upstream.connections(),0);
   await reusablePort(port);
-  t.diagnostic('Under the same Seatbelt policy: bundled inspection/catalog, managed Ready Off and persistent get/set On/Off, stable listener/fingerprint/provider/router bytes, zero upstream connections, activation and byte-exact rollback passed; both tracked children exited and the selected synthetic port was reusable. No GUI control action is inferred.');
+  t.diagnostic('Under the same Seatbelt policy: bundled inspection/catalog, stopped assignment Save and next Start Off, owned live assign/switch/remove with applied health fingerprints, persistent get/set On/Off, retained listener/provider/recovery, zero upstream connections, activation and byte-exact rollback passed; both tracked children exited and the selected synthetic port was reusable. No GUI control action is inferred.');
 });

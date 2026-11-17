@@ -26,7 +26,7 @@ Create a user-owned directory with mode `700` outside the checkout, normally `~/
 
 Set `codexHome`, `providerId`, and `upstreamBaseUrl` to the existing provider setup. Preserve the complete upstream API prefix. Put desktop project IDs and non-secret route aliases in `projectRoutes`; include the controller project's ID so this chat can continue during validation. Alias values are short letters/digits/underscore/hyphen labels. They never contain keys.
 
-New companion configurations use `schemaVersion: 2`; schema 1 remains supported by the standalone CLI. The port defaults to `8787`. The listener is fixed to `127.0.0.1`. An explicit config path is required by every command. Restart the foreground proxy after changing its configuration.
+New companion configurations use `schemaVersion: 2`; schema 1 remains supported by the standalone CLI. The port defaults to `8787`. The listener is fixed to `127.0.0.1`. An explicit config path is required by every command. External configuration edits require a proxy restart; the companion's guarded assignment flow below applies only assignment changes live.
 
 Keep actual endpoints, project mappings, Keychain references, configuration backups, and private run evidence outside Git. The router rejects a configuration stored inside its checkout. It never runs the desktop authentication helper. Configuration loading, startup, health, status, activation and rollback retrieve no credentials and send no destination-preflight requests, including when credential routing is enabled. Local readiness probes remain permitted.
 
@@ -84,9 +84,60 @@ predetermined identity without retrieving its secret. An uncertain helper keeps
 writes and dismissal blocked until it exits and its result is checked. Existing
 or stale `.activation.lock` evidence is never adopted, signalled or removed
 automatically; independently inspect its origin and resolve it locally, preserving
-receipts/checkpoints and recovery evidence. Account editing/deletion and assignment
-editing remain deferred. See the [current validation record](validation/companion-account-default-setup.md)
+receipts/checkpoints and recovery evidence. Account editing/deletion remains
+deferred. See the [account setup validation record](validation/companion-account-default-setup.md)
 for observed evidence and pending native/live acceptance.
+
+## Project assignment editing
+
+Open one project and choose an existing named account, or **Use default** to remove
+that project's exact override. Selecting the current default account by name keeps
+an explicit override. Imported legacy inheritance stays inherited until explicitly
+changed. A missing target stays an error until you select an account or Use default;
+opening the editor never converts it silently. Projects found only in saved
+configuration show a warning and remain editable by their exact saved identity
+when discovery is otherwise healthy. There is no manual ID entry or bulk editor.
+
+Editing requires a valid, ready schema-2 setup and fresh matching project/catalog
+and configuration evidence. With the exact owned supported router and functioning
+control channel, **Save and apply** persists and publishes the assignment without
+an ordinary Codex restart, preserving On/Off. With safe Direct state, no owned
+listener, an independently empty selected port and resolved recovery, **Save**
+persists for the next explicit **Start router (routing Off)**. Off by itself does
+not authorize a stopped save. Account/default changes retain their separate safe
+Direct/stopped boundary; this is no account, credential, default or provider reload.
+
+Saved and running summaries are separate. On applies overrides; Off suspends them
+and uses the running default. A saved choice or On alone cannot prove that a
+particular assignment is running. Unconfirmed control reads say **Running assignment
+unconfirmed**. An external listener or unavailable/unsupported channel permits
+browsing but blocks writes. Unsaved choices remain local to the editor; explicit
+**Refresh** reloads its baseline. Background refresh does not silently rebase an
+old selection.
+
+A rejected save leaves the selection available for inspection. An ambiguous result
+may have persisted: do not repeat it, assume rollback, or issue a second command
+to finish applying. Refresh observes the exact operation's saved/running evidence;
+unresolved or divergent evidence keeps assignment writes blocked. Closing the
+editor does not cancel or repeat an accepted save. Direct recovery remains
+available subject to its own checks: **Restore direct**, manually restart Codex,
+confirm a working direct response, then guarded Stop. No process or stale lock is
+adopted automatically.
+
+Each request captures its immutable configured assignment and mode at receipt,
+before authentication or other asynchronous lookup. Later changes affect later
+requests; existing requests retain their selection. No model retry, alternate
+account fallback or redirect is added. Shared bindings are never retargeted or
+garbage-collected; unrelated settings and optional-property presence are preserved.
+The shared lock and fresh source checks coordinate participating writers, but
+cannot provide atomic compare-and-swap against external editors that ignore the
+lock. Avoid concurrent external edits. Keep comparison tokens, actual mappings,
+references, checkpoints and raw evidence private; they are not UI diagnostics.
+
+See the [assignment validation record](validation/companion-project-assignment-editing.md)
+for current automated evidence and pending native/live observations. Readiness
+and configured account labels do not establish credential access, gateway
+acceptance, billing attribution or general cross-account continuation.
 
 ## Schema-1 project credential routing compatibility
 
@@ -114,7 +165,7 @@ When credential routing is configured, each admitted non-health request retrieve
 | Selected saved override has no complete target | `CREDENTIAL_UNMAPPED` (422) |
 | Required item is absent, inaccessible, times out, or returns invalid output | `CREDENTIAL_UNAVAILABLE` (503) |
 
-Global-item failure blocks authenticated requests. Project-item failure affects requests needing that key; unrelated healthy projects can continue. Failures never select another credential or destination, fall back to the global pair, retry the model request, or follow redirects. A managed request captures On/Off at HTTP receipt, before its first asynchronous lookup, then fixes its resolved project, destination and credential before forwarding. Switching mode affects later requests; active streams keep their original selection and are never retried or migrated. Project reassignment affects subsequent lookups; configuration changes require a proxy restart. Cross-credential or cross-instance continuation failures from the gateway remain failures; the router does not rewrite models, payloads or continuation IDs to repair them. Use fresh validation chats when switching gateway instances.
+Global-item failure blocks authenticated requests. Project-item failure affects requests needing that key; unrelated healthy projects can continue. Failures never select another credential or destination, fall back to the global pair, retry the model request, or follow redirects. A managed request captures On/Off at HTTP receipt, before its first asynchronous lookup, then fixes its resolved project, destination and credential before forwarding. Switching mode affects later requests; active streams keep their original selection and are never retried or migrated. Desktop project reassignment affects subsequent identity lookups. Companion assignment saves publish a new configured snapshot for later requests; external configuration edits require a proxy restart. Cross-credential or cross-instance continuation failures from the gateway remain failures; the router does not rewrite models, payloads or continuation IDs to repair them. Use fresh validation chats when switching gateway instances.
 
 Each Keychain lookup runs fixed `/usr/bin/security find-generic-password` without a shell, using explicit account, service and keychain path. It has a five-second timeout and separate 16 KiB stdout/stderr limits. The child is terminated and reaped on timeout, overflow or cancellation. A token must contain 1–8,192 visible ASCII bytes after removing at most one final LF; spaces, other whitespace, control characters and non-ASCII bytes are rejected. Failed process outcomes reject even plausible output. Subprocess output is never included in router diagnostics or errors.
 
@@ -280,8 +331,8 @@ obligations from provider changes. **Restore direct** is a separate recovery flo
 restore the bound provider settings, restart Codex, verify and confirm a direct
 response, then stop the owned listener when permitted. Off still needs the listener.
 An external listener is never adopted or stopped. No last-used On state, automatic
-startup, fallback, automatic restart or account/assignment editing is provided.
-Named-account addition and explicit default selection are available as described above.
+startup, fallback, automatic restart or account editing/deletion is provided.
+Named-account addition, explicit default selection and guarded project assignment editing are available as described above.
 
 See [companion setup, lifecycle, packaging and recovery](../companion/README.md) for
 custom activation contexts and recovery details. The [managed-routing validation
@@ -291,8 +342,15 @@ reports retain their original scope and limitations.
 
 ## Development checks
 
+Run the final native → build → Node → package sequence in this order so package
+checks compare the current signed resources. On a host prone to idle sleep, use
+process-scoped `caffeinate -i` around each command.
+
 ```sh
+npm run companion:test
+npm run companion:build
 npm test
+npm run companion:package-test
 node --check src/cli.js
 git diff --check
 ```

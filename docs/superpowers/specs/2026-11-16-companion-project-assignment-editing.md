@@ -8,11 +8,13 @@
 
 **Created:** 2026-11-16
 
-**Updated:** 2026-11-16
+**Updated:** 2026-11-17
 
 **Stage:** 4 — specification and plan separately approved; Subagent-driven implementation selected
 
-**Storage:** Saved in the existing checkout; remain uncommitted until the separately approved implementation branch is created.
+**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 automated native/build/Node/package verification passed (298 native, 958 Node, exactly 3 package cases, zero failures/skips); human native/live acceptance and the sole final sequential whole-branch specification/quality gate remain pending. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+
+**Storage:** Saved in the existing checkout on `feat/companion-project-assignment-editing`; the approved pair was committed together before product changes. Current lifecycle updates remain local to this branch.
 
 **Provenance:** The next companion increment request, repository and operational inspection, native clarification answers, and the complete Stage 1 scope/design proposal accepted by the subsequent `confirmed` message. That confirmation authorized the DRAFT only. The complete DRAFT was then presented in chat while Plan mode prohibited saving. The user's subsequent `Please implement the plan.` approves the specification just presented under the mandatory separate-gate workflow; no assignment implementation plan had yet been presented. Specification approval authorizes separate planning only. The approved requirements below are unchanged; status, storage and approval metadata now reflect that approval.
 

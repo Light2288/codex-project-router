@@ -14,9 +14,11 @@
 
 **Status:** APPROVED — implementation in progress
 
+**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 automated native/build/Node/package verification passed (298 native, 958 Node, exactly 3 package cases, zero failures/skips); human native/live acceptance and the sole final sequential whole-branch specification/quality gate remain pending. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+
 **Created:** 2026-11-16
 
-**Updated:** 2026-11-16
+**Updated:** 2026-11-17
 
 **Provenance:** The separately presented Stage 2 specification, approved by the user's subsequent `Please implement the plan.` message. At that approval no assignment implementation plan existed. Stage 1 had separately been confirmed with `confirmed`. This separate plan was then saved and presented; the user's subsequent `approved` explicitly approves it. The execution-method question was not answered by that message; the user subsequently selected Subagent-driven through the native interactive control. This plan is grounded in the existing checkout at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73`; artifact lookup alone does not establish approval.
 
