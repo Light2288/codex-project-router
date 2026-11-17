@@ -590,6 +590,13 @@ import Darwin
         }
         return state.runningRevision == nil && ownedRouter == nil
     }
+    private func pendingAssignmentDiverged(_ pending: PendingAssignment, state: AssignmentState?, value: Inspection) -> Bool {
+        guard let state else { return false }
+        return state.savedState == "conflict" || (state.savedState == "ready" &&
+            (!AssignmentWire.reconciles(state, change: pending.change, live: pending.child != nil) ||
+             value.context != pending.before.context || value.recoveryRevision != pending.before.recoveryRevision ||
+             value.provider.state != pending.before.provider.state || value.provider.recordPhase != pending.before.provider.recordPhase))
+    }
     private func inspectAssignmentTransition(_ pending: PendingAssignment, commit: AssignmentCommit?, allowSettlement: Bool) async -> Bool {
         inspectionSequence &+= 1
         let sequence = inspectionSequence, currentGeneration = generation
@@ -608,13 +615,7 @@ import Darwin
                 }
             } else {
                 assignmentRequiresReconciliation = true
-                let diverged = state.map {
-                    $0.savedState == "conflict" || ($0.savedState == "ready" &&
-                        (!AssignmentWire.reconciles($0, change: pending.change, live: pending.child != nil) ||
-                         value.context != pending.before.context || value.recoveryRevision != pending.before.recoveryRevision ||
-                         value.provider.state != pending.before.provider.state || value.provider.recordPhase != pending.before.provider.recordPhase))
-                } ?? false
-                assignmentStatus = diverged ? .diverged : .uncertain
+                assignmentStatus = pendingAssignmentDiverged(pending, state: state, value: value) ? .diverged : .uncertain
                 assignmentError = CompanionError.assignmentUncertain.rawValue
             }
             return verified
@@ -779,6 +780,9 @@ import Darwin
             }
             reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == priorConfirmation)
             installAssignmentEvidence(state, value: value)
+            if let pending = pendingAssignment, assignmentRequiresReconciliation {
+                assignmentStatus = pendingAssignmentDiverged(pending, state: state, value: value) ? .diverged : .uncertain
+            }
             // Mode reads share the disk slot, but recovery actions retain their own evidence authority.
             await reconcileRoutingMode(generation: requestGeneration, sequence: requestSequence, query: !busy || queryRoutingMode)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }

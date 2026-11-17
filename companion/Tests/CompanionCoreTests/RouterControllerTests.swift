@@ -1587,6 +1587,41 @@ import XCTest
         XCTAssertNil(controller.ownedRouter)
         XCTAssertEqual(backend.assignmentChanges.count, 1)
     }
+    func testPendingUnavailableObservationLaterProvesDivergenceWithoutRetry() async throws {
+        // Fresh exact-child divergent evidence must update status without releasing the pending write block.
+        let project = enableAssignments()
+        let controller = await activated(); await controller.confirmRoutedResponse()
+        let previous = backend.assignmentState(projectID: project.id, live: true)
+        backend.assignmentError = .assignmentUncertain
+        backend.assignmentAppliesBeforeError = true
+        backend.onAssignment = { self.backend.assignmentReady = false }
+        await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID)
+        XCTAssertEqual(controller.assignmentStatus, .uncertain)
+        let operation = try XCTUnwrap(controller.pendingAssignmentOperationID)
+        backend.assignmentReady = true
+        var divergent = backend.assignmentState(projectID: project.id, live: true)
+        divergent.runningRevision = previous.runningRevision
+        divergent.runningIdentity = previous.runningIdentity
+        divergent.runningFingerprint = previous.runningFingerprint
+        divergent.runningAssignment = previous.runningAssignment
+        backend.assignmentReadOverride = divergent
+        await controller.refresh()
+        XCTAssertEqual(controller.assignmentStatus, .diverged)
+        XCTAssertTrue(controller.assignmentRequiresReconciliation)
+        XCTAssertEqual(controller.pendingAssignmentOperationID, operation)
+        XCTAssertFalse(controller.canEditAssignment(project))
+        XCTAssertTrue(controller.canRestoreDirect)
+        XCTAssertFalse(controller.canStop)
+        XCTAssertEqual(backend.assignmentChanges.count, 1)
+        XCTAssertEqual(backend.assignmentReads.last?.0, controller.ownedRouter?.id)
+        XCTAssertEqual(backend.assignmentReads.last?.2, operation)
+        backend.assignmentReady = false
+        await controller.refresh()
+        XCTAssertTrue(controller.assignmentRequiresReconciliation)
+        XCTAssertNotEqual(controller.assignmentStatus, .ready)
+        XCTAssertTrue(controller.canRestoreDirect)
+        XCTAssertEqual(backend.assignmentChanges.count, 1)
+    }
     func testAssignmentReadDoesNotRequireMatchingReadiness() async {
         let project = enableAssignments()
         let controller = await started()
@@ -1926,6 +1961,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
 
     var assignmentNoOp = false
     var assignmentAppliesBeforeError = false
+    var assignmentReadOverride: AssignmentState?
     var assignmentReadBarrier: Barrier<Void>?
     var assignmentReady = false
     var assignmentError: CompanionError?
@@ -1948,7 +1984,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
         guard assignmentReady else { throw CompanionError.assignmentUnavailable }
         assignmentReads.append((child.id, projectID, operationID))
         if let barrier = assignmentReadBarrier { assignmentReadBarrier = nil; await barrier.wait() }
-        return assignmentState(projectID: projectID, live: true)
+        return assignmentReadOverride ?? assignmentState(projectID: projectID, live: true)
     }
     func readStoppedAssignment(context: ActivationContext, projectID: String, operationID: String?) async throws -> AssignmentState {
         guard assignmentReady else { throw CompanionError.assignmentUnavailable }
