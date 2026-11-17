@@ -558,12 +558,15 @@ import Darwin
         if let state, let projectID = selectedAssignmentProjectID, state.projectId == projectID { selectedAssignment = state }
         if !assignmentRequiresReconciliation {
             assignmentStatus = state.map {
+                // An unavailable saved observation cannot establish a mismatch.
+                guard $0.savedState != "unavailable" else { return .unavailable }
                 let runtimeMatches = ownedRouter == nil || ($0.savedRevision == $0.runningRevision &&
                     $0.savedIdentity == $0.runningIdentity && $0.savedFingerprint == $0.runningFingerprint)
                 return assignmentEvidenceMatches($0, value: value) && runtimeMatches ? .ready : .diverged
             } ?? .unavailable
             if assignmentStatus == .ready { assignmentError = nil }
             else if assignmentStatus == .diverged { assignmentError = CompanionError.assignmentConflict.rawValue }
+            else if state != nil, assignmentError == CompanionError.assignmentConflict.rawValue { assignmentError = nil }
         }
     }
     private func continuity(_ pending: PendingAssignment, value: Inspection, state: AssignmentState, storageSafe: Bool, commit: AssignmentCommit?) -> Bool {

@@ -62,6 +62,9 @@ enum AssignmentSelection: Hashable {
         if controller.assignmentRequiresReconciliation { return "Refresh to inspect the pending assignment. Further saves are blocked until it is reconciled." }
         if controller.busy { return "Wait for the current operation to finish." }
         guard controller.canEditAssignment(project) else {
+            if controller.inspection?.configuration.setupState == "required" {
+                return "Assignment editing is unavailable. Complete account setup in the main controls, then refresh this editor."
+            }
             return "Assignment editing is unavailable. Refresh and check the configuration, account setup and router control. Direct recovery remains in the main controls."
         }
         switch selection {

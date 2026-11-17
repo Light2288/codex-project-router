@@ -3,13 +3,19 @@ import XCTest
 @testable import CodexProjectRouter
 
 @MainActor final class ProjectAssignmentPresentationTests: XCTestCase {
-    private func withEditor(live: Bool = true, _ body: (RouterController, AssignmentDisplayBackend, Inspection.Entry) async throws -> Void) async throws {
+    private func withEditor(live: Bool = true, setupRequired: Bool = false, _ body: (RouterController, AssignmentDisplayBackend, Inspection.Entry) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("assignment presentation \(UUID())")
         defer {
             do { try FileManager.default.removeItem(at: root) }
             catch { XCTFail("Assignment fixture cleanup failed: \(error)") }
         }
         let backend = AssignmentDisplayBackend(root: root)
+        if setupRequired {
+            backend.snapshot.configuration.setupState = "required"
+            backend.snapshot.configuration.accounts = []
+            backend.snapshot.configuration.defaultAccount = nil
+            backend.returnedSavedState = "unavailable"
+        }
         let store = PrivateStore(directory: root.appendingPathComponent("companion"))
         try store.save(.init(selectedConfigurationPath: backend.context.configPath))
         let controller = RouterController(backend: backend, store: store, browseHome: root)
@@ -18,6 +24,28 @@ import XCTest
         let project = backend.snapshot.catalog.entries[0]
         _ = await controller.loadAssignment(projectID: project.id)
         try await body(controller, backend, project)
+    }
+    func testFreshSetupRequiredEditorExplainsUnavailableWithoutConflict() async throws {
+        try await withEditor(live: false, setupRequired: true) { controller, backend, project in
+            let editor = AssignmentEditor()
+            for _ in 0..<2 {
+                await editor.load(controller: controller, project: project)
+                await controller.refresh()
+                let display = AssignmentPresentation(controller: controller, project: project, selection: editor.selection)
+                XCTAssertEqual(controller.assignmentStatus, .unavailable)
+                XCTAssertNil(controller.assignmentError)
+                XCTAssertNil(display.warning)
+                XCTAssertTrue(display.disabledReason?.contains("Complete account setup in the main controls") == true)
+                XCTAssertFalse(display.canSave)
+                XCTAssertTrue(display.accounts.isEmpty)
+                XCTAssertEqual(editor.selection, .unselected)
+                XCTAssertEqual(display.savedText, "Saved assignment unavailable — refresh to check")
+                XCTAssertEqual(display.runningText, "Router not running — saved assignment loads on next Start")
+                await editor.save(controller: controller, project: project)
+            }
+            XCTAssertTrue(backend.changes.isEmpty)
+            XCTAssertNil(controller.pendingAssignmentOperationID)
+        }
     }
     func testHealthyStoppedRefreshKeepsEditorPresentationThroughReadAndPortProbe() async throws {
         // Clearing prior port proof before a healthy observation completes inserts a sheet-height-changing reason.

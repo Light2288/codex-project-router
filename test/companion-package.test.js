@@ -632,8 +632,37 @@ test('native relocated app and bundled controls work with checkout reads denied 
     await new Promise(r=>setTimeout(r,100));
   }
   assert.equal(lockObserved,true,'native process must hold the synthetic store lock; HOME overrides alone are insufficient');
-  const windowProbe = 'import AppKit; import CoreGraphics; let pid = Int(CommandLine.arguments[1])!; let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []; let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }; let regular = NSRunningApplication(processIdentifier: pid_t(pid))?.activationPolicy == .regular; print(regular ? "regular-native-app" : "missing-regular-policy"); print(found ? "visible-native-window" : "missing"); exit(found && regular ? 0 : 1)';
-  await run('/usr/bin/swift',['-e',windowProbe,String(native.child.pid)],{cwd:dir,env,timeout:20_000});
+  // The store lock precedes window publication; WindowServer may also briefly
+  // omit an existing window during presentation. Observe the same predicate
+  // within one absolute budget, including Swift startup.
+  const windowProbe = `import AppKit
+import CoreGraphics
+let pid = Int(CommandLine.arguments[1])!
+let deadline = Date(timeIntervalSince1970: Double(CommandLine.arguments[2])! / 1000)
+var previous = ""
+while Date() < deadline {
+  let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []
+  let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
+  let app = NSRunningApplication(processIdentifier: pid_t(pid))
+  let regular = app?.activationPolicy == .regular
+  let state = "regular=\\(regular) onScreen=\\(found) registered=\\(app != nil) terminated=\\(app?.isTerminated ?? false)"
+  if state != previous { print(state); fflush(stdout); previous = state }
+  if found && regular { exit(0) }
+  if app?.isTerminated == true { exit(1) }
+  RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.025)))
+}
+print("native-window-deadline"); exit(1)`;
+  const windowAbort = new AbortController();
+  const nativeExited = () => windowAbort.abort();
+  native.child.once('exit',nativeExited);
+  try {
+    assert.equal(native.child.exitCode,null,'native child exited before window observation: '+native.stderr);
+    assert.equal(native.child.signalCode,null,'native child signaled before window observation: '+native.stderr);
+    await run('/usr/bin/swift',['-e',windowProbe,String(native.child.pid),String(Date.now()+20_000)],{cwd:dir,env,timeout:20_000,signal:windowAbort.signal});
+  } catch (error) {
+    assert.fail('Native window observation failed: '+JSON.stringify({exitCode:native.child.exitCode,signalCode:native.child.signalCode,
+      stdout:native.stdout,stderr:native.stderr,probeCode:error.code,probeSignal:error.signal,probeStdout:error.stdout,probeStderr:error.stderr}));
+  } finally { native.child.removeListener('exit',nativeExited); }
   assert.deepEqual(JSON.parse(await readFile(join(store,'state.json'),'utf8')),{schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node});
   await assert.rejects(stat(configPath),{code:'ENOENT'});
   assert.equal(await readFile(providerPath,'utf8'),original);

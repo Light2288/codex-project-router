@@ -1534,6 +1534,93 @@ import XCTest
         backend.snapshot.catalog.entries = [project]
         return project
     }
+    private func unavailableAssignment(projectID: String, live: Bool, savedState: String = "unavailable") throws -> AssignmentState {
+        var state = backend.assignmentState(projectID: projectID, live: live)
+        state.savedState = savedState
+        state.savedRevision = nil; state.savedIdentity = nil; state.savedFingerprint = nil
+        state.catalogRevision = nil; state.savedAssignment = nil; state.intent = nil
+        if live { state.runningAssignment = .init(kind: "inherited", account: .init(id: assignmentAccountID, displayName: "Synthetic account")) }
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state))
+        XCTAssertNotNil(AssignmentWire.state(object, context: context, projectID: projectID, operationID: nil, live: live))
+        return state
+    }
+    func testFreshSetupRequiredAssignmentRemainsUnavailableAcrossPollAndSelection() async throws {
+        // A successful incomplete-setup observation cannot invent a saved/running conflict.
+        let project = enableAssignments()
+        backend.snapshot.configuration.setupState = "required"
+        backend.snapshot.configuration.accounts = []
+        backend.assignmentReadOverride = try unavailableAssignment(projectID: project.id, live: false)
+        let controller = makeController()
+        for _ in 0..<2 {
+            await controller.refresh()
+            let state = await controller.loadAssignment(projectID: project.id)
+            XCTAssertEqual(state?.savedState, "unavailable")
+            XCTAssertEqual(controller.assignmentStatus, .unavailable)
+            XCTAssertNil(controller.assignmentError)
+            XCTAssertNil(state?.runningAssignment); XCTAssertNil(state?.mode)
+            XCTAssertFalse(controller.canEditAssignment(project))
+            await controller.saveAssignment(projectID: project.id, accountID: nil)
+        }
+        XCTAssertTrue(backend.assignmentChanges.isEmpty)
+        XCTAssertNil(controller.pendingAssignmentOperationID)
+        XCTAssertNil(controller.ownedRouter)
+    }
+    func testReturnedUnavailableReplacesConflictButReadFailureRemainsVisible() async throws {
+        let project = enableAssignments()
+        backend.assignmentReadOverride = try unavailableAssignment(projectID: project.id, live: false, savedState: "conflict")
+        let controller = makeController()
+        _ = await controller.loadAssignment(projectID: project.id)
+        XCTAssertEqual(controller.assignmentStatus, .diverged)
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
+        backend.assignmentReadOverride = try unavailableAssignment(projectID: project.id, live: false)
+        await controller.refresh()
+        XCTAssertEqual(controller.assignmentStatus, .unavailable)
+        XCTAssertNil(controller.assignmentError)
+        XCTAssertFalse(controller.canEditAssignment(project))
+        backend.assignmentReady = false
+        await controller.refresh()
+        XCTAssertEqual(controller.assignmentStatus, .unavailable)
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentUnavailable.rawValue)
+    }
+    func testUnavailableSavedObservationRetainsKnownRuntimeEvidence() async throws {
+        let project = enableAssignments()
+        let controller = await started()
+        let state = try unavailableAssignment(projectID: project.id, live: true)
+        backend.assignmentReadOverride = state
+        _ = await controller.loadAssignment(projectID: project.id)
+        XCTAssertEqual(controller.assignmentStatus, .unavailable)
+        XCTAssertEqual(controller.selectedAssignment, state)
+        XCTAssertNotNil(controller.selectedAssignment?.runningAssignment)
+        XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+        XCTAssertNil(controller.assignmentError)
+        XCTAssertFalse(controller.canEditAssignment(project))
+    }
+    func testUnavailableSavedObservationDoesNotClearPendingAssignment() async throws {
+        let project = enableAssignments()
+        let controller = await started()
+        backend.assignmentError = .assignmentUncertain
+        await controller.saveAssignment(projectID: project.id, accountID: assignmentAccountID)
+        let operation = try XCTUnwrap(controller.pendingAssignmentOperationID)
+        backend.assignmentReadOverride = try unavailableAssignment(projectID: project.id, live: true)
+        await controller.refresh()
+        XCTAssertEqual(controller.assignmentStatus, .uncertain)
+        XCTAssertTrue(controller.assignmentRequiresReconciliation)
+        XCTAssertEqual(controller.pendingAssignmentOperationID, operation)
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentUncertain.rawValue)
+        XCTAssertFalse(controller.canEditAssignment(project))
+        XCTAssertEqual(backend.assignmentChanges.count, 1)
+    }
+    func testReadySavedMismatchStillReportsDivergence() async {
+        let project = enableAssignments()
+        let controller = await started()
+        var state = backend.assignmentState(projectID: project.id, live: true)
+        state.runningRevision = String(repeating: "9", count: 64)
+        backend.assignmentReadOverride = state
+        _ = await controller.loadAssignment(projectID: project.id)
+        XCTAssertEqual(controller.assignmentStatus, .diverged)
+        XCTAssertEqual(controller.assignmentError, CompanionError.assignmentConflict.rawValue)
+        XCTAssertFalse(controller.canEditAssignment(project))
+    }
     func testVerifiedAssignmentPreservesConfirmedRoutedAndDirectAuthority() async throws {
         let project = enableAssignments()
         let controller = await activated(); await controller.confirmRoutedResponse()
@@ -2018,7 +2105,7 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
         guard assignmentReady else { throw CompanionError.assignmentUnavailable }
         assignmentReads.append((nil, projectID, operationID))
         if let barrier = assignmentReadBarrier { assignmentReadBarrier = nil; await barrier.wait() }
-        return assignmentState(projectID: projectID, live: false)
+        return assignmentReadOverride ?? assignmentState(projectID: projectID, live: false)
     }
     func probeAssignmentPort(_ context: ActivationContext) async -> StopOutcome.PortState { assignmentPort }
     func applyAssignment(_ change: AssignmentChange, to child: OwnedRouter) async throws -> AssignmentCommit { try await performAssignment(change, live: true) }
