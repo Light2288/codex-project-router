@@ -565,7 +565,8 @@ Opening or explicit Refresh loads an editor baseline; background refresh cannot
 silently rebase it. Rejection preserves the unsaved choice. Sheet dismissal cannot
 cancel, retry or settle the controller-owned mutation.
 
-The private channel's ready-schema-2 frame advertises `project_assignments_v1`.
+For ready schema-2 configurations, the schema-1 ready frame advertises
+`project_assignments_v1`.
 Its bounded serialized `get_assignment`/`set_assignment` commands share existing
 owned pipes and five-second native deadline; legacy ready frames retain mode
 control only. Stopped `assignment_state`/`assignment_commit` helpers share the

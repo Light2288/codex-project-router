@@ -3,9 +3,10 @@
 Created: 2026-11-17
 Updated: 2026-11-17
 
-Status: implementation and task reviews through Task 7 recorded; Task 8 automated
-verification passed. Human native/live acceptance and the sole final
-whole-branch sequential specification/quality review remain **PENDING**. This
+Status: automated verification passed. Task 8 automated-partition review found
+specification compliance and quality Approved with a minor schema-wording
+correction. Overall Task 8 remains open: human native/live acceptance and the sole
+final whole-branch sequential specification/quality review remain **PENDING**. This
 record does not close the increment or approve the final branch. Work remains
 local; no push or merge.
 
@@ -138,7 +139,11 @@ the final scoped review approved both specification compliance and quality.
 Task 6's queued live-to-stopped child-capture finding was addressed and approved
 in scoped review; its deferred delayed-divergence presentation finding was fixed
 and reviewed in Task 7. Existing unchanged Security API warnings remain a separate
-cleanup concern. These are task reviews, not the sole final whole-branch gate.
+cleanup concern. Task 8's automated-partition review found specification
+compliance and quality Approved with a minor correction distinguishing the
+schema-1 ready frame from ready schema-2 configurations. The correction has not
+received a scoped re-review in this record. These are task reviews; overall Task 8,
+human native/live acceptance and the sole final whole-branch gate remain pending.
 
 Recorded implementation rulings preserve the existing checkout/no-worktree
 preference, earlier synchronized source allowlists and matching builds, temporary
