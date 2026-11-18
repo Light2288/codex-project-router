@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFile, unlink, mkdir, copyFile, symlink } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir, copyFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -535,6 +535,203 @@ test("managed inheritance uses own mappings and preserves bounded state lookup",
   await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false}), {code: "STATE_UNAVAILABLE"});
   assert.ok(Date.now() - start < 1800);
   await assert.rejects(identifyProject(headers(), f.config, {requireRoute: false, signal: AbortSignal.abort()}), {code: "CANCELLED"});
+});
+
+test("managed accounts resolve explicit projectless identity", async t => {
+  const f = await fixture(t);
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  delete f.state["thread-project-assignments"][T1];
+  f.state["projectless-thread-ids"] = [T1.toUpperCase(), T1];
+  f.edge(T1.toUpperCase(), CHILD.toUpperCase());
+  await f.saveState();
+  const before = await f.snapshot();
+  const configBefore = await readFile(f.configPath);
+  for (const requireRoute of [true, false]) {
+    const options = {allowProjectless: true, requireRoute};
+    const direct = await identifyProject(headers(T1), f.config, options);
+    assert.deepEqual(direct, {threadId: T1, ownerThreadId: T1, source: "projectless"});
+    assert.ok(Object.isFrozen(direct));
+    const descendant = await identifyProject(headers(CHILD), f.config, options);
+    assert.deepEqual(descendant, {threadId: CHILD, ownerThreadId: T1, source: "projectless"});
+    assert.ok(Object.isFrozen(descendant));
+  }
+  assert.deepEqual(await f.snapshot(), before);
+  assert.deepEqual(await readFile(f.configPath), configBefore);
+  f.state["projectless-thread-ids"].push(CHILD);
+  await f.saveState();
+  assert.deepEqual(await identifyProject(headers(CHILD), f.config, {allowProjectless: true}),
+    {threadId: CHILD, ownerThreadId: CHILD, source: "projectless"});
+  f.state["projectless-thread-ids"].pop();
+  await f.saveState();
+  assert.deepEqual(await f.snapshot(), before);
+  assert.deepEqual(await readFile(f.configPath), configBefore);
+});
+
+test("projectless ancestry is checked through conflicting ancestors", async t => {
+  for (const scenario of ["own project", "ancestor project", "descendant project"]) await t.test(scenario, async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    if (scenario !== "own project") f.edge(T1, CHILD);
+    f.state["projectless-thread-ids"] = [scenario === "descendant project" ? T1 : CHILD];
+    if (scenario !== "ancestor project")
+      f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+    if (scenario === "descendant project") delete f.state["thread-project-assignments"][T1];
+    await f.saveState();
+    await assert.rejects(identifyProject(headers(CHILD), f.config, {allowProjectless: true, requireRoute: false}),
+      {code: "IDENTITY_CONFLICT"});
+  });
+});
+
+test("projectless proof rejects case-shadowed membership and edges", async t => {
+  for (const scenario of ["uppercase assignment", "uppercase edge", "duplicate assignment", "duplicate parent"]) await t.test(scenario, async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    f.state["projectless-thread-ids"] = [CHILD.toUpperCase()];
+    if (scenario === "uppercase assignment")
+      f.state["thread-project-assignments"][CHILD.toUpperCase()] = {projectKind: "local", projectId: P1};
+    if (scenario === "uppercase edge") f.edge(T1.toUpperCase(), CHILD.toUpperCase());
+    if (scenario === "duplicate assignment") {
+      delete f.state["thread-project-assignments"][T1];
+      f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+      f.state["thread-project-assignments"][CHILD.toUpperCase()] = {projectKind: "local", projectId: P1};
+      f.state["projectless-thread-ids"] = [];
+    }
+    if (scenario === "duplicate parent") {
+      delete f.state["thread-project-assignments"][T1];
+      f.edge(T1, CHILD);
+      f.edge(T1.toUpperCase(), CHILD.toUpperCase());
+    }
+    await f.saveState();
+    await assert.rejects(identifyProject(headers(CHILD), f.config, {allowProjectless: true, requireRoute: false}),
+      {code: "IDENTITY_CONFLICT"});
+  });
+});
+
+test("projectless proof preserves session cycle and state guards", async t => {
+  for (const [scenario, code] of [
+    ["cycle", "IDENTITY_CONFLICT"], ["forged parent", "STATE_UNAVAILABLE"],
+    ["incompatible session", "IDENTITY_CONFLICT"], ["malformed marker", "STATE_UNAVAILABLE"],
+    ["missing database", "STATE_UNAVAILABLE"], ["locked database", "STATE_UNAVAILABLE"],
+    ["malformed parent", "STATE_UNAVAILABLE"], ["saved thread only", "STATE_UNAVAILABLE"],
+    ["33 nodes", "IDENTITY_CONFLICT"],
+  ]) await t.test(scenario, async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    f.state["projectless-thread-ids"] = [CHILD];
+    let raw = headers(CHILD), writer;
+    if (scenario === "cycle") {f.edge(T1, CHILD);f.edge(CHILD, T1);delete f.state["thread-project-assignments"][T1];}
+    if (scenario === "forged parent") raw = headers(CHILD, {parent_thread_id: T1});
+    if (scenario === "incompatible session") raw = ["thread-id", CHILD, "session-id", T1];
+    if (scenario === "malformed marker") f.state["projectless-thread-ids"].push(null);
+    if (scenario === "missing database") await unlink(f.dbPath);
+    if (scenario === "locked database") {writer = new DatabaseSync(f.dbPath);writer.exec("BEGIN EXCLUSIVE");}
+    if (scenario === "malformed parent") f.edge("invalid", CHILD);
+    if (scenario === "saved thread only") {f.thread(CHILD);f.state["projectless-thread-ids"] = [];}
+    if (scenario === "33 nodes") {
+      let child = CHILD;
+      for (let i = 1; i <= 32; i++) {
+        const parent = `${String(i).padStart(8, "0")}-dddd-4ddd-8ddd-dddddddddddd`;
+        f.edge(parent, child);
+        child = parent;
+      }
+    }
+    await f.saveState();
+    const before = await readFile(f.statePath);
+    const databaseBefore = scenario === "missing database" ? undefined : await readFile(f.dbPath);
+    try {
+      await assert.rejects(identifyProject(raw, f.config, {allowProjectless: true}), {code});
+    } finally {
+      if (writer) {writer.exec("ROLLBACK");writer.close();}
+    }
+    assert.deepEqual(await readFile(f.statePath), before);
+    if (databaseBefore) assert.deepEqual(await readFile(f.dbPath), databaseBefore);
+    else await assert.rejects(readFile(f.dbPath), {code: "ENOENT"});
+  });
+  await t.test("32 nodes and supported session", async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    let child = CHILD;
+    for (let i = 1; i <= 31; i++) {
+      const parent = `${String(i).padStart(8, "0")}-dddd-4ddd-8ddd-dddddddddddd`;
+      f.edge(parent, child);
+      child = parent;
+    }
+    f.state["projectless-thread-ids"] = ["00000031-dddd-4ddd-8ddd-dddddddddddd"];
+    await f.saveState();
+    assert.deepEqual(await identifyProject(["thread-id", CHILD, "session-id", "00000031-dddd-4ddd-8ddd-dddddddddddd"],
+      f.config, {allowProjectless: true}),
+    {threadId: CHILD, ownerThreadId: "00000031-dddd-4ddd-8ddd-dddddddddddd", source: "projectless"});
+  });
+  await t.test("cancelled lookups", async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    await assert.rejects(identifyProject(headers(CHILD), f.config,
+      {allowProjectless: true, signal: AbortSignal.abort()}), {code: "CANCELLED"});
+    const controller = new AbortController();
+    const pending = identifyProject(headers(CHILD), f.config, {allowProjectless: true, signal: controller.signal});
+    await delay(70);
+    controller.abort();
+    await assert.rejects(pending, {code: "CANCELLED"});
+  });
+});
+
+test("fresh projectless marker may appear within the existing lookup window", async t => {
+  const f = await fixture(t);
+  f.config.schemaVersion = 2;
+  f.config.accountRouting = accountRouting();
+  const pending = identifyProject(headers(CHILD), f.config, {allowProjectless: true});
+  await delay(70);
+  f.state["projectless-thread-ids"] = [CHILD];
+  await f.saveState();
+  const before = await f.snapshot();
+  assert.deepEqual(await pending, {threadId: CHILD, ownerThreadId: CHILD, source: "projectless"});
+  assert.deepEqual(await f.snapshot(), before);
+});
+
+test("projectless permission leaves legacy and title admission unchanged", async t => {
+  for (const [schemaVersion, accounts, permission] of [
+    [2, true, undefined], [2, true, false], [2, true, "true"], [1, true, true], [2, false, true],
+  ]) await t.test(`legacy ${schemaVersion} ${accounts} ${permission}`, async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = schemaVersion;
+    if (accounts) f.config.accountRouting = accountRouting();
+    f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    await assert.rejects(identifyProject(headers(CHILD), f.config, {allowProjectless: permission}), {code: "PROJECT_UNRESOLVED"});
+  });
+  await t.test("ordinary identity takes title precedence", async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    for (const optIn of [false, true]) {
+      f.config.allowUnassignedThreadTitles = optIn;
+      assert.deepEqual(await identifyProject(titleHeaders(CHILD), f.config, {allowProjectless: true, allowUnassignedTitle: true}),
+        {threadId: CHILD, ownerThreadId: CHILD, source: "projectless"});
+      assert.equal((await identifyProject(titleHeaders(T1), f.config, {allowProjectless: true, allowUnassignedTitle: true})).projectId, P1);
+    }
+  });
+  await t.test("unknown title still requires opt-in and absence proof", async t => {
+    const f = await fixture(t);
+    f.config.schemaVersion = 2;
+    f.config.accountRouting = accountRouting();
+    await assert.rejects(identifyProject(titleHeaders(), f.config, {allowProjectless: true, allowUnassignedTitle: true}),
+      {code: "STATE_UNAVAILABLE"});
+    f.config.allowUnassignedThreadTitles = true;
+    assert.deepEqual(await identifyProject(titleHeaders(), f.config, {allowProjectless: true, allowUnassignedTitle: true}),
+      {threadId: CHILD, source: "unassigned_title"});
+    await assert.rejects(identifyProject(titleHeaders(), f.config, {allowProjectless: true}), {code: "STATE_UNAVAILABLE"});
+    f.thread(CHILD);
+    await assert.rejects(identifyProject(titleHeaders(), f.config, {allowProjectless: true, allowUnassignedTitle: true}),
+      {code: "STATE_UNAVAILABLE"});
+  });
 });
 
 
