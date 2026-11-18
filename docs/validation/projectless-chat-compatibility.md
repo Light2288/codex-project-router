@@ -10,9 +10,12 @@ fixture error. That run's exact recovery is verified. A corrected run observed
 reopened projectless Off→On→Off replies on one retained listener and the intended
 control selection categories, with cancelled control streams retained separately.
 Both runs ended with human Direct confirmation, guarded Stop/Quit and independently
-verified exact recovery. Acceptance evidence is recorded with its limits; the
-sole final sequential review and lifecycle closeout remain **PENDING**. This
-record does not declare the increment fully complete or authorize another one.
+verified exact recovery. **Acceptance remains incomplete:** Task 6 Step 3's
+explicit guarded routed-response confirmation action is **unproven/unmet**.
+The final specification review returned **MISSING**; the sequential quality
+review has **not run**. Successful replies and restoration do not supply the
+missing confirmation action. Lifecycle closeout and the increment remain
+incomplete; no later increment is authorized.
 
 Scope: the approved [specification](../superpowers/specs/2026-11-18-projectless-chat-compatibility.md)
 and separate [implementation plan](../superpowers/plans/2026-11-18-projectless-chat-compatibility.md).
@@ -127,7 +130,7 @@ does not establish every byte of delivery.
 | --- | --- | --- | --- | --- |
 | Exact tested app and owned listener | N/A | N/A | N/A | Controller's native-launch proof, exact private live app/listener attribution and post-run source/bundle/signature match recorded |
 | Native account-mode guidance legible without promoting readiness/control authority | N/A | UNOBSERVED in this run | N/A | Observed separately in corrected run below |
-| Explicit startup Off and initial guarded activation/restart confirmation | N/A | Fresh Off reply confirmed below | HTTP 200 below | Started-Off/guarded live sequence recorded privately; actual fresh routed response confirmed |
+| Explicit startup Off and initial guarded activation/restart confirmation | N/A | Fresh Off reply observed below | HTTP 200 below | Started-Off and actual reply evidence retained; explicit guarded routed-response confirmation action UNPROVEN/UNMET |
 | Genuinely fresh chat outside every project, first message in Off | ORIGINAL | Human confirmed reply | HTTP 200 | Positive supported marker; target thread absent from preactivation DB IDs; first-message evidence observed |
 | Same-chat follow-up after switching On | ORIGINAL | Human confirmed reply | HTTP 200 | Observed; first-run owned listener attributed |
 | Extra same-chat On follow-up | ORIGINAL | Human confirmed reply | HTTP 200 | Observed separately |
@@ -208,6 +211,15 @@ observed. Journal phase `routed_confirmation` alone does not prove a pending
 confirmation: in-memory confirmation can leave that journal phase unchanged.
 The actual observed UI state and the later Direct-pending state below are kept
 separate from journal-phase inference.
+
+The final specification review identified the required guarded routed-response
+confirmation action as unproven. No direct evidence records that action and its
+resulting state. Task 6 Step 3 is therefore **unmet**, even though the replies,
+HTTP statuses, identity proof and later exact Direct recovery are observed. The
+reply cannot stand in for the explicit confirmation control. The final
+specification result is **MISSING** and quality review has **not run**; acceptance
+and increment completion remain incomplete. A pending human-availability question
+for a bounded retest supplies no answer or additional evidence.
 
 Disabled live titles and unperformed live compaction/ancestry/in-flight cases
 remain UNRUN; deterministic automated coverage is unchanged. General stream
@@ -292,15 +304,17 @@ part of the evidence.
 | AC-06 | Scoped managed schema-2 policy, unchanged legacy/standalone behavior and setup/control boundaries covered by Tasks 1–5; final current-source chain PASS |
 | AC-07 | Diagnostic privacy/current guidance and relocated source-denied package coverage pass; read-only native observation confirms exact guidance and guarded On/owned-ready presentation |
 | AC-08 | Required ordered current-source checks PASS with disclosed intentional warnings |
-| AC-09 | Initial supported fresh first message/distinct-default evidence plus corrected reopened Off→On→Off replies on one listener and intended control selection categories observed; control transport cancellation and separate-run limits explicit; final disposition awaits whole-branch review |
+| AC-09 | Fresh/reopened projectless replies, distinct-default evidence and control selection observations retained with their limits; the required Task 6 Step 3 guarded routed-response confirmation action is UNPROVEN/UNMET, so acceptance remains incomplete |
 | AC-10 | Human projectless replies separated from initiating HTTP 200, control/ancillary 499, unknown-identity 503 and initial controller 401. Disabled titles and unperformed live compaction/ancestry/in-flight cases UNRUN |
 | AC-11 | Both runs recovered with required human restart/direct-reply confirmation and guarded Stop/Quit; final independent process/listener absence, both Direct/restored contexts, byte-exact owned settings/journal and optional-property restoration verified |
-| AC-12 | Tasks 1–5 independent task reviews Approved with no findings; sole final whole-branch specification → quality gate PENDING |
+| AC-12 | Tasks 1–5 task reviews Approved. Final whole-branch specification review: MISSING for unproven guarded routed-response confirmation; sequential quality review NOT RUN; final gate and lifecycle closeout incomplete |
 
 The controller owns the sole final sequential review against implementation base
 `91b53e0` and the approved pair. Task-level approvals do not replace that gate.
-Acceptance evidence and recovery are complete for this assigned documentation
-task. Final whole-branch approval and increment/lifecycle completion are not
-claimed. Account editing/deletion, project visibility, broader UI and distribution
-remain deferred; the controller proceeds only to the authorized final review and
-local closeout.
+Successful acceptance observations and exact recovery remain recorded, but the
+required guarded routed-response confirmation action is unproven/unmet. Final
+specification review is MISSING; quality review has not run. Acceptance, the final
+gate and increment/lifecycle closeout are incomplete. Account editing/deletion,
+project visibility, broader UI and distribution remain deferred. Any bounded
+retest must obtain actual human action/evidence; the pending availability question
+is not treated as answered.

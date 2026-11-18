@@ -123,9 +123,11 @@ projectless first reply. A corrected run also observed reopened Off→On→Off
 projectless replies on one retained listener. Both runs ended with verified Direct
 recovery. The [current acceptance record](validation/projectless-chat-compatibility.md)
 retains both runs, cancelled control transports, the initial fixture failure and
-exact restoration evidence separately; final whole-branch review remains pending.
-Synthetic evidence cannot substitute for required live checks. No new desktop-state
-source or unresolved-request fallback is introduced.
+exact restoration evidence separately. Guarded routed-response confirmation is
+unproven/unmet; acceptance remains incomplete. Final specification review returned
+MISSING and quality review has not run. Synthetic evidence cannot substitute for
+required live checks. No new desktop-state source or unresolved-request fallback
+is introduced.
 
 The separate `allowUnassignedThreadTitles` option stays off by default. Its strict
 metadata matching and fresh absence proof still apply. Ordinary proven project or
@@ -425,8 +427,9 @@ custom activation contexts and recovery details. The [managed-routing validation
 record](validation/companion-routing-on-off.md) records completed local acceptance
 and final review, qualified native/live observations and accepted viewport/Tab
 limitations. The separate [projectless acceptance record](validation/projectless-chat-compatibility.md)
-now records bounded native/live observations and verified recovery; its final
-whole-branch review remains pending.
+records bounded native/live observations, exact recovery and the unmet guarded
+routed-response confirmation requirement. Final specification review is MISSING,
+quality review has not run and acceptance remains incomplete.
 Historical validation reports retain their original scope and limitations.
 
 ## Development checks
