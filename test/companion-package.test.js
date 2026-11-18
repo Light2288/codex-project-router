@@ -15,6 +15,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
 const brandingNames = ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff'];
 const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
+const projectlessProbe = join(root,'test/helpers/projectless-package-probe.mjs');
 const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
@@ -115,6 +116,38 @@ function processes(t) {
 async function reusablePort(port) {
   const empty = net.createServer(); empty.listen(port,'127.0.0.1'); await once(empty,'listening');
   await new Promise(resolve => empty.close(resolve));
+}
+async function prepareProjectlessProbe(dir) {
+  const fixtureRoot = join(dir,'private request probe');
+  await mkdir(fixtureRoot,{mode:0o700});
+  await cp(projectlessProbe,join(fixtureRoot,'projectless-package-probe.mjs'));
+  for (const name of ['test-only-key.pem','test-only-cert.pem'])
+    await cp(join(root,'test/fixtures/tls',name),join(fixtureRoot,name));
+  return fixtureRoot;
+}
+async function bundledProjectlessProbe(t, lifecycle, {node,router,fixtureRoot,dir,env,profile}) {
+  const args = [join(fixtureRoot,'projectless-package-probe.mjs'),'--router-root',router,'--fixture-root',fixtureRoot];
+  const tracked = profile
+    ? lifecycle.start('/usr/bin/sandbox-exec',['-f',profile,node,...args],{cwd:dir,env})
+    : lifecycle.start(node,args,{cwd:dir,env});
+  tracked.child.stdin.end();
+  let ports;
+  try {
+    assert.deepEqual(await lifecycle.wait(tracked,15_000),[0,null],tracked.stderr);
+    assert.equal(tracked.stdout,'projectless-package-pass\n');
+    assert.equal(tracked.stderr,'');
+  } finally {
+    // wait() reaps the owned process on success, failure and timeout before any
+    // port is checked, including when the runner cannot finish its own finally.
+    await lifecycle.stop(tracked);
+    ports = JSON.parse(await readFile(join(fixtureRoot,'ports.json'),'utf8'));
+    const outcomes = await Promise.allSettled(ports.map(reusablePort));
+    const errors = outcomes.filter(result => result.status === 'rejected').map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors,'Request probe ports remained bound');
+  }
+  assert.equal(ports.length,4);
+  assert.equal(new Set(ports).size,4);
+  t.diagnostic('Bundled request probe passed: original response/compact, catalog and eligible title in On/Off (8 calls); mapped override On/default Off (2 calls); unknown/conflicting identity and invalid auth denied (8 requests). Its process was absent and all four synthetic ports were reusable. Credential-reader seam only; native Keychain evidence remains separate.');
 }
 async function nextFrame(tracked) {
   for (let i=0;i<200;i++) {
@@ -478,6 +511,8 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   await assert.rejects(run(node,[join(buildRoot,'scripts/build-companion.mjs')],{cwd:dir,env:{PATH:join(buildRoot,'fixture bin')+':/usr/bin:/bin',HOME:dir,TMPDIR:tmpdir()}}), /branding resource MenuBarIconTemplate.tiff/);
   const home=join(dir,'private codex'); await mkdir(home,{mode:0o700});
   const env={HOME:home,CFFIXED_USER_HOME:home,PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'};
+  const requestFixture = await prepareProjectlessProbe(dir);
+  await bundledProjectlessProbe(t,lifecycle,{node,router,fixtureRoot:requestFixture,dir,env});
   const cli=join(router,'src/companion-cli.js');
   async function bridge(request) {
     const tracked=lifecycle.start(node,['--use-system-ca',cli],{cwd:dir,env});
@@ -586,6 +621,7 @@ test('native relocated app and bundled controls work with checkout reads denied 
   await mkdir(codexHome,{recursive:true,mode:0o700});
   await mkdir(store,{recursive:true,mode:0o700});
   const env = {HOME:home,CFFIXED_USER_HOME:home,PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'};
+  const requestFixture = await prepareProjectlessProbe(dir);
   const profile = join(dir,'deny-checkout.sb');
   // Seatbelt resolves symlinks. Deny both spellings and guard the user's private
   // stores even if a future native-home regression bypasses the synthetic home.
@@ -669,6 +705,7 @@ print("native-window-deadline"); exit(1)`;
   t.diagnostic('Relocated signed native executable displayed its own on-screen window and held the synthetic companion instance.lock under source-denial confinement.');
 
   const router = join(app,'Contents/Resources/router');
+  await bundledProjectlessProbe(t,lifecycle,{node,router,fixtureRoot:requestFixture,dir,env,profile});
   async function bridge(request) {
     const execution = confined(node,['--use-system-ca',join(router,'src/companion-cli.js')]);
     execution.child.stdin.end(JSON.stringify({schemaVersion:1,...request}));
