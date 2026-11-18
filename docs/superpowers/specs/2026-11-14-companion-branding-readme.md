@@ -8,9 +8,9 @@
 
 **Created:** 2026-11-14
 
-**Updated:** 2026-11-14
+**Updated:** 2026-11-16
 
-**Provenance:** User's icon integration and README request; scope/design explicitly confirmed with “scope and design confirmed.” The DRAFT specification was presented in chat during Plan mode on 2026-11-14 because that mode prohibited saving it. The next user message, “Please implement the plan.”, accepts that presented specification and advances only its pending gate under the supplied AGENTS.md. Specification approval authorizes a separate implementation plan only; no implementation plan has been presented or approved. This file materializes that specification with approval and storage metadata updated; its approved scope is unchanged.
+**Provenance:** User's icon integration and README request; scope/design explicitly confirmed with “scope and design confirmed.” The DRAFT specification was presented in chat during Plan mode on 2026-11-14 because that mode prohibited saving it. The next user message, “Please implement the plan.”, accepts that presented specification and advances only its pending gate under the supplied AGENTS.md. At that historical handoff, specification approval authorized a separate implementation plan only. That plan was subsequently presented and separately approved with a second “Please implement the plan.” before implementation; see the approval evidence below. This file materializes that specification with approval and storage metadata updated; its approved scope is unchanged.
 
 ## Problem and desired outcome
 
@@ -88,4 +88,36 @@ Artwork redesign, animated or state-dependent icons, broad interface changes, ro
 
 **Execution endpoint:** Complete the approved branding and documentation update, verification, final review, and local commits; report the result and limitations, then stop.
 
-**Current stage:** Stage 3 — implementation planning is authorized. The specification has been approved and saved. A separate implementation plan must be presented and explicitly approved before product changes. Keep this specification uncommitted until the implementation branch is created after both approvals; preserve the existing checkout and local changes.
+## Lifecycle reconciliation — 2026-11-16
+
+The former Stage 3 marker described the specification-save handoff, not the
+subsequent implementation state. This correction changes no approved requirement.
+The original failed review remains recorded in the validation report.
+
+Separate approval evidence was verified in the original chat **Design companion
+app icons** (`01a1db67-aa35-79c2-b917-abd3bfe04578`):
+
+- Scope/design: “scope and design confirmed” in turn
+  `01a1dbde-3b9f-7a70-a97d-6c88c39200df`.
+- Specification: presented in turn `01a1dbe2-1214-7f60-a93e-e4569e65e523`;
+  approved with “Please implement the plan.” in turn
+  `01a1dbe5-f681-7262-a5c2-46e6fea9252f`.
+- Implementation plan: separately presented in turn
+  `01a1dbe9-1e6e-79a3-8848-db31455f2c32`; approved with a second
+  “Please implement the plan.” in turn `01a1dbf5-b593-7d00-b179-2acff98ef148`.
+
+The original review concerns branding through `2c20965`, including implementation
+`609ee6b`, from baseline `5be89ca45ca4d50824827eed37063236a6c0f8ff`.
+Later separately approved Dock-presence and icon-rendering increments supersede
+this document's historical Dock behavior and icon packaging where applicable.
+Their requirements and completed reviews are not reopened by this closeout.
+
+**Current stage:** Stage 4 — branding implementation and local closeout complete.
+Separate specification and plan approvals are verified above. After lifecycle
+reconciliation, the resumed specification review returned PASS, then the quality
+review returned PASS with no findings on the same unchanged package. The original
+BLOCKED run remains historical evidence in the
+[validation report](../../validation/companion-branding-readme.md). This resumption
+changes documentation only; historical acceptance is not fresh runtime evidence.
+Keep the separate local closeout branch; no assignment implementation, push or
+merge is authorized by this completion.

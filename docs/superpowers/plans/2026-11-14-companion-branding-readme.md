@@ -16,7 +16,7 @@
 
 **Created:** 2026-11-14
 
-**Updated:** 2026-11-14
+**Updated:** 2026-11-16
 
 **Execution tier:** full
 
@@ -85,11 +85,28 @@
 - [x] Run the established acceptance sequence: `npm run companion:test`, `npm run companion:build`, `npm test`, `npm run companion:package-test`, `node --check src/cli.js`, and `git diff --check`. Retain exit statuses and decisive results; expect zero failures and no package-test skips.
 - [x] Confirm the relocated-app checks cover branding resources, valid signing, and operation with checkout reads denied. Preserve existing isolation and owned-process cleanup.
 - [x] Record source hashes, icon representations, visual observations, documentation checks, and acceptance results in a concise validation record. Label anything unobserved.
-- [ ] Run `personal-workflows:code-review` once as the final integrated review: specification review first, then quality review after specification PASS. Resolve findings within the approved scope and rerun affected checks.
-- [ ] Commit closeout documentation, verify the final Git state, and report the working result, evidence, and limitations.
+- [x] Run `personal-workflows:code-review` once as the final integrated review: specification review first, then quality review after specification PASS. Resolve findings within the approved scope and rerun affected checks.
+- [x] Commit closeout documentation, verify the final Git state, and report the working result, evidence, and limitations.
 
 **Criterion coverage:** Task 1 covers artwork/native integration; Task 2 covers documentation; Task 3 supplies the combined verification and final review required by AC-08.
 
 **Execution endpoint:** Deliver and locally commit the verified branding/documentation increment, report results, and stop without installation, pushing, merging, or subsequent feature work.
 
-**Current stage:** Stage 4 — implementation authorized by the separately presented and approved specification and implementation plan. Both artifacts are saved. Preserve their filenames and scope.
+**Current stage:** Stage 4 — branding implementation and local closeout complete. Separate approvals are verified in the specification. The resumed specification review passed before quality review passed, with no findings. The validation report preserves the original BLOCKED result and records the resumed gate identity. Approved requirements and filenames remain unchanged.
+
+## Closeout resumption — 2026-11-16
+
+The original separately presented specification and plan approvals were verified
+against their user messages; see the specification's lifecycle reconciliation.
+Only remaining Task 3 review/closeout steps are resumed on
+`docs/companion-branding-closeout`, based on current `main` at `c0a5a53`.
+No product changes, reimplementation, main update, worktree, push or merge are
+part of this resumption. Review covers the original branding range plus these
+metadata corrections; it does not reopen later increments. Historical acceptance
+remains dated evidence, with no fresh full suite or live-app claim.
+
+Both resumed stages passed against the same immutable package, with no findings.
+The sole outstanding review seat is complete; no duplicate generic review or
+product fix pass was run. Final follow-up edits record obtained review outcomes
+and completed lifecycle/checklists only. Local documentation checks and commit
+verification establish this closeout, not new product/runtime acceptance.
