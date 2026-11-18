@@ -1,3 +1,5 @@
+import * as configurationFS from "node:fs/promises";
+import { constants } from "node:fs";
 import { readFile, realpath, stat, lstat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, dirname, basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +92,48 @@ async function readConfiguration(configPath) {
   }
   return { value, source };
 }
+// Assignment authority binds descriptor-validated bytes to their canonical inode.
+// Legacy browsing keeps its existing, less restrictive read contract above.
+export function configurationIdentityFor(configPath, config, directoryInfo, fileInfo) {
+  return createHash("sha256").update(JSON.stringify([
+    [configPath, config.codexHome, config.providerId, config.listenPort],
+    [directoryInfo.dev, directoryInfo.ino],
+    [fileInfo.dev, fileInfo.ino, fileInfo.uid, fileInfo.mode, fileInfo.nlink, fileInfo.size],
+  ])).digest("hex");
+}
+export async function readRouterConfigurationSource(configPath, { fs = configurationFS } = {}) {
+  if (typeof configPath !== "string" || !isAbsolute(configPath) || resolve(configPath) !== configPath)
+    throw new RouterError("CONFIG_INVALID");
+  // Reuse the established checkout/bundle containment policy without changing
+  // the compatibility contract of inspectRouterConfiguration.
+  await readConfiguration(configPath);
+  const directory = dirname(configPath), parent = await fs.lstat(directory);
+  const privateDirectory = info => info.isDirectory() && info.uid === process.getuid() && !(info.mode & 0o077);
+  const privateFile = info => info.isFile() && info.uid === process.getuid() && info.nlink === 1 && !(info.mode & 0o077);
+  const same = (a, b) => ["dev", "ino", "uid", "mode", "nlink", "size", "mtimeMs", "ctimeMs"].every(key => a[key] === b[key]);
+  if (!privateDirectory(parent) || await fs.realpath(directory) !== directory || await fs.realpath(configPath) !== configPath)
+    throw new RouterError("ACTIVATION_CONFLICT");
+  const pathInfo = await fs.lstat(configPath);
+  if (!privateFile(pathInfo)) throw new RouterError("ACTIVATION_CONFLICT");
+  const handle = await fs.open(configPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!privateFile(before) || !same(pathInfo, before)) throw new RouterError("ACTIVATION_CONFLICT");
+    const bytes = await handle.readFile(), after = await handle.stat();
+    const latest = await fs.lstat(configPath), latestParent = await fs.lstat(directory);
+    if (!same(before, after) || !same(after, latest) || !privateDirectory(latestParent) ||
+      parent.dev !== latestParent.dev || parent.ino !== latestParent.ino || parent.uid !== latestParent.uid || parent.mode !== latestParent.mode ||
+      await fs.realpath(directory) !== directory || !(await fs.readFile(configPath)).equals(bytes))
+      throw new RouterError("ACTIVATION_CONFLICT");
+    const final = await handle.stat();
+    if (!same(final, after) || !same(final, await fs.lstat(configPath))) throw new RouterError("ACTIVATION_CONFLICT");
+    const source = new TextDecoder("utf-8", {fatal:true}).decode(bytes), value = JSON.parse(source);
+    const inspection = inspectRouterConfigurationValue(value);
+    if (inspection.setupState === "invalid") throw new RouterError("ACCOUNT_SETUP_INVALID");
+    return { value, ...inspection, source, configurationRevision:createHash("sha256").update(bytes).digest("hex"),
+      configurationIdentity:configurationIdentityFor(configPath, inspection.config, parent, final), fileInfo:final, directoryInfo:parent };
+  } finally { await handle.close(); }
+}
 function operationalConfig(value) {
   const fields = [
     "schemaVersion",
@@ -174,8 +218,7 @@ function accountRouting(value) {
     throw new RouterError("ACCOUNT_SETUP_INVALID");
   }
 }
-export async function inspectRouterConfiguration(configPath) {
-  const { value, source } = await readConfiguration(configPath);
+export function inspectRouterConfigurationValue(value) {
   const core = operationalConfig(value);
   let config, setupState;
   if (value.schemaVersion === 1) {
@@ -189,13 +232,18 @@ export async function inspectRouterConfiguration(configPath) {
       if (error.code !== "ACCOUNT_SETUP_INVALID") throw error;
       // Unsafe account metadata is neither exposed nor hashed. Core validation
       // remains authoritative for browsing and restoring the original provider.
-      return Object.freeze({ config: core, setupState: "invalid", configurationRevision: null });
+      return Object.freeze({ config: core, setupState: "invalid" });
     }
     config = Object.freeze({ ...core, accountRouting: routing });
     setupState = routing.incomingCredential !== null && routing.defaultAccountId !== null ? "ready" : "required";
   }
-  return Object.freeze({ config, setupState,
-    configurationRevision: createHash("sha256").update(source).digest("hex") });
+  return Object.freeze({ config, setupState });
+}
+export async function inspectRouterConfiguration(configPath) {
+  const { value, source } = await readConfiguration(configPath);
+  const inspection = inspectRouterConfigurationValue(value);
+  return Object.freeze({ ...inspection, configurationRevision: inspection.setupState === "invalid"
+    ? null : createHash("sha256").update(source).digest("hex") });
 }
 export async function loadRouterConfig(configPath) {
   const inspection = await inspectRouterConfiguration(configPath);

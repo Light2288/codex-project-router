@@ -5,6 +5,203 @@ import Darwin
 @MainActor final class RouterModeChannelTests: XCTestCase {
     private let context = ActivationContext(configPath: "/synthetic/config.json", codexHome: "/synthetic/home", providerId: "fixture", listenPort: 43129)
 
+    func testAssignmentRequiresCapabilityAndExactChild() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.readyAndWait()
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Missing capability accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        let reading = Task { try await peer.channel.readMode() }
+        let read = try await peer.command(); try await peer.reply(to: read, mode: "off")
+        _ = try await reading.value
+        XCTAssertEqual(peer.commands.count, 1)
+    }
+
+    func testAssignmentTimeoutNeedsFreshAssignmentRead() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        let command = try await peer.command()
+        XCTAssertEqual(command["action"] as? String, "set_assignment")
+        XCTAssertTrue(command.keys.contains("accountId")); XCTAssertTrue(command["accountId"] is NSNull)
+        do { _ = try await saving.value; XCTFail("Timeout accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Unreconciled write accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let reading = Task { try await peer.channel.readAssignment(projectID: change.projectId, operationID: change.operationId) }
+        let read = try await peer.command()
+        try await peer.assignmentReply(to: read, state: AssignmentFixtures.state(change, applied: true))
+        let state = try await reading.value
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertEqual(peer.commands.filter { $0["action"] as? String == "set_assignment" }.count, 1)
+        do { _ = try await peer.channel.applyAssignment(change); XCTFail("Immediate operation ID reused") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict) }
+        var next = AssignmentFixtures.change()
+        next.expectedSavedRevision = AssignmentFixtures.candidate; next.expectedConfigurationIdentity = AssignmentFixtures.candidateIdentity
+        next.expectedRunningRevision = AssignmentFixtures.candidate
+        let explicitSave = Task { try await peer.channel.applyAssignment(next) }
+        let nextCommand = try await peer.command()
+        try await peer.assignmentFailure(to: nextCommand, outcome: "rejected", code: "ASSIGNMENT_CONFLICT")
+        do { _ = try await explicitSave.value; XCTFail("Conflict accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict) }
+    }
+
+    func testModeReadCannotReconcileAssignment() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        _ = try await peer.command(); saving.cancel()
+        do { _ = try await saving.value; XCTFail("Cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let reading = Task { try await peer.channel.readMode() }
+        let read = try await peer.command(); try await peer.reply(to: read, mode: "off"); _ = try await reading.value
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Mode read settled persistence") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertEqual(peer.commands.count, 2)
+    }
+
+    func testQueuedFreshReadIgnoresRetiredMutationReply() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        let old = try await peer.command(); saving.cancel()
+        do { _ = try await saving.value; XCTFail("Cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let reading = Task { try await peer.channel.readAssignment(projectID: change.projectId, operationID: change.operationId) }
+        let read = try await peer.command()
+        try await peer.assignmentResult(to: old, change: change)
+        var state = try AssignmentFixtures.state(change, applied: true)
+        state["savedState"] = "unavailable"; state["savedRevision"] = NSNull(); state["savedIdentity"] = NSNull()
+        state["savedFingerprint"] = NSNull(); state["savedAssignment"] = NSNull(); state["catalogRevision"] = NSNull(); state["intent"] = NSNull()
+        try await peer.assignmentReply(to: read, state: state)
+        let result = try await reading.value; XCTAssertEqual(result.savedState, "unavailable")
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Late result settled persistence") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+    }
+
+    func testPartialFrameDisablesChannelWithoutSignalling() async throws {
+        // A truncated response cannot grant authority and EOF cannot authorize a second write.
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let saving = Task { try await peer.channel.applyAssignment(AssignmentFixtures.change()) }
+        _ = try await peer.command()
+        try await peer.write(Data("{\"schemaVersion\":1".utf8)); try peer.routerOutput.close()
+        do { _ = try await saving.value; XCTFail("Partial response accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        do { _ = try await peer.channel.readAssignment(projectID: nil, operationID: nil); XCTFail("Broken channel accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+    }
+
+    func testAppliedAssignmentRequiresMatchingChoiceAndRuntimeAttestation() async throws {
+        // A plausible commit cannot attest another choice or a different runtime snapshot.
+        for variant in ["choice", "runtime", "intent", "extra", "nullSummary", "badToken", "missingNull"] {
+            let peer = ModePeer(context: context); defer { peer.close() }
+            try await peer.assignmentReady()
+            let change = AssignmentFixtures.change()
+            let saving = Task { try await peer.channel.applyAssignment(change) }
+            let command = try await peer.command()
+            var commit = try AssignmentFixtures.commit(change), state = try AssignmentFixtures.state(change, applied: true)
+            switch variant {
+            case "choice": commit["after"] = ["kind": "override", "routeAlias": "synthetic", "account": ["id": AssignmentFixtures.account, "displayName": "Synthetic"]]
+            case "runtime": state["runningRevision"] = AssignmentFixtures.token; state["runningIdentity"] = AssignmentFixtures.identity
+            case "intent": var intent = AssignmentFixtures.intent(change); intent["accountId"] = AssignmentFixtures.account; commit["intent"] = intent
+            case "extra": state["privateSource"] = "synthetic"
+            case "nullSummary": var summary = AssignmentFixtures.summary; summary["routeAlias"] = NSNull(); state["savedAssignment"] = summary
+            case "badToken": state["savedIdentity"] = "INVALID"
+            default: state.removeValue(forKey: "lastAttempt")
+            }
+            try await peer.assignmentResult(to: command, commit: commit, state: state)
+            do { _ = try await saving.value; XCTFail("Unsafe applied attestation accepted: \(variant)") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+            do { _ = try await peer.channel.readAssignment(projectID: change.projectId, operationID: change.operationId); XCTFail("Malformed channel stayed available: \(variant)") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        }
+    }
+
+    func testPartialOutboundAssignmentRetiresTheEntireChannel() async throws {
+        // Appending a query after a partially delivered JSON command would corrupt the stream.
+        let longContext = ActivationContext(configPath: "/" + String(repeating: "a", count: 7000), codexHome: context.codexHome, providerId: context.providerId, listenPort: context.listenPort)
+        let peer = ModePeer(context: longContext); defer { peer.close() }
+        try await peer.assignmentReady()
+        let filled = peer.fillInputPipe(); XCTAssertGreaterThan(filled, 4096)
+        XCTAssertEqual(peer.discardInput(maximum: 4096), 4096)
+        let saving = Task { try await peer.channel.applyAssignment(AssignmentFixtures.change(context: longContext)) }
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertGreaterThan(peer.channel.retainedOutputByteCount, 4096)
+        saving.cancel()
+        do { _ = try await saving.value; XCTFail("Partial command accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertGreaterThan(peer.discardInput(), filled - 4096, "No partial command was delivered")
+        do { _ = try await peer.channel.readAssignment(projectID: nil, operationID: nil); XCTFail("Query appended after partial command") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertEqual(peer.channel.retainedOutputByteCount, 0)
+    }
+
+    func testUncertainAssignmentResultRequiresMatchingFreshEvidence() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        let command = try await peer.command()
+        try await peer.assignmentFailure(to: command, outcome: "uncertain", code: "ASSIGNMENT_UNCERTAIN")
+        do { _ = try await saving.value; XCTFail("Uncertain result accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let unrelated = Task { try await peer.channel.readAssignment(projectID: change.projectId, operationID: UUID().uuidString) }
+        let unrelatedCommand = try await peer.command()
+        try await peer.assignmentReply(to: unrelatedCommand, state: AssignmentFixtures.state(change))
+        _ = try await unrelated.value
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Unrelated operation reconciled") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let matching = Task { try await peer.channel.readAssignment(projectID: change.projectId, operationID: change.operationId) }
+        let matchingCommand = try await peer.command()
+        try await peer.assignmentReply(to: matchingCommand, state: AssignmentFixtures.state(change))
+        _ = try await matching.value
+        let next = Task { try await peer.channel.applyAssignment(AssignmentFixtures.change()) }
+        let nextCommand = try await peer.command()
+        try await peer.assignmentFailure(to: nextCommand, outcome: "rejected", code: "ASSIGNMENT_UNAVAILABLE")
+        do { _ = try await next.value; XCTFail("Unavailable accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+    }
+
+    func testMalformedRetiredAssignmentReplyDisablesControl() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.assignmentReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        let old = try await peer.command(); saving.cancel()
+        do { _ = try await saving.value; XCTFail("Cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let reading = Task { try await peer.channel.readAssignment(projectID: change.projectId, operationID: change.operationId) }
+        let read = try await peer.command()
+        var malformed = try AssignmentFixtures.commit(change); malformed["extra"] = true
+        try await peer.assignmentResult(to: old, commit: malformed, state: AssignmentFixtures.state(change, applied: true))
+        try await peer.assignmentReply(to: read, state: AssignmentFixtures.state(change, applied: true))
+        do { _ = try await reading.value; XCTFail("Malformed retired frame was ignored") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+    }
+
+    func testExplicitAccountChoiceAndNoOpUseTheirExactOperation() async throws {
+        for explicit in [true, false] {
+            let peer = ModePeer(context: context); defer { peer.close() }
+            try await peer.assignmentReady()
+            var change = AssignmentFixtures.change(); change.accountId = explicit ? AssignmentFixtures.account : nil
+            let saving = Task { try await peer.channel.applyAssignment(change) }
+            let command = try await peer.command()
+            XCTAssertEqual(command["requestId"] as? String, change.operationId)
+            var commit = try AssignmentFixtures.commit(change), state = try AssignmentFixtures.state(change, applied: explicit)
+            if explicit {
+                XCTAssertEqual(command["accountId"] as? String, AssignmentFixtures.account)
+                let summary: [String: Any] = ["kind": "override", "routeAlias": "explicit", "account": ["id": AssignmentFixtures.account, "displayName": "Synthetic"]]
+                commit["after"] = summary; state["savedAssignment"] = summary; state["runningAssignment"] = summary
+            } else {
+                commit["changed"] = false; commit["checkpointPath"] = NSNull(); commit["intent"] = NSNull()
+                for key in ["candidateRevision", "savedRevision", "runningRevision"] { commit[key] = AssignmentFixtures.token }
+                for key in ["candidateIdentity", "savedIdentity", "runningIdentity"] { commit[key] = AssignmentFixtures.identity }
+            }
+            try await peer.assignmentResult(to: command, commit: commit, state: state)
+            let applied = try await saving.value
+            XCTAssertEqual(applied.changed, explicit); XCTAssertEqual(applied.after.kind, explicit ? "override" : "inherited")
+            do { _ = try await peer.channel.applyAssignment(change); XCTFail("Immediate completed operation reused") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict) }
+            XCTAssertEqual(peer.commands.count, 1)
+        }
+    }
+
     func testManagedReadyBindsExactChildAndContext() async throws {
         // Accepting another session/context or historical listener readiness would grant authority to the wrong child.
         let peer = ModePeer(context: context); defer { peer.close() }
@@ -73,6 +270,7 @@ import Darwin
         let changes: [[String: Any]] = [
             ["schemaVersion": 2], ["schemaVersion": true], ["sessionId": UUID().uuidString],
             ["mode": "on"], ["mode": "unknown"], ["extra": "private"],
+            ["capabilities": []], ["capabilities": ["future"]], ["capabilities": ["project_assignments_v1", "project_assignments_v1"]],
             ["context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": "wrong", "listenPort": context.listenPort]],
             ["context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": context.providerId, "listenPort": context.listenPort, "extra": true]]
         ]
@@ -204,6 +402,30 @@ import Darwin
         _ = fcntl(routerOutput.fileDescriptor, F_SETNOSIGPIPE, 1)
         channel = RouterModeChannel(input: input.fileHandleForWriting, output: output.fileHandleForReading, sessionID: session, context: context)
     }
+    func assignmentReady() async throws {
+        let waiting = Task { try await channel.waitUntilReady() }
+        try await ready(changes: ["capabilities": ["project_assignments_v1"]]); _ = try await waiting.value
+    }
+    func assignmentReply(to command: [String: Any], state: [String: Any]) async throws {
+        var bytes = try AssignmentFixtures.data(["schemaVersion": 1, "type": "assignment_state", "sessionId": session.uuidString,
+            "requestId": command["requestId"]!, "state": state]); bytes.append(0x0a); try await write(bytes)
+    }
+    func assignmentFailure(to command: [String: Any], outcome: String, code: String) async throws {
+        var bytes = try AssignmentFixtures.data(["schemaVersion": 1, "type": "assignment_result", "sessionId": session.uuidString,
+            "requestId": command["requestId"]!, "outcome": outcome, "code": code, "commit": NSNull(), "state": NSNull()])
+        bytes.append(0x0a); try await write(bytes)
+    }
+    func assignmentResult(to command: [String: Any], commit: [String: Any], state: [String: Any]) async throws {
+        var bytes = try AssignmentFixtures.data(["schemaVersion": 1, "type": "assignment_result", "sessionId": session.uuidString,
+            "requestId": command["requestId"]!, "outcome": "applied", "code": NSNull(), "commit": commit, "state": state])
+        bytes.append(0x0a); try await write(bytes)
+    }
+    func assignmentResult(to command: [String: Any], change: AssignmentChange) async throws {
+        var bytes = try AssignmentFixtures.data(["schemaVersion": 1, "type": "assignment_result", "sessionId": session.uuidString,
+            "requestId": command["requestId"]!, "outcome": "applied", "code": NSNull(),
+            "commit": AssignmentFixtures.commit(change), "state": AssignmentFixtures.state(change, applied: true)])
+        bytes.append(0x0a); try await write(bytes)
+    }
     func readyFrame(changes: [String: Any] = [:]) throws -> Data {
         var frame: [String: Any] = ["schemaVersion": 1, "type": "ready", "sessionId": session.uuidString,
             "context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": context.providerId, "listenPort": context.listenPort], "mode": "off"]
@@ -251,13 +473,14 @@ import Darwin
             count += wrote
         }
     }
-    func discardInput() -> Int {
+    func discardInput(maximum: Int = Int.max) -> Int {
         var total = 0, bytes = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = Darwin.read(routerInput.fileDescriptor, &bytes, bytes.count)
+        while total < maximum {
+            let count = Darwin.read(routerInput.fileDescriptor, &bytes, min(bytes.count, maximum - total))
             if count <= 0 { return total }
             total += count
         }
+        return total
     }
     func close() { channel.close(); try? routerInput.close(); try? routerOutput.close() }
 }

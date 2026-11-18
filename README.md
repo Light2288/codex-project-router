@@ -44,7 +44,8 @@ every desktop version, gateway, or account; see the [validation evidence](#valid
 - **Everyday routing controls:** New managed starts begin Off. On applies saved
   project overrides; identified projects without an override inherit the default.
   Off uses the default through the running router.
-- **Native companion:** Search projects and inspect their assignments, with setup,
+- **Native companion:** Search projects and assign, switch, or remove an existing
+  account override, with separate saved/running state and setup,
   activation, and recovery available from the same controls window.
 - **Local credential handling:** Configuration stores Keychain references; request
   credentials are retrieved from the configured file-backed macOS Keychain items.
@@ -109,9 +110,14 @@ when minimized or hidden. Closing controls returns the running app to the menu
 bar; **Open controls…** brings it back. **Quit** from the Dock uses the same
 guarded recovery checks. Pinned and recent Dock items follow your macOS settings.
 
-The companion supports account addition and explicit default selection. Account
-editing/deletion and project-assignment editing remain deferred; see the
-[configuration guide](docs/operating-guide.md#private-configuration) for saved mappings.
+Open a project to choose an existing account or **Use default**. **Save and apply**
+updates the exact owned running router without an ordinary Codex restart; **Save**
+is available when safely stopped and Direct, for the next explicit Start in Off.
+Choosing the named default is still an explicit override; **Use default** removes
+it. Off suspends overrides. A saved choice alone does not prove running application.
+Unavailable control or uncertain outcomes block writes while preserving guarded
+Direct recovery. See [assignment editing](docs/operating-guide.md#project-assignment-editing).
+Account editing/deletion remains deferred.
 
 ## Documentation
 
@@ -136,6 +142,10 @@ recorded in the [account setup validation](docs/validation/companion-account-def
 Historical reports retain their original scope. Readiness, configured account
 selection, Keychain access, desktop-loaded settings, gateway acceptance, and billing
 attribution are separate facts.
+
+The [assignment-editing validation](docs/validation/companion-project-assignment-editing.md)
+records automated coverage, bounded human native/live observations, exact recovery
+and cleanup with the completed final whole-branch gate and its scoped follow-up.
 
 The listener is loopback-only. Keep actual endpoints, mappings, credentials,
 Keychain references, backups, and runtime evidence outside Git. Unresolved or

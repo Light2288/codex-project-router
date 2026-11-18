@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ActivationContext: Codable, Equatable {
+public struct ActivationContext: Codable, Equatable, Sendable {
     public var configPath: String
     public var codexHome: String
     public var providerId: String
@@ -10,16 +10,16 @@ public struct ActivationContext: Codable, Equatable {
         self.providerId = providerId; self.listenPort = listenPort
     }
 }
-public struct AccountSummary: Codable, Equatable {
+public struct AccountSummary: Codable, Equatable, Sendable {
     public var id: String; public var displayName: String
     public init(id: String, displayName: String) { self.id = id; self.displayName = displayName }
 }
 public struct Inspection: Codable, Equatable {
     public struct Configuration: Codable, Equatable {
         public var state: String; public var path: String?; public var mode: String?
-        public var setupState: String?; public var defaultAccount: AccountSummary?
-        public init(state: String, path: String? = nil, mode: String? = nil, setupState: String? = nil, defaultAccount: AccountSummary? = nil) {
-            self.state = state; self.path = path; self.mode = mode; self.setupState = setupState; self.defaultAccount = defaultAccount
+        public var setupState: String?; public var defaultAccount: AccountSummary?; public var accounts: [AccountSummary]?
+        public init(state: String, path: String? = nil, mode: String? = nil, setupState: String? = nil, defaultAccount: AccountSummary? = nil, accounts: [AccountSummary]? = nil) {
+            self.state = state; self.path = path; self.mode = mode; self.setupState = setupState; self.defaultAccount = defaultAccount; self.accounts = accounts
         }
     }
     public struct Provider: Codable, Equatable {
@@ -36,13 +36,15 @@ public struct Inspection: Codable, Equatable {
         }
     }
     public struct Catalog: Codable, Equatable {
-        public var state: String; public var entries: [Entry]
-        public init(state: String, entries: [Entry]) { self.state = state; self.entries = entries }
+        public var state: String; public var entries: [Entry]; public var revision: String?
+        public init(state: String, entries: [Entry], revision: String? = nil) { self.state = state; self.entries = entries; self.revision = revision }
     }
     public var configuration: Configuration; public var context: ActivationContext?; public var revision: String?
     public var provider: Provider; public var catalog: Catalog
-    public init(configuration: Configuration, context: ActivationContext? = nil, revision: String? = nil, provider: Provider, catalog: Catalog) {
+    public var configurationRevision: String?; public var configurationIdentity: String?; public var routingFingerprint: String?; public var recoveryRevision: String?
+    public init(configuration: Configuration, context: ActivationContext? = nil, revision: String? = nil, provider: Provider, catalog: Catalog, configurationRevision: String? = nil, configurationIdentity: String? = nil, routingFingerprint: String? = nil, recoveryRevision: String? = nil) {
         self.configuration = configuration; self.context = context; self.revision = revision; self.provider = provider; self.catalog = catalog
+        self.configurationRevision = configurationRevision; self.configurationIdentity = configurationIdentity; self.routingFingerprint = routingFingerprint; self.recoveryRevision = recoveryRevision
     }
 }
 public enum ProjectRoutingMode: String, Codable, Sendable { case on, off }
@@ -67,6 +69,9 @@ public enum CompanionError: String, Error, LocalizedError {
     case mutationBusy = "A provider operation must finish and be reconciled first."
     case routingModeUncertain = "The routing mode is uncertain. Refresh before switching again."
     case routingModeUnavailable = "Routing control is unavailable. Keep the router running and use direct recovery if needed."
+    case assignmentUnavailable = "Project assignment editing is unavailable."
+    case assignmentUncertain = "The assignment outcome is unconfirmed. Refresh to check its state."
+    case assignmentConflict = "Project assignment information changed. Refresh before editing."
     case startupFailed = "The router could not be started."
     case unownedChild = "The router child is not owned by this session."
     public var errorDescription: String? { rawValue }

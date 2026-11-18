@@ -52,9 +52,10 @@ test("inspection projects each mode without secrets", async t => {
     assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: credential ? "credential" : "legacy", setupState: "migration_required" });
     assert.deepEqual(result.context, contextFor(f));
     assert.deepEqual(result.provider, { state: "direct", recoveryRequired: false, proxyReady: true, recordPhase: "none" });
-    assert.deepEqual(result.catalog, { state: "ready", entries: expectedEntries(credential) });
+    assert.match(result.catalog.revision, /^[a-f0-9]{64}$/);
+    assert.deepEqual(result.catalog, { state: "ready", revision: result.catalog.revision, entries: expectedEntries(credential) });
     assert.match(result.revision, /^[a-f0-9]{64}$/);
-    assert.deepEqual(Object.keys(result).sort(), ["catalog", "configuration", "context", "provider", "revision"]);
+    assert.deepEqual(Object.keys(result).sort(), ["catalog", "configuration", "configurationIdentity", "configurationRevision", "context", "provider", "recoveryRevision", "revision", "routingFingerprint"]);
     assert.doesNotMatch(JSON.stringify(result), secret);
     assert.deepEqual(await Promise.all([readFile(f.configPath), readFile(f.providerPath), readFile(f.statePath)]), before);
   }
@@ -64,7 +65,8 @@ test("catalog survives provider failure", async t => {
   for (const source of ["{SECRET_SENTINEL", f.original.replace("supports_websockets = false", "supports_websockets = true")]) {
     await writeFile(f.providerPath, source);
     const result = await inspectCompanion({ configPath: f.configPath });
-    assert.deepEqual(result.catalog, { state: "ready", entries: expectedEntries(false) });
+    assert.match(result.catalog.revision, /^[a-f0-9]{64}$/);
+    assert.deepEqual(result.catalog, { state: "ready", revision: result.catalog.revision, entries: expectedEntries(false) });
     assert.deepEqual(result.provider, { state: "unavailable", recoveryRequired: true, proxyReady: null, recordPhase: "unavailable" });
     assert.doesNotMatch(JSON.stringify(result), secret);
   }
@@ -74,7 +76,9 @@ test("new and absent catalog projects remain explicit", async t => {
   delete f.state["local-projects"][P2];
   f.state["local-projects"][P3] = { id: P3, name: "Alpha" };
   await f.saveState();
-  assert.deepEqual((await inspectCompanion({ configPath: f.configPath })).catalog, { state: "ready", entries: [
+  const catalog = (await inspectCompanion({ configPath: f.configPath })).catalog;
+  assert.match(catalog.revision, /^[a-f0-9]{64}$/);
+  assert.deepEqual(catalog, { state: "ready", revision: catalog.revision, entries: [
     { id: P2, name: "", routeAlias: "route-b", routeState: "catalog_missing" },
     { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped" },
     { id: P3, name: "Alpha", routeAlias: null, routeState: "unmapped" },
@@ -237,7 +241,7 @@ test("account inspection summarizes default and exact assignments without privat
   f.config.accountRouting = accountRouting();
   await f.saveConfig();
   const result = await inspectCompanion({ configPath: f.configPath });
-  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" } });
+  assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" }, accounts: [{ id: A1, displayName: "Default account" }, { id: A2, displayName: "Project account" }] });
   assert.deepEqual(result.catalog.entries, [
     { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped", assignmentKind: "override", account: { id: A2, displayName: "Project account" } },
     { id: P2, name: "Beta", routeAlias: "route-b", routeState: "mapped", assignmentKind: "legacy_inherited", account: { id: A1, displayName: "Default account" } },
@@ -326,4 +330,74 @@ test("missing destination provider recovery stays required for unsafe or unsettl
   assert.equal((await inspect()).provider.recoveryRequired,true); await chmod(f.dir,0o700);
   await unlink(f.providerPath); await symlink(f.statePath,f.providerPath);
   assert.equal((await inspect()).provider.recoveryRequired,true);
+});
+
+
+test("catalog revision binds validated identities and names, excluding routing and unrelated desktop bytes", async t => {
+  const f = await setup(t);
+  const initial = (await inspectCompanion({ configPath: f.configPath })).catalog;
+  assert.match(initial.revision, /^[a-f0-9]{64}$/);
+  f.state["unrelated-desktop-data"] = { value: "changed" };
+  f.state["local-projects"] = Object.fromEntries(Object.entries(f.state["local-projects"]).reverse());
+  f.config.projectRoutes[P1] = "different-alias";
+  f.config.projectRoutes[P3] = "configured-only";
+  await f.saveState(); await f.saveConfig();
+  const same = (await inspectCompanion({ configPath: f.configPath })).catalog;
+  assert.equal(same.revision, initial.revision);
+  f.state["local-projects"][P1].name = "Renamed";
+  await f.saveState();
+  const renamed = (await inspectCompanion({ configPath: f.configPath })).catalog;
+  assert.notEqual(renamed.revision, initial.revision);
+  delete f.state["local-projects"][P2];
+  await f.saveState();
+  assert.notEqual((await inspectCompanion({ configPath: f.configPath })).catalog.revision, renamed.revision);
+});
+
+
+test("inspection refuses mixed assignment source and catalog observations", async t => {
+  const f = await setup(t);
+  f.config.schemaVersion = 2; f.config.accountRouting = accountRouting(); await f.saveConfig();
+  const originalRead = fs.readFile;
+  let changed = false;
+  t.mock.method(fs, "readFile", async (path, ...args) => {
+    if (!changed && String(path) === f.statePath) {
+      changed = true;
+      f.config.accountRouting.accounts[A2].displayName = "Changed account";
+      await f.saveConfig();
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await inspectCompanion({ configPath: f.configPath });
+    assert.equal(changed, true);
+    assert.equal(result.provider.state, "unavailable");
+    assert.equal(result.configurationRevision, undefined);
+    assert.equal(result.configurationIdentity, undefined);
+    assert.equal(result.revision, undefined);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
+});
+
+
+test("inspection rejects same-byte source replacement between catalog and provider", async t => {
+  const f = await setup(t);
+  const originalRead = fs.readFile;
+  let replaced = false;
+  t.mock.method(fs, "readFile", async (path, ...args) => {
+    if (!replaced && String(path) === f.statePath) {
+      replaced = true;
+      const bytes = await originalRead(f.configPath);
+      const replacement = f.configPath + ".replacement";
+      await writeFile(replacement, bytes, { mode: 0o600 });
+      await fs.rename(replacement, f.configPath);
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = await inspectCompanion({ configPath: f.configPath });
+    assert.equal(replaced, true);
+    assert.equal(result.provider.state, "unavailable");
+    assert.equal(result.configurationIdentity, undefined);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); }
 });

@@ -30,15 +30,18 @@ function endToEnd(headers) {
   );
 }
 export function createProxy(
-  config,
+  startupConfig,
   {
     diagnostics = process.stderr,
     upstreamAgent,
     inactivityTimeoutMs = 300000,
     credentialReader = readKeychainCredential,
     getProjectRoutingMode,
+    getRequestRoutingSnapshot,
   } = {},
 ) {
+  if (getProjectRoutingMode !== undefined && getRequestRoutingSnapshot !== undefined)
+    throw new TypeError("Supply only one request routing getter.");
   const server = http.createServer(
     { maxHeaderSize: 65536 },
     async (req, res) => {
@@ -124,7 +127,18 @@ export function createProxy(
         }
       });
       try {
-        if (getProjectRoutingMode !== undefined) {
+        let config = startupConfig;
+        if (getRequestRoutingSnapshot !== undefined) {
+          // Keep configuration and mode together across every async boundary,
+          // including incoming authentication and desktop identity retries.
+          const snapshot = getRequestRoutingSnapshot();
+          if (!snapshot || !snapshot.config || typeof snapshot.config !== "object" ||
+              Array.isArray(snapshot.config) ||
+              snapshot.mode !== "on" && snapshot.mode !== "off")
+            throw new RouterError("INTERNAL_ERROR");
+          config = snapshot.config;
+          routingMode = snapshot.mode;
+        } else if (getProjectRoutingMode !== undefined) {
           const mode = getProjectRoutingMode();
           if (mode !== "on" && mode !== "off")
             throw new RouterError("INTERNAL_ERROR");

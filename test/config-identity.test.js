@@ -659,3 +659,23 @@ test("account fingerprints preserve historical compatibility", async t => {
   }
   assert.notEqual(configuration.operationalFingerprint(await configuration.loadRecoveryConfig(f.configPath)), fingerprint);
 });
+
+
+test("pure configuration validation matches file validation without accepting source text", async t => {
+  const f = await fixture(t);
+  for (const accountMode of [false, true]) {
+    if (accountMode) { f.config.schemaVersion = 2; f.config.accountRouting = accountRouting(); }
+    await f.saveConfig();
+    const fromFile = await configuration.inspectRouterConfiguration(f.configPath);
+    const pure = configuration.inspectRouterConfigurationValue(f.config);
+    assert.deepEqual(pure, { config: fromFile.config, setupState: fromFile.setupState });
+    assert.equal(Object.hasOwn(pure, "configurationRevision"), false);
+    assert.ok(Object.isFrozen(pure.config));
+  }
+  f.config.accountRouting.accounts[A1].displayName = "";
+  const invalid = configuration.inspectRouterConfigurationValue(f.config);
+  assert.equal(invalid.setupState, "invalid");
+  assert.equal(Object.hasOwn(invalid.config, "accountRouting"), false);
+  assert.equal(Object.hasOwn(invalid, "configurationRevision"), false);
+  assert.throws(() => configuration.inspectRouterConfigurationValue("{untrusted source}"), { code: "CONFIG_INVALID" });
+});

@@ -472,6 +472,293 @@ import Darwin
         XCTAssertEqual(replacementMode, .off)
         _ = try await backend.stop(replacement)
     }
+    func testAssignmentRequiresCapabilityAndExactChild() async throws {
+        let child = try await startFixture()
+        let change = AssignmentFixtures.change(context: child.context)
+        let forgery = OwnedRouter(process: child.process, context: child.context, id: child.id)
+        do { _ = try await backend.applyAssignment(change, to: forgery); XCTFail("Forged assignment authority") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        let state = try await backend.readAssignment(child, projectID: change.projectId, operationID: nil)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.token)
+        let result = try await backend.applyAssignment(change, to: child)
+        XCTAssertEqual(result.operationId, change.operationId)
+        XCTAssertEqual(result.runningRevision, AssignmentFixtures.candidate)
+        XCTAssertTrue(child.process.isRunning)
+        _ = try await backend.stop(child)
+        try setMode("modeOnlyReady")
+        let old = try await startFixture()
+        do { _ = try await backend.readAssignment(old, projectID: change.projectId, operationID: nil); XCTFail("Old ready accepted assignment") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        let mode = try await backend.readRoutingMode(old); XCTAssertEqual(mode, .off)
+        _ = try await backend.stop(old)
+    }
+
+    func testAssignmentReadRetainsOwnedPipeAuthorityAfterInspectionFailure() async throws {
+        let child = try await startFixture()
+        try setMode("malformed")
+        do { _ = try await backend.inspect(configPath: config, browseHome: root); XCTFail("Invalid helper observation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .protocolFailure) }
+        let state = try await backend.readAssignment(child, projectID: AssignmentFixtures.project, operationID: nil)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.token)
+        XCTAssertTrue(child.process.isRunning)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        _ = try await backend.stop(child)
+    }
+
+    func testStoppedHelperMustExitBeforeReconciliation() async throws {
+        let inspection = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(inspection.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentHeld")
+        defer { try? releaseFixture("release-assignment") }
+        let saving = Task { try await backend.saveStoppedAssignment(change) }
+        try await waitForFixture("assignment-started"); let pid = try fixturePID()
+        saving.cancel()
+        do { _ = try await saving.value; XCTFail("Cancelled helper accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertEqual(kill(pid, 0), 0)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId); XCTFail("Running helper reconciled") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        try setMode("valid"); _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.saveStoppedAssignment(AssignmentFixtures.change(context: context)); XCTFail("Second helper accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        try releaseFixture("release-assignment"); try await waitForExit(pid)
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let state = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+        let request = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: resources.appendingPathComponent("src/assignment-request"))) as? [String: Any])
+        XCTAssertEqual(request["action"] as? String, "assignment_commit")
+        XCTAssertTrue(request["accountId"] is NSNull)
+        XCTAssertNil(request["expectedRunningRevision"])
+    }
+
+    func testAssignmentUncertaintyPreservesDirectRecoveryAndRequiresExactExitedChild() async throws {
+        try setMode("assignmentLoss")
+        let child = try await startFixture(), change = AssignmentFixtures.change(context: child.context)
+        do { _ = try await backend.applyAssignment(change, to: child); XCTFail("Lost acknowledgment accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertTrue(child.process.isRunning); XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let recovered = try await backend.control(action: .rollback, configPath: config, expectedContext: child.context)
+        XCTAssertEqual(recovered.state, "direct"); XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId); XCTFail("Live child masqueraded as stopped") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        _ = try await backend.stop(child)
+        let replacement = try await startFixture()
+        do { _ = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId); XCTFail("Replacement masqueraded as stopped") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        _ = try await backend.stop(replacement)
+        let state = try await backend.readStoppedAssignment(context: child.context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate); XCTAssertNil(state.runningRevision)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testAssignmentReadRechecksExactChildAfterAwaitedLoss() async throws {
+        try setMode("assignmentReadExit")
+        let child = try await startFixture()
+        do { _ = try await backend.readAssignment(child, projectID: AssignmentFixtures.project, operationID: nil); XCTFail("Exited child supplied authority") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testStoppedAssignmentFailuresStaySeparateFromProviderUncertainty() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentRejected")
+        do { _ = try await backend.saveStoppedAssignment(change); XCTFail("Rejection accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict); XCTAssertFalse(error.localizedDescription.contains("SENTINEL")) }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("assignmentLostReply")
+        let next = AssignmentFixtures.change(context: context)
+        do { _ = try await backend.saveStoppedAssignment(next); XCTFail("Lost helper response accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain); XCTAssertFalse(error.localizedDescription.contains("SENTINEL")) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("valid")
+        _ = try await backend.inspect(configPath: config, browseHome: root)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        let state = try await backend.readStoppedAssignment(context: context, projectID: next.projectId, operationID: next.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
+    func testStoppedAssignmentExitOneAcceptsOnlyKnownCertainRejections() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context)
+        for (mode, expected) in [("assignmentRejected", CompanionError.assignmentConflict), ("assignmentInvalid", .assignmentUnavailable), ("assignmentUnavailable", .assignmentUnavailable)] {
+            try setMode(mode)
+            let before = try String(contentsOf: resources.appendingPathComponent("src/invocations")).split(separator: "\n").count
+            do { _ = try await backend.saveStoppedAssignment(AssignmentFixtures.change(context: context)); XCTFail("Rejection accepted: \(mode)") }
+            catch { XCTAssertEqual(error as? CompanionError, expected); XCTAssertFalse(error.localizedDescription.contains("SENTINEL")) }
+            XCTAssertFalse(backend.assignmentRequiresReconciliation, mode)
+            XCTAssertNil(backend.uncertainAssignmentOperationID, mode)
+            XCTAssertFalse(backend.assignmentHelperIsRunning, mode)
+            XCTAssertFalse(backend.mutationRequiresReconciliation, mode)
+            let after = try String(contentsOf: resources.appendingPathComponent("src/invocations")).split(separator: "\n").count
+            XCTAssertEqual(after - before, 1, "A rejection must not retry")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: resources.appendingPathComponent("src/assignment-record").path))
+        }
+        try setMode("valid")
+        let state = try await backend.readStoppedAssignment(context: context, projectID: AssignmentFixtures.project, operationID: nil)
+        XCTAssertNil(state.intent)
+        let later = try await backend.saveStoppedAssignment(AssignmentFixtures.change(context: context))
+        XCTAssertTrue(later.changed)
+    }
+
+    func testAmbiguousStoppedAssignmentExitEvidenceRemainsUncertain() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context)
+        for suffix in ["Uncertain", "Unknown", "Malformed", "Extra", "ErrorExtra", "Message", "Schema", "OK", "Contradictory", "Success", "Other", "Signal", "Undrained", "Overflow"] {
+            let mode = "assignmentExit" + suffix
+            try setMode(mode)
+            let isolated = ProcessBackend(resourcesURL: resources, nodeExecutable: node)
+            let change = AssignmentFixtures.change(context: context)
+            let before = try String(contentsOf: resources.appendingPathComponent("src/invocations")).split(separator: "\n").count
+            do { _ = try await isolated.saveStoppedAssignment(change); XCTFail("Ambiguous evidence accepted: \(mode)") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain, mode) }
+            XCTAssertTrue(isolated.assignmentRequiresReconciliation, mode)
+            XCTAssertEqual(isolated.uncertainAssignmentOperationID, change.operationId, mode)
+            if suffix == "Undrained" { XCTAssertTrue(isolated.assignmentHelperIsRunning) }
+            do { _ = try await isolated.saveStoppedAssignment(AssignmentFixtures.change(context: context)); XCTFail("Uncertain mutation retried: \(mode)") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain, mode) }
+            let after = try String(contentsOf: resources.appendingPathComponent("src/invocations")).split(separator: "\n").count
+            XCTAssertEqual(after - before, 1, mode)
+            let deadline = Date().addingTimeInterval(3)
+            while isolated.assignmentHelperIsRunning && Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+            XCTAssertFalse(isolated.assignmentHelperIsRunning, mode)
+            XCTAssertFalse(isolated.mutationRequiresReconciliation, mode)
+        }
+    }
+
+    func testProductionCLIStaleSourceRejectsWithoutIntentOrBackendLockout() async throws {
+        let canonicalPath = try XCTUnwrap(Darwin.realpath(root.path, nil))
+        defer { free(canonicalPath) }
+        let canonicalRoot = URL(fileURLWithPath: String(cString: canonicalPath))
+        let directory = canonicalRoot.appendingPathComponent("production router")
+        let home = canonicalRoot.appendingPathComponent("production home")
+        for path in [directory, home] {
+            try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        }
+        let config = directory.appendingPathComponent("config.json"), project = AssignmentFixtures.project
+        let account = "dddddddd-dddd-4ddd-8ddd-dddddddddddd", port = try unusedPort()
+        let reference = ["keychainPath": "/private/synthetic-never-read.keychain-db", "service": "synthetic", "account": "synthetic"]
+        let value: [String: Any] = ["schemaVersion": 2, "codexHome": home.path, "providerId": "synthetic", "upstreamBaseUrl": "https://synthetic.invalid/v1", "listenPort": port,
+            "projectRoutes": [String: String](), "accountRouting": ["incomingCredential": reference, "defaultAccountId": account,
+                "accounts": [account: ["displayName": "Synthetic account", "upstreamBaseUrl": "https://synthetic.invalid/account/v1", "credential": reference]], "routeAccounts": [String: String]()]]
+        try JSONSerialization.data(withJSONObject: value).write(to: config)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+        try JSONSerialization.data(withJSONObject: ["local-projects": [project: ["id": project, "name": "Synthetic project"]]]).write(to: home.appendingPathComponent(".codex-global-state.json"))
+        let provider = home.appendingPathComponent("config.toml")
+        let providerBytes = Data("""
+        model_provider = "synthetic"
+        [model_providers.synthetic]
+        base_url = "https://synthetic.invalid/v1"
+        wire_api = "responses"
+        supports_websockets = false
+        [model_providers.synthetic.auth]
+        command = "/synthetic/auth-must-not-run"
+        args = []
+        """.utf8)
+        try providerBytes.write(to: provider)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: provider.path)
+        let environment = ProcessInfo.processInfo.environment
+        let candidates = [environment["npm_node_execpath"]].compactMap { $0 } + (environment["PATH"] ?? "").split(separator: ":").map { String($0) + "/node" }
+        let node = URL(fileURLWithPath: try XCTUnwrap(candidates.first { FileManager.default.isExecutableFile(atPath: $0) })).resolvingSymlinksInPath()
+        var repository = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { repository.deleteLastPathComponent() }
+        let production = ProcessBackend(resourcesURL: repository, nodeExecutable: node)
+        let context = ActivationContext(configPath: config.path, codexHome: home.path, providerId: "synthetic", listenPort: port)
+        let initial = try await production.readStoppedAssignment(context: context, projectID: project, operationID: nil)
+        XCTAssertEqual(initial.savedState, "ready")
+        let stale = AssignmentChange(configPath: config.path, expectedContext: context, expectedSavedRevision: try XCTUnwrap(initial.savedRevision),
+            expectedConfigurationIdentity: try XCTUnwrap(initial.savedIdentity), expectedRunningRevision: nil, expectedCatalogRevision: try XCTUnwrap(initial.catalogRevision),
+            operationId: UUID().uuidString, projectId: project, accountId: account)
+        var externalBytes = try Data(contentsOf: config); externalBytes.append(0x0a)
+        try externalBytes.write(to: config, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: config.path)
+
+        // Confirm the actual CLI contract independently of the native classification.
+        var request = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(stale)) as? [String: Any])
+        request.removeValue(forKey: "expectedRunningRevision"); request["schemaVersion"] = 1; request["action"] = "assignment_commit"
+        let child = Process(), input = Pipe(), output = Pipe(), errors = Pipe()
+        child.executableURL = node; child.arguments = ["--use-system-ca", repository.appendingPathComponent("src/companion-cli.js").path]
+        child.environment = ["NODE_USE_SYSTEM_CA": "1"]
+        child.standardInput = input; child.standardOutput = output; child.standardError = errors
+        try child.run()
+        defer { if child.isRunning { kill(child.processIdentifier, SIGKILL) } }
+        try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: request)); try input.fileHandleForWriting.close()
+        let deadline = Date().addingTimeInterval(5)
+        while child.isRunning && Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(child.isRunning)
+        guard !child.isRunning else { return }
+        XCTAssertEqual(child.terminationReason, .exit); XCTAssertEqual(child.terminationStatus, 1)
+        let raw = try XCTUnwrap(JSONSerialization.jsonObject(with: output.fileHandleForReading.readDataToEndOfFile()) as? [String: Any])
+        XCTAssertEqual(Set(raw.keys), ["schemaVersion", "ok", "error"])
+        XCTAssertEqual(raw["schemaVersion"] as? Int, 1); XCTAssertEqual(raw["ok"] as? Bool, false)
+        let failure = try XCTUnwrap(raw["error"] as? [String: String])
+        XCTAssertEqual(failure, ["code": "ASSIGNMENT_CONFLICT", "message": "Project assignment state changed; no overwrite was performed."])
+        XCTAssertTrue(errors.fileHandleForReading.readDataToEndOfFile().isEmpty)
+
+        do { _ = try await production.saveStoppedAssignment(stale); XCTFail("Stale source accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentConflict) }
+        XCTAssertFalse(production.assignmentRequiresReconciliation)
+        XCTAssertNil(production.uncertainAssignmentOperationID)
+        XCTAssertFalse(production.assignmentHelperIsRunning); XCTAssertFalse(production.mutationRequiresReconciliation)
+        XCTAssertTrue(try Data(contentsOf: config) == externalBytes)
+        XCTAssertTrue(try Data(contentsOf: provider) == providerBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["config.json"], "A rejected mutation must leave no intent, checkpoint, lock or temp")
+        let fresh = try await production.readStoppedAssignment(context: context, projectID: project, operationID: stale.operationId)
+        XCTAssertEqual(fresh.savedState, "ready"); XCTAssertNil(fresh.intent); XCTAssertNil(fresh.lastAttempt)
+        XCTAssertTrue(fresh.savedRevision != initial.savedRevision); XCTAssertTrue(fresh.savedIdentity != initial.savedIdentity)
+        let later = AssignmentChange(configPath: config.path, expectedContext: context, expectedSavedRevision: try XCTUnwrap(fresh.savedRevision),
+            expectedConfigurationIdentity: try XCTUnwrap(fresh.savedIdentity), expectedRunningRevision: nil, expectedCatalogRevision: try XCTUnwrap(fresh.catalogRevision),
+            operationId: UUID().uuidString, projectId: project, accountId: nil)
+        let saved = try await production.saveStoppedAssignment(later)
+        XCTAssertFalse(saved.changed); XCTAssertNil(saved.intent)
+        XCTAssertTrue(try Data(contentsOf: config) == externalBytes); XCTAssertTrue(try Data(contentsOf: provider) == providerBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["config.json"])
+    }
+
+    func testAssignmentTimeoutNeedsFreshAssignmentRead() async throws {
+        try setMode("assignmentTimeout")
+        let child = try await startFixture(), change = AssignmentFixtures.change(context: child.context)
+        let invocations = try String(contentsOf: resources.appendingPathComponent("src/invocations"))
+        let began = Date()
+        do { _ = try await backend.applyAssignment(change, to: child); XCTFail("Timed-out mutation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertLessThan(Date().timeIntervalSince(began), 5.75)
+        XCTAssertTrue(child.process.isRunning); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        let mode = try await backend.readRoutingMode(child); XCTAssertEqual(mode, .off)
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        do { _ = try await backend.applyAssignment(AssignmentFixtures.change(context: child.context), to: child); XCTFail("Unreconciled assignment retried") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let state = try await backend.readAssignment(child, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.runningRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+        let commands = try String(contentsOf: resources.appendingPathComponent("src/commands")).split(separator: "\n")
+        XCTAssertEqual(commands.filter { $0.contains("set_assignment") }.count, 1)
+        XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/invocations")), invocations)
+        _ = try await backend.stop(child)
+    }
+
+    func testMalformedStoppedRejectionCannotClaimNoReplacement() async throws {
+        let initial = try await backend.inspect(configPath: config, browseHome: root)
+        let context = try XCTUnwrap(initial.context), change = AssignmentFixtures.change(context: context)
+        try setMode("assignmentBooleanSchema")
+        do { _ = try await backend.saveStoppedAssignment(change); XCTFail("Malformed rejection accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        XCTAssertTrue(backend.assignmentRequiresReconciliation)
+        XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try setMode("valid")
+        let state = try await backend.readStoppedAssignment(context: context, projectID: change.projectId, operationID: change.operationId)
+        XCTAssertEqual(state.savedRevision, AssignmentFixtures.candidate)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
     private func startFixture() async throws -> OwnedRouter {
         let child = try await backend.start(configPath: config)
         startedChildren.append(child)

@@ -28,7 +28,7 @@ Selected configurations use their own `codexHome` and activation directory.
 Inspection reads current state without changing configuration or mappings.
 
 Run `node src/companion-cli.js` with one JSON object on stdin. The request has
-`schemaVersion: 1` and an inspect, activation, rollback or setup action.
+`schemaVersion: 1` and an inspect, activation, rollback, setup or assignment action.
 Inspection accepts `configPath` and optional absolute `browseHome`; the latter is
 required for a null selection and preserves catalog browsing at a genuinely absent
 selected destination. A valid selected configuration always supplies its own home.
@@ -136,7 +136,9 @@ Uncertain operations block further writes and dismissal. Existing/stale
 `.activation.lock` files are never automatically removed, adopted or used to signal
 a PID. Independently verify the recorded process origin and resolve the lock locally,
 retaining recovery evidence. No automatic retry or rollback occurs.
-Account editing/deletion and assignment editing remain deferred.
+Account editing/deletion remains deferred. Project assignments use the separate
+[assignment flow](#project-assignment-editing) below; the account/default Save
+boundary above is unchanged.
 
 ## Native core verification
 
@@ -336,6 +338,15 @@ Ordinary `npm test` explicitly skips the two artifact integration tests when an
 app has not yet been built. Final package acceptance requires a current build and
 zero skipped package tests; rebuild when executable resources change.
 
+Both relocated fixtures also exercise bundled stopped assignment Save, checkpoint
+comparison, next Start Off, and owned live assign/switch/remove. They check saved
+and running revision/identity coherence, applied health fingerprint, exact listener
+ownership, explicit named-default versus inheritance, retained account/default/
+incoming settings and existing bindings, unchanged provider/recovery bytes and zero
+destination connections. The source-denied fixture performs these operations under
+the same Seatbelt policy. Exactly three package cases remain; native Keychain,
+branding, strict signature and source/resource confinement checks are retained.
+
 The controls window opens at launch, showing the navy app icon in the Dock and
 making the companion available through **⌘Tab**. Minimizing the window or hiding
 the app keeps that presence. An allowed close returns the running app to the
@@ -443,9 +454,9 @@ macOS observation after the automated package checks. Automated fixture coverage
 does not claim those observations or live operational acceptance. Preserve actual
 provider/router settings during a UI-only package check.
 
-This increment adds named-account setup, add-only Keychain creation and explicit
-default selection. It has no assignment editing, project hiding, account editing
-or deletion, startup automation, bundled Node, automatic Codex
+The companion includes named-account setup, add-only Keychain creation, explicit
+default selection and project assignment editing. It has no project hiding,
+account editing or deletion, startup automation, bundled Node, automatic Codex
 restart, automatic prompts, or improved gateway/billing attribution. Later
 increments require their own scope and approval.
 
@@ -464,7 +475,7 @@ provider. After this integration, **Turn project routing On** applies saved proj
 overrides and **Turn project routing Off** suspends them for subsequent requests
 without a Codex restart or any provider URL rewrite. Saved overrides remain visible and unchanged while Off.
 Saving an account/default change requires the safe stop/save/explicit Start boundary
-above. Assignment editing remains deferred.
+above. Assignment changes use the guarded flow below.
 
 With schema 2, Off selects the explicit default endpoint/item after separate incoming
 authentication; On selects an explicit saved account or inherits the default. The
@@ -485,14 +496,15 @@ rejects obsolete `routeCredentials`. Legacy configuration uses the caller's
 credential and has no separate account selection; standalone `serve` retains its
 historical behavior and has no managed mode channel.
 
-Each HTTP request captures mode before any asynchronous lookup. A later mode
+Each HTTP request captures mode and its immutable configured assignment snapshot
+before authentication or any other asynchronous lookup. A later mode
 change affects later requests, while active streams retain their initial selection.
 No request is retried or migrated to make a switch appear successful. Gateways'
 model, payload, continuation and cross-account errors remain errors.
 
 The owned child uses bundled `managed-serve.js --config <canonical-absolute-path>
 --session <UUID>` through Node 24 with `--use-system-ca`. Its newline-delimited JSON
-control channel accepts only schema 1 `get_mode` and absolute `set_mode` commands
+control channel accepts schema 1 `get_mode` and absolute `set_mode` commands
 with matching session/request UUIDs; a set includes `mode: "on"` or `"off"`. Ready
 reports Off and the exact configuration context. Applied-mode acknowledgements
 carry their request ID. No credential crosses this pipe and no HTTP mutation
@@ -521,8 +533,72 @@ above. Custom `codexHome`, provider, config path and port remain bound to the
 selected/retained context; changing them does not retarget pending recovery.
 For unowned/external listeners, use the manual origin/port verification above.
 
-The implementation adds account creation/import and explicit default selection;
-account editing/deletion, assignment editing, automatic startup, automatic Codex
-restart, fallback and automatic prompts remain deferred. The [current account setup
+The implementation includes account creation/import, explicit default selection
+and project assignment editing; account editing/deletion, automatic startup,
+automatic Codex restart, fallback and automatic prompts remain deferred. The [current account setup
 validation record](../docs/validation/companion-account-default-setup.md) separates
 automated evidence from native/live acceptance. Prior reports are historical evidence only.
+
+## Project assignment editing
+
+Open one project's editor to choose an existing account or **Use default**.
+**Save and apply** saves and publishes to the exact owned supported child;
+**Save** persists only when safely stopped and Direct with an independently empty
+selected port and no unresolved recovery/mutation. Valid ready schema 2, fresh
+catalog/source authority and a working owned channel are required for live writes.
+An external listener or unsupported/unavailable channel stays browse-only. Off
+alone never grants stopped-save authority. Each new explicit Start loads the
+actual saved assignments in Off. Incomplete setup shows account-setup actions and
+an explicit warning before Start; assignment Save remains disabled until setup is
+ready, without presenting unavailable evidence as a saved/running conflict.
+
+The named default remains an explicit override when selected by name. Use default
+removes the exact mapping. Legacy inheritance remains distinct until changed;
+unresolved targets require an explicit repair choice. A configured-only project
+remains editable by its exact saved ID with a warning when discovery is otherwise
+healthy. Invalid, conflicting or unreadable identity cannot grant editing.
+
+Saved and running summaries use their respective snapshots. Off suspends saved
+overrides; On alone cannot prove a saved assignment is applied. Missing proof says
+**Running assignment unconfirmed**. Account display names in running summaries
+come from the retained runtime, even after external saved-account edits. Technical
+aliases remain in Advanced; private comparison tokens are never rendered there.
+Opening or explicit Refresh loads an editor baseline; background refresh cannot
+silently rebase it. Save leaves the editor open for inspection. Rejection preserves
+the unsaved choice. Sheet dismissal cannot cancel, retry or settle the
+controller-owned mutation.
+
+For ready schema-2 configurations, the schema-1 ready frame advertises
+`project_assignments_v1`.
+Its bounded serialized `get_assignment`/`set_assignment` commands share existing
+owned pipes and five-second native deadline; legacy ready frames retain mode
+control only. Stopped `assignment_state`/`assignment_commit` helpers share the
+guarded writer without accepting caller-supplied running authority. Comparison
+tokens bind context, source identity/revision, catalog and running snapshot; they
+stay private. No full maps, endpoint/item pairs or credentials cross this channel.
+
+Publication preserves On/Off. HTTP requests capture mode and immutable assignment
+configuration at receipt before authentication or any other await; accepted
+changes affect subsequent requests without an ordinary Codex restart. Account,
+default, credential and provider settings are not reloaded. Shared bindings are
+never retargeted or garbage-collected. The shared lease and final source/artifact
+checks coordinate participating writers, with no atomic multi-file snapshot or
+filesystem compare-and-swap guarantee against external editors ignoring the lock.
+
+Lost acknowledgements and post-write uncertainty are neither success nor rollback.
+Never automatically retry or send a second command to finish applying. Fresh
+serialized reads observe the exact operation and saved/running evidence;
+uncertainty/divergence blocks assignment writes while preserving guarded Direct
+recovery. A stopped read after the exact child/helper exits may settle persistence,
+but cannot prove prior live application. No stale lock or unowned process is adopted.
+Restore direct, manually restart Codex, confirm a working direct response and then
+Stop under existing guards. An external equal-content provider rewrite can change
+recovery metadata and reopen Direct confirmation; follow the renewed confirmation
+guidance. No fallback, redirect or model-request retry is added.
+
+The [assignment validation record](../docs/validation/companion-project-assignment-editing.md)
+separates automated results, bounded human native/live observations and exact
+recovery/cleanup from the completed final whole-branch gate and scoped follow-up.
+Readiness and configured labels do not prove gateway/account acceptance,
+billing attribution or general cross-account continuation. Existing viewport and
+off-screen Tab observations remain; broader UI simplification is deferred.

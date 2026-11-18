@@ -40,30 +40,19 @@ import CompanionCore
     }
     func assignment(for project: Inspection.Entry) -> String {
         if controller.inspection?.configuration.mode == "accounts" {
-            if project.assignmentKind == "target_missing" { return "Missing target — alias: \(project.routeAlias ?? "unavailable")" }
-            let name = project.account?.displayName ?? controller.inspection?.configuration.defaultAccount?.displayName ?? "No default designated"
-            if project.assignmentKind == "legacy_inherited", let alias = project.routeAlias {
-                return "\(name) — Inherited label: \(alias)"
-            }
-            if project.assignmentKind == "override" {
-                switch controller.projectRoutingStatus {
-                case .known(.on) where pendingRoutingMode == nil: return "Override active — \(name)"
-                case .known(.off) where pendingRoutingMode == nil: return "Override saved — \(name) (inactive while Off)"
-                default: return "Override saved — \(name) (routing unconfirmed)"
-                }
-            }
-            return "Default (inherited) — \(name)"
+            let assignment = AssignmentPresentation(controller: controller, project: project)
+            return assignment.savedText + "\n" + (pendingRoutingMode == nil ? assignment.runningText : "Running assignment unconfirmed")
         }
-        if let alias = project.routeAlias {
-            if controller.inspection?.configuration.mode == "legacy" { return "Global credential; saved alias: \(alias)" }
+        if project.routeAlias != nil {
+            if controller.inspection?.configuration.mode == "legacy" { return "Global credential; saved label retained" }
             if controller.inspection?.configuration.mode == "credential", pendingRoutingMode == nil {
                 switch controller.projectRoutingStatus {
-                case .known(.on): return "Override active — alias: \(alias)"
-                case .known(.off): return "Override saved; inactive while Off — alias: \(alias)"
+                case .known(.on): return "Override saved (running assignment unconfirmed)"
+                case .known(.off): return "Override saved; inactive while Off"
                 default: break
                 }
             }
-            return "Override saved — alias: \(alias) (routing unconfirmed)"
+            return "Override saved (routing unconfirmed)"
         }
         if pendingRoutingMode == nil {
             switch controller.projectRoutingStatus {
@@ -73,6 +62,17 @@ import CompanionCore
             }
         }
         return "Global (inheritance policy; routing unconfirmed)"
+    }
+    var assignmentGuidance: String? {
+        if controller.pendingAssignmentOperationID != nil && controller.busy {
+            return "Assignment save in progress. The app keeps tracking it if the editor closes."
+        }
+        if controller.assignmentRequiresReconciliation {
+            return controller.assignmentStatus == .diverged
+                ? "Assignment or recovery information changed. The previous save remains pending. Refresh to inspect saved and running assignments; Direct recovery remains available."
+                : "Assignment outcome unconfirmed. Refresh to inspect the pending save; Direct recovery remains available."
+        }
+        return nil
     }
     var configuration: String {
         if let guidance = accountSetupGuidance, controller.inspection?.configuration.setupState != nil { return guidance }
@@ -157,6 +157,7 @@ struct ControlsDisclosureState {
     let navigation: QuitGuidanceNavigation
     var accountSetup: AccountSetupController? = nil
     @State private var accountSheet: AccountSetupIntent?
+    @State private var assignmentProject: Inspection.Entry?
     @State private var search = ""
     @State private var showActivationNotice = false
     @State private var disclosures = ControlsDisclosureState()
@@ -189,18 +190,21 @@ struct ControlsDisclosureState {
                     VStack(alignment: .leading, spacing: 14) {
                         routingSection
                         Text("Projects").font(.headline)
-                        TextField("Search names or route aliases", text: $search).textFieldStyle(.roundedBorder)
+                        TextField("Search projects or accounts", text: $search).textFieldStyle(.roundedBorder)
                         Text(display.catalog).font(.caption).foregroundStyle(.secondary)
                         ForEach(display.projects(matching: search), id: \.id) { project in
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack {
                                     Text(project.name.isEmpty ? "Unresolved project" : project.name).fontWeight(.medium)
                                     Spacer()
+                                    if controller.inspection?.configuration.mode == "accounts" {
+                                        Button("Edit assignment…") { assignmentProject = project }
+                                            .disabled(controller.busy || accountSheet != nil)
+                                    }
                                 }
                                 Text(display.assignment(for: project)).foregroundStyle(.secondary)
-                                Text(project.id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                                 if project.routeState == "target_missing" { Text("Route target missing").font(.caption).foregroundStyle(.orange) }
-                                if project.routeState == "catalog_missing" { Text("Stale mapping — project absent from current catalog").font(.caption).foregroundStyle(.orange) }
+                                if project.routeState == "catalog_missing" { Text("Saved project absent from current discovery").font(.caption).foregroundStyle(.orange) }
                             }.padding(.vertical, 4)
                             Divider()
                         }
@@ -229,6 +233,9 @@ struct ControlsDisclosureState {
         .padding(20).frame(minWidth: 720, minHeight: 640)
         .sheet(item: $accountSheet) { intent in
             if let accountSetup { AccountSetupView(router: controller, setup: accountSetup, intent: intent) }
+        }
+        .sheet(isPresented: Binding(get: { assignmentProject != nil }, set: { if !$0 { assignmentProject = nil } })) {
+            if let project = assignmentProject { ProjectAssignmentView(controller: controller, project: project) }
         }
         .alert("Activate routing for every chat using this provider?", isPresented: $showActivationNotice) {
             Button("Cancel", role: .cancel) {}
@@ -284,6 +291,9 @@ struct ControlsDisclosureState {
                 }
                 Text("Off suspends project overrides. Codex still uses the router listener until direct settings are restored and verified.")
                     .font(.caption).foregroundStyle(.secondary)
+                if let guidance = display.assignmentGuidance {
+                    Text(guidance).foregroundStyle(.orange)
+                }
                 if let error = controller.routingModeError {
                     Text(error).foregroundStyle(.orange)
                     Text("Refresh to check routing mode before changing it again.").font(.caption)
@@ -312,6 +322,15 @@ struct ControlsDisclosureState {
     }
     private var advancedContents: some View {
         VStack(alignment: .leading, spacing: 14) {
+            DisclosureGroup("Project assignment details") {
+                ForEach(display.projects(matching: search), id: \.id) { project in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(project.name.isEmpty ? "Unresolved project" : project.name)
+                        Text("Project ID: \(project.id)")
+                        if let alias = project.routeAlias { Text("Saved route alias: \(alias)") }
+                    }.font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
             DisclosureGroup("Setup", isExpanded: $disclosures.setupExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(display.configuration).font(.headline)

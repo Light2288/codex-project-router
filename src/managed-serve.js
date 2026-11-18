@@ -1,75 +1,61 @@
-import { realpath, lstat, open, unlink } from "node:fs/promises";
-import { isAbsolute, resolve, dirname, join } from "node:path";
+import { realpath } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { loadRouterConfig, UUID } from "./config.js";
+import { isDeepStrictEqual } from "node:util";
+import { UUID, readRouterConfigurationSource } from "./config.js";
 import { createProxy } from "./proxy.js";
 import { RouterError, safeError } from "./errors.js";
+import { withConfigurationLock } from "./configuration-lock.js";
+import { commitProjectAssignment, readProjectAssignmentState } from "./project-assignments.js";
+export { withConfigurationLock as withRouterStartupLock } from "./configuration-lock.js";
 
 const maxFrameBytes = 16384;
 const maxRetainedBytes = 32768;
+const token = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+const uuid = value => typeof value === "string" && UUID.test(value);
+const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
+  Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+const contextValid = value => exact(value, ["configPath", "codexHome", "providerId", "listenPort"]) &&
+  typeof value.configPath === "string" && isAbsolute(value.configPath) &&
+  typeof value.codexHome === "string" && isAbsolute(value.codexHome) &&
+  typeof value.providerId === "string" && /^[a-zA-Z0-9_-]+$/.test(value.providerId) &&
+  Number.isInteger(value.listenPort) && value.listenPort >= 1 && value.listenPort <= 65535;
 
-function commandFrom(frame, sessionId) {
+function commandFrom(frame, sessionId, assignmentsEnabled) {
   const command = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(frame));
   if (
     !command || typeof command !== "object" || Array.isArray(command) ||
     command.schemaVersion !== 1 || command.sessionId !== sessionId ||
-    typeof command.requestId !== "string" || !UUID.test(command.requestId) ||
-    !["get_mode", "set_mode"].includes(command.action)
+    !uuid(command.requestId) ||
+    !["get_mode", "set_mode", ...(assignmentsEnabled ? ["get_assignment", "set_assignment"] : [])].includes(command.action)
   ) throw new RouterError("CONFIG_INVALID");
-  const keys = command.action === "get_mode"
-    ? ["schemaVersion", "sessionId", "requestId", "action"]
-    : ["schemaVersion", "sessionId", "requestId", "action", "mode"];
+  const keys = ["schemaVersion", "sessionId", "requestId", "action", ...({
+    get_mode: [], set_mode: ["mode"],
+    get_assignment: ["expectedContext", "projectId", "operationId"],
+    set_assignment: ["expectedContext", "expectedSavedRevision", "expectedConfigurationIdentity",
+      "expectedRunningRevision", "expectedCatalogRevision", "projectId", "accountId"],
+  }[command.action])];
   if (
-    Object.keys(command).length !== keys.length ||
-    Object.keys(command).some(key => !keys.includes(key)) ||
-    (command.action === "set_mode" && !["on", "off"].includes(command.mode))
+    !exact(command, keys) ||
+    (command.action === "set_mode" && !["on", "off"].includes(command.mode)) ||
+    (command.action.endsWith("assignment") && !contextValid(command.expectedContext)) ||
+    (command.action === "get_assignment" &&
+      (command.projectId !== null && !uuid(command.projectId) || command.operationId !== null && !uuid(command.operationId))) ||
+    (command.action === "set_assignment" && (!uuid(command.projectId) ||
+      command.accountId !== null && !uuid(command.accountId) ||
+      ![command.expectedSavedRevision, command.expectedConfigurationIdentity,
+        command.expectedRunningRevision, command.expectedCatalogRevision].every(token)))
   ) throw new RouterError("CONFIG_INVALID");
   return command;
-}
-
-// Setup consent/commit and startup use the same exclusive lease. Hold it until
-// bind completes so a setup writer cannot trust an empty port during startup.
-export async function withRouterStartupLock(configPath, start) {
-  let actualPath;
-  try { actualPath = await realpath(configPath); }
-  catch { throw new RouterError("CONFIG_UNAVAILABLE"); }
-  const directory = dirname(actualPath), lockPath = join(directory, ".activation.lock");
-  let handle;
-  try {
-    const directoryInfo = await lstat(directory);
-    if (!directoryInfo.isDirectory() || directoryInfo.uid !== process.getuid() || directoryInfo.mode & 0o077)
-      throw new RouterError("STORAGE_FAILED");
-    handle = await open(lockPath, "wx", 0o600);
-  } catch (error) {
-    if (error instanceof RouterError) throw error;
-    throw new RouterError(error.code === "EEXIST" ? "ACTIVATION_CONFLICT" : "STORAGE_FAILED");
-  }
-  try {
-    const owned = await handle.stat();
-    await handle.writeFile(JSON.stringify({ pid: process.pid }));
-    try {
-      return await start(await loadRouterConfig(actualPath));
-    } finally {
-      let current;
-      try { current = await lstat(lockPath); }
-      catch { throw new RouterError("ACTIVATION_CONFLICT"); }
-      if (!current.isFile() || current.uid !== process.getuid() || current.mode & 0o077 ||
-        current.nlink !== 1 || current.dev !== owned.dev || current.ino !== owned.ino)
-        throw new RouterError("ACTIVATION_CONFLICT");
-      await unlink(lockPath);
-    }
-  } catch (error) {
-    throw error instanceof RouterError ? error : new RouterError("STORAGE_FAILED");
-  } finally {
-    await handle.close();
-  }
 }
 
 export async function startManagedRouter({
   configPath, sessionId, input = process.stdin, output = process.stdout,
   diagnostics = process.stderr,
+  commitAssignment = commitProjectAssignment, readAssignmentState = readProjectAssignmentState,
 }) {
-  let mode = "off", ready = false, enabled = true, blocked = false,
+  let current, context, lastAttempt = null, assignmentsEnabled = false;
+  let ready = false, enabled = true, blocked = false,
     pumping = false, retained = 0;
   const buffer = Buffer.alloc(maxFrameBytes);
   const discard = () => {};
@@ -85,9 +71,10 @@ export async function startManagedRouter({
   };
   const write = value => {
     const frame = JSON.stringify(value) + "\n";
+    const frameBytes = Buffer.byteLength(frame);
     if (
       !enabled || output.destroyed || output.writableEnded ||
-      output.writableLength + Buffer.byteLength(frame) > maxRetainedBytes
+      frameBytes > maxFrameBytes || output.writableLength + frameBytes > maxRetainedBytes
     ) {
       closeControl();
       return;
@@ -101,8 +88,68 @@ export async function startManagedRouter({
       closeControl();
     }
   };
+  const readState = async (projectId, operationId) => {
+    const state = await readAssignmentState({ configPath: context.configPath,
+      expectedContext: context, projectId, operationId }, current);
+    if (operationId !== null && lastAttempt?.operationId === operationId &&
+      (projectId === null || lastAttempt.projectId === projectId)) {
+      // An immutable intent establishes the attempted candidate, never its application.
+      if (state.intent && lastAttempt.candidateRevision === null) {
+        lastAttempt = { ...lastAttempt, beforeRevision: state.intent.beforeRevision,
+          beforeIdentity: state.intent.beforeIdentity, candidateRevision: state.intent.candidateRevision,
+          candidateIdentity: state.intent.candidateIdentity };
+      }
+      state.lastAttempt = { ...lastAttempt };
+    }
+    return state;
+  };
+  const execute = async command => {
+    const envelope = { schemaVersion: 1, sessionId, requestId: command.requestId };
+    if (command.action === "get_mode" || command.action === "set_mode") {
+      if (command.action === "set_mode") current = Object.freeze({ ...current, mode: command.mode });
+      write({ ...envelope, type: "mode", mode: current.mode });
+      return;
+    }
+    if (command.action === "get_assignment") {
+      if (!isDeepStrictEqual(command.expectedContext, context)) {
+        write({ ...envelope, type: "assignment_result", outcome: "rejected",
+          code: "ASSIGNMENT_CONFLICT", commit: null, state: null });
+      } else {
+        write({ ...envelope, type: "assignment_state",
+          state: await readState(command.projectId, command.operationId) });
+      }
+      return;
+    }
+    let commit = null, outcome = "applied", code = null;
+    try {
+      // Saved tokens cannot authorize finishing a divergent runtime snapshot.
+      // The writer independently binds these same tokens to fresh source under its lease.
+      if (!isDeepStrictEqual(command.expectedContext, context) ||
+        command.expectedSavedRevision !== current.configurationRevision ||
+        command.expectedRunningRevision !== current.configurationRevision ||
+        command.expectedConfigurationIdentity !== current.configurationIdentity ||
+        lastAttempt?.operationId.toLowerCase() === command.requestId.toLowerCase())
+        throw new RouterError("ASSIGNMENT_CONFLICT");
+      const { schemaVersion: _schema, sessionId: _session, requestId, action: _action, ...change } = command;
+      commit = await commitAssignment({ ...change, configPath: context.configPath, operationId: requestId }, {
+        running: current, publish(next) { current = next; },
+      });
+    } catch (error) {
+      code = error instanceof RouterError && ["ASSIGNMENT_INVALID", "ASSIGNMENT_CONFLICT",
+        "ASSIGNMENT_UNAVAILABLE", "ASSIGNMENT_UNCERTAIN"].includes(error.code)
+        ? error.code : "ASSIGNMENT_UNCERTAIN";
+      outcome = code === "ASSIGNMENT_UNCERTAIN" ? "uncertain" : "rejected";
+    }
+    lastAttempt = { operationId: command.requestId, projectId: command.projectId, outcome, code,
+      beforeRevision: commit?.beforeRevision ?? null, beforeIdentity: commit?.beforeIdentity ?? null,
+      candidateRevision: commit?.candidateRevision ?? null, candidateIdentity: commit?.candidateIdentity ?? null };
+    let state = null;
+    try { state = await readState(command.projectId, command.requestId); }
+    catch { /* Persistence outcome is established independently of optional state delivery. */ }
+    write({ ...envelope, type: "assignment_result", outcome, code, commit, state });
+  };
   const overflow = () => retained + input.readableLength > maxRetainedBytes;
-  function pump() {
+  async function pump() {
     if (!enabled || !ready || blocked || pumping) return;
     pumping = true;
     try {
@@ -113,12 +160,11 @@ export async function startManagedRouter({
         }
         const newline = buffer.subarray(0, retained).indexOf(0x0a);
         if (newline >= 0) {
-          const command = commandFrom(buffer.subarray(0, newline), sessionId);
+          const command = commandFrom(buffer.subarray(0, newline), sessionId, assignmentsEnabled);
           buffer.copy(buffer, 0, newline + 1, retained);
           retained -= newline + 1;
-          if (command.action === "set_mode") mode = command.mode;
-          write({ schemaVersion: 1, type: "mode", sessionId,
-            requestId: command.requestId, mode });
+          // Keep parsing paused until durability, publication and lock cleanup settle.
+          await execute(command);
           continue;
         }
         if (retained === maxFrameBytes) {
@@ -188,8 +234,17 @@ export async function startManagedRouter({
     try { actualPath = await realpath(configPath); }
     catch { throw new RouterError("CONFIG_UNAVAILABLE"); }
     if (actualPath !== configPath) throw new RouterError("CONFIG_INVALID");
-    const config = await withRouterStartupLock(actualPath, async config => {
-      server = createProxy(config, { diagnostics: managedDiagnostics, getProjectRoutingMode: () => mode });
+    await withConfigurationLock(actualPath, async (_config, lease) => {
+      const source = await readRouterConfigurationSource(actualPath);
+      if (source.setupState === "required") throw new RouterError("ACCOUNT_SETUP_REQUIRED");
+      const config = source.config;
+      current = Object.freeze({ config, configurationRevision: source.configurationRevision,
+        configurationIdentity: source.configurationIdentity, mode: "off" });
+      context = Object.freeze({ configPath: actualPath, codexHome: config.codexHome,
+        providerId: config.providerId, listenPort: config.listenPort });
+      assignmentsEnabled = config.schemaVersion === 2;
+      await lease.assertUnchanged();
+      server = createProxy(config, { diagnostics: managedDiagnostics, getRequestRoutingSnapshot: () => current });
       await new Promise((resolveListen, reject) => {
         const onError = () => reject(new RouterError("PROXY_NOT_READY"));
         server.once("error", onError);
@@ -198,7 +253,6 @@ export async function startManagedRouter({
           resolveListen();
         });
       });
-      return config;
     });
     const shutdown = () => {
       closeControl();
@@ -216,8 +270,8 @@ export async function startManagedRouter({
     if (enabled) {
       ready = true;
       write({ schemaVersion: 1, type: "ready", sessionId,
-        context: { configPath: actualPath, codexHome: config.codexHome,
-          providerId: config.providerId, listenPort: config.listenPort }, mode });
+        context, mode: current.mode,
+        ...(assignmentsEnabled ? { capabilities: ["project_assignments_v1"] } : {}) });
     }
     return { server, closeControl };
   } catch (error) {

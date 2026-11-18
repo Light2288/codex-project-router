@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import https from "node:https";
 import { once } from "node:events";
-import { readFile, writeFile, stat, readdir, realpath, mkdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir, realpath, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import childProcess from "node:child_process";
@@ -467,4 +467,27 @@ test("normalizing an unrecorded direct URL preserves malformed URL conflict hand
   const f=await setup(t,{ready:false});
   await writeFile(f.codexConfigPath,f.original.replace(f.config.upstreamBaseUrl,"not-a-url"));
   assert.equal((await activation.inspectActivation(f.configPath,{probeProxy:false})).status.state,"conflict");
+});
+
+
+test("assignment inspection separates source identity and recovery continuity", async t => {
+  const f = await setup(t, { accounts: true });
+  const first = await activation.inspectActivation(f.configPath);
+  for (const field of ["configurationRevision", "configurationIdentity", "routingFingerprint", "recoveryRevision"])
+    assert.match(first[field], /^[a-f0-9]{64}$/);
+  f.config.projectRoutes["11111111-1111-4111-8111-111111111111"] = "another-route";
+  await f.saveConfig();
+  const changed = await activation.inspectActivation(f.configPath);
+  assert.notEqual(changed.configurationRevision, first.configurationRevision);
+  assert.notEqual(changed.routingFingerprint, first.routingFingerprint);
+  assert.equal(changed.recoveryRevision, first.recoveryRevision);
+  await activate(f.configPath);
+  const routed = await activation.inspectActivation(f.configPath);
+  assert.notEqual(routed.recoveryRevision, changed.recoveryRevision);
+  assert.equal(routed.configurationRevision, changed.configurationRevision);
+  await writeFile(f.recordPath + ".replacement", await readFile(f.recordPath), { mode: 0o600 });
+  await rename(f.recordPath + ".replacement", f.recordPath);
+  const replacedRecord = await activation.inspectActivation(f.configPath);
+  assert.equal(replacedRecord.revision, routed.revision);
+  assert.notEqual(replacedRecord.recoveryRevision, routed.recoveryRevision);
 });
