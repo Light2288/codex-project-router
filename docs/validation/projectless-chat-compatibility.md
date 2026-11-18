@@ -1,7 +1,7 @@
 # Projectless chat compatibility validation
 
 Created: 2026-11-18
-Updated: 2026-11-18
+Updated: 2026-11-19
 
 Status: Stage 4 acceptance is **in progress**. Automated current-source checks
 passed in the required order below. The first live run observed fresh projectless
@@ -10,12 +10,12 @@ fixture error. That run's exact recovery is verified. A corrected run observed
 reopened projectless Off→On→Off replies on one retained listener and the intended
 control selection categories, with cancelled control streams retained separately.
 Both runs ended with human Direct confirmation, guarded Stop/Quit and independently
-verified exact recovery. **Acceptance remains incomplete:** Task 6 Step 3's
-explicit guarded routed-response confirmation action is **unproven/unmet**.
-The final specification review returned **MISSING**; the sequential quality
-review has **not run**. Successful replies and restoration do not supply the
-missing confirmation action. Lifecycle closeout and the increment remain
-incomplete; no later increment is authorized.
+verified exact recovery. A separate confirmation-only run now directly proves
+Task 6 Step 3's guarded routed-response confirmation action and resulting state;
+its exact Direct recovery is also verified. The earlier specification **MISSING**
+result remains historical. A fresh sequential specification → quality gate is
+**PENDING**; quality has **not yet run**. The increment and lifecycle closeout are
+not complete, and no later increment is authorized.
 
 Scope: the approved [specification](../superpowers/specs/2026-11-18-projectless-chat-compatibility.md)
 and separate [implementation plan](../superpowers/plans/2026-11-18-projectless-chat-compatibility.md).
@@ -108,10 +108,13 @@ verification exited 0 after the chain and again on recheck. The host was macOS
 | Ad-hoc CDHash | `cd3fd3ad311d2718bd62f96142c0d224bb42fb27` |
 
 The controller reports matching post-first-run source/bundle/signature checks
-and private native-launch/app/listener attribution for both runs. After final
-operational restoration at 21:40:36Z, source, bundle, executable bytes, physical
-identities and signature still matched. A file/signature match alone is not used
-to attribute a running app or listener.
+and private native-launch/app/listener attribution for the first two runs. The
+separate confirmation-only run used the same tested app and explicitly selected
+the tested real Node runtime, with fresh exact app/managed-parent attribution.
+After its final recovery at 23:04:55Z on 2026-11-18 UTC (2026-11-19 Europe/Rome),
+source, bundle, executable bytes, physical identities and strict signature still
+matched. A file/signature match alone is not used to attribute a running app or
+listener.
 
 Private raw command logs and exact source/bundle manifests remain outside Git in
 the ignored task-evidence directory. No actual configuration, endpoint, mapping,
@@ -130,7 +133,7 @@ does not establish every byte of delivery.
 | --- | --- | --- | --- | --- |
 | Exact tested app and owned listener | N/A | N/A | N/A | Controller's native-launch proof, exact private live app/listener attribution and post-run source/bundle/signature match recorded |
 | Native account-mode guidance legible without promoting readiness/control authority | N/A | UNOBSERVED in this run | N/A | Observed separately in corrected run below |
-| Explicit startup Off and initial guarded activation/restart confirmation | N/A | Fresh Off reply observed below | HTTP 200 below | Started-Off and actual reply evidence retained; explicit guarded routed-response confirmation action UNPROVEN/UNMET |
+| Explicit startup Off and initial guarded activation/restart confirmation | N/A | Fresh Off reply observed below | HTTP 200 below | Started-Off and actual reply evidence retained; guarded confirmation was unproven here and is proven in the separate confirmation-only run below |
 | Genuinely fresh chat outside every project, first message in Off | ORIGINAL | Human confirmed reply | HTTP 200 | Positive supported marker; target thread absent from preactivation DB IDs; first-message evidence observed |
 | Same-chat follow-up after switching On | ORIGINAL | Human confirmed reply | HTTP 200 | Observed; first-run owned listener attributed |
 | Extra same-chat On follow-up | ORIGINAL | Human confirmed reply | HTTP 200 | Observed separately |
@@ -212,19 +215,57 @@ confirmation: in-memory confirmation can leave that journal phase unchanged.
 The actual observed UI state and the later Direct-pending state below are kept
 separate from journal-phase inference.
 
-The final specification review identified the required guarded routed-response
-confirmation action as unproven. No direct evidence records that action and its
-resulting state. Task 6 Step 3 is therefore **unmet**, even though the replies,
-HTTP statuses, identity proof and later exact Direct recovery are observed. The
-reply cannot stand in for the explicit confirmation control. The final
-specification result is **MISSING** and quality review has **not run**; acceptance
-and increment completion remain incomplete. A pending human-availability question
-for a bounded retest supplies no answer or additional evidence.
+### Historical missing-confirmation finding
+
+At the earlier final specification review, direct evidence of the guarded routed
+confirmation action and resulting state was absent. That review returned
+**MISSING**, Task 6 Step 3 was correctly left unmet, and quality review did not
+run. Visible replies, journal phase and exact Direct recovery did not supply the
+missing action. The user subsequently authorized finishing this same confirmation
+test; the separate observed continuation below resolves that gap. The historical
+MISSING result is retained and is not rewritten as a pass.
 
 Disabled live titles and unperformed live compaction/ancestry/in-flight cases
 remain UNRUN; deterministic automated coverage is unchanged. General stream
 completeness, clean control HTTP 200 delivery, cross-account continuation and
 billing attribution are not claimed.
+
+### Separate confirmation-only continuation: guarded action now observed
+
+The user explicitly requested finishing the confirmation test. This bounded third
+run used a fresh byte-copy of the known-working configuration, unchanged existing
+keys, the exact tested app launched through LaunchServices and the explicitly
+selected tested real Node runtime. It used no logger or custom instrumentation.
+This used the existing controller/project chat, not a new projectless chat. It
+supplies the missing confirmation action/state; it does not repeat or replace
+the first two runs' fresh-first-message, On/Off, distinct-default or control
+selection/transport evidence. No model-request initiating HTTP status was captured
+in this run. Any `/healthz` HTTP 200 was readiness evidence only; no new model
+HTTP 200, transport-completion or cross-account claim is added.
+
+The human started Off, activated, manually restarted Codex, received a routed
+reply and reported clicking routed-response confirmation. Initial read-only
+accessibility inspection still showed confirmation pending. Configuration/mode
+source identities were unchanged while the recovery revision changed; the exact
+cause and first-click/invalidation timing are **UNOBSERVED**. No first-click bug
+or specific metadata invalidation is claimed.
+
+The human repeated the confirmation button while the controller inspected and
+without sending another chat message. Read-only native screenshot evidence then
+directly displayed **User confirmed routed response**, with **Account routing**,
+**Router**, **Matching listener ready** and **Owned by this app session**.
+Restore Direct was enabled and Stop disabled. Fresh private inspection bound this
+state to the same exact native app and managed child/parent attribution. This is
+direct evidence of the guarded action and resulting state: Task 6 Step 3's
+previously missing confirmation obligation is **PROVEN**. No agent UI action
+performed the confirmation.
+
+The retained-context warning remained expected until Direct recovery, including
+after confirmed routed state. This observation establishes no product bug or
+product fix. Original control HTTP 499/CANCELLED, same-pair selection categories,
+distinct-default evidence from the first run, disabled live titles and unperformed
+live compaction/ancestry/in-flight cases keep their original limits. No general
+cross-account continuation, distinct live gateway-key or billing claim is added.
 
 ## Recovery and private-state disposition
 
@@ -292,6 +333,33 @@ inspection is retained privately and is superseded by the final verified stopped
 endpoint above. The initial failed fixture and all 401/499/503 observations remain
 part of the evidence.
 
+### Confirmation-only recovery and all-context restoration
+
+The human restored Direct, manually restarted and received a direct reply. The
+first stopped inspection found the router absent and port empty while the same
+native app remained alive with Direct confirmation pending. This was a partial
+boundary, not final cleanup. The human repeated Direct confirmation and Quit,
+without another message. Independent reinspection then verified exact owned
+native/child PIDs absent, zero native/router matches, empty port, pending
+confirmation absent and correctly bound Direct/restored state with no recovery.
+Normal settings and provider bytes matched the original checkpoints exactly.
+
+Under the owned instance `flock`, owner/mode/no-follow/link-count/stat/source-byte
+guards restored the original journal byte-exactly, including its original selected
+configuration and optional Node-property absence; unrelated fields were preserved.
+The final independent comparison covers **all three retained contexts**:
+Direct/restored, no recovery, correctly bound named TOML backups byte-exact with
+matching hashes, no activation locks, and normal/provider/journal all byte-exact.
+Pending confirmation is absent and the original runtime-property absence is
+restored. This third run had no diagnostic logger to close. Private receipts and
+backups remain outside Git.
+
+The final source/bundle/binary/physical identity comparison and strict signature
+verification passed at 23:04:55Z on 2026-11-18 UTC, which is 2026-11-19 Europe/Rome.
+These restoration claims concern the named compared operational artifacts and
+retained contexts; no equality is inferred for unrelated user files or chat
+history. The earlier partial stopped boundary remains preserved as history.
+
 ## Criterion disposition and review
 
 | Criterion | Current decisive evidence and remaining obligation |
@@ -304,17 +372,17 @@ part of the evidence.
 | AC-06 | Scoped managed schema-2 policy, unchanged legacy/standalone behavior and setup/control boundaries covered by Tasks 1–5; final current-source chain PASS |
 | AC-07 | Diagnostic privacy/current guidance and relocated source-denied package coverage pass; read-only native observation confirms exact guidance and guarded On/owned-ready presentation |
 | AC-08 | Required ordered current-source checks PASS with disclosed intentional warnings |
-| AC-09 | Fresh/reopened projectless replies, distinct-default evidence and control selection observations retained with their limits; the required Task 6 Step 3 guarded routed-response confirmation action is UNPROVEN/UNMET, so acceptance remains incomplete |
+| AC-09 | Original fresh/reopened projectless replies, distinct-default and control selection evidence retain their limits. Separate confirmation-only run directly proves the guarded routed-response confirmation action/state; Task 6 Step 3 observation is complete, subject to the fresh final gate |
 | AC-10 | Human projectless replies separated from initiating HTTP 200, control/ancillary 499, unknown-identity 503 and initial controller 401. Disabled titles and unperformed live compaction/ancestry/in-flight cases UNRUN |
-| AC-11 | Both runs recovered with required human restart/direct-reply confirmation and guarded Stop/Quit; final independent process/listener absence, both Direct/restored contexts, byte-exact owned settings/journal and optional-property restoration verified |
-| AC-12 | Tasks 1–5 task reviews Approved. Final whole-branch specification review: MISSING for unproven guarded routed-response confirmation; sequential quality review NOT RUN; final gate and lifecycle closeout incomplete |
+| AC-11 | All three runs recovered with required human restart/direct confirmation and guarded Stop/Quit; final independent owned-process/listener absence, all three Direct/restored contexts, byte-exact owned settings/journal/backups and original optional-property absence verified |
+| AC-12 | Tasks 1–5 task reviews Approved. Earlier specification MISSING retained as history; confirmation gap now resolved by direct evidence. Fresh sequential specification → quality review PENDING, quality NOT YET RUN; final gate/lifecycle closeout incomplete |
 
 The controller owns the sole final sequential review against implementation base
 `91b53e0` and the approved pair. Task-level approvals do not replace that gate.
-Successful acceptance observations and exact recovery remain recorded, but the
-required guarded routed-response confirmation action is unproven/unmet. Final
-specification review is MISSING; quality review has not run. Acceptance, the final
-gate and increment/lifecycle closeout are incomplete. Account editing/deletion,
-project visibility, broader UI and distribution remain deferred. Any bounded
-retest must obtain actual human action/evidence; the pending availability question
-is not treated as answered.
+The previously missing guarded routed-response confirmation action/state is now
+proven in the separate continuation, and all three runs' exact recovery is
+verified. The earlier MISSING result remains historical. A fresh sequential
+specification → quality gate is pending, with quality not yet run; acceptance
+approval and increment/lifecycle completion are not claimed. Account editing/deletion,
+project visibility, broader UI and distribution remain deferred. This evidence
+continuation adds no product fix or new scope.

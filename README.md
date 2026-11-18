@@ -134,10 +134,9 @@ Account editing/deletion remains deferred.
 A fresh chat must have positive supported saved-state evidence of projectless
 membership before its first request can route; missing or conflicting identity
 still blocks. The [bounded native/live acceptance record](docs/validation/projectless-chat-compatibility.md)
-records fresh/reopened replies, transport limits and verified recovery. Acceptance
-remains incomplete because guarded routed-response confirmation is unproven;
-final specification review is MISSING and quality review has not run. For an
-existing installation,
+records fresh/reopened replies, transport limits, a separately observed guarded
+routed-response confirmation and verified recovery. A fresh sequential final
+review remains pending; quality has not yet run. For an existing installation,
 follow the [safe update and restart sequence](docs/operating-guide.md#original-connection-and-projectless-chats)
 before replacing or restarting the app/router. Neither original nor selected
 account failures trigger fallback, retries, or redirects.

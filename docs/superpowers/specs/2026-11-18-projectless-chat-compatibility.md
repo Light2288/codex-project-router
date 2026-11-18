@@ -8,9 +8,9 @@
 
 **Created:** 2026-11-18
 
-**Updated:** 2026-11-18
+**Updated:** 2026-11-19
 
-**Current stage:** 4 — specification and separate implementation plan approved; subagent-driven implementation authorized. Execution preflight and Tasks 1–5 are complete with independent task reviews Approved and no findings. Task 6 ordered automated acceptance passed; the first live run established fresh projectless Off/On responses, retained a failed controller-project validation case and completed verified recovery. The corrected run recorded reopened projectless Off→On→Off responses on one retained listener and control selection categories, with cancelled control transports explicitly retained. Both live runs now have human Direct confirmation, guarded Stop/Quit and independently verified exact operational restoration. Task 6 Step 3 remains unmet because the explicit guarded routed-response confirmation action is unproven. Successful replies and exact restoration are retained without inferring that action. Final specification review returned MISSING; sequential quality review has not run. Acceptance, the final gate and increment/lifecycle closeout remain incomplete; the human-availability question for a bounded retest is unanswered.
+**Current stage:** 4 — specification and separate plan approved; subagent-driven execution authorized. Preflight and Tasks 1–5 are complete with independent task reviews Approved. Task 6 retains its automated/live successes, initial fixture failure, cancelled control transports and unrun-case limits. The separate confirmation-only continuation now directly proves the guarded routed-response confirmation action/state, so Task 6 Step 3 observation is complete. All three retained contexts have verified exact Direct restoration, human Direct confirmation, guarded Stop/Quit and independent owned-process/listener absence. The earlier specification MISSING result remains historical. A fresh sequential specification → quality gate is pending; quality has not yet run. Increment/lifecycle completion is not claimed.
 
 **Storage:** Saved after leaving Plan mode at `docs/superpowers/specs/2026-11-18-projectless-chat-compatibility.md`. The complete unsaved DRAFT was previously presented in chat; its requirements below are unchanged.
 

@@ -502,10 +502,9 @@ Projectless routing requires positive supported saved-state evidence and complet
 relevant ancestry/session consistency checks; absence of a project assignment is
 insufficient. A first message with unavailable or contradictory evidence blocks.
 The [bounded native/live acceptance record](../docs/validation/projectless-chat-compatibility.md)
-records observed fresh/reopened replies, transport limits and exact recovery.
-Guarded routed-response confirmation remains unproven, so acceptance is incomplete;
-final specification review is MISSING and quality review has not run. Standalone
-schema-1/schema-2 and managed
+records fresh/reopened replies, transport limits, the separately proven guarded
+routed-response confirmation and exact recovery. A fresh sequential final review
+remains pending; quality has not yet run. Standalone schema-1/schema-2 and managed
 schema-1 retain their historical behavior; no schema, migration, selector or policy
 switch is added.
 
