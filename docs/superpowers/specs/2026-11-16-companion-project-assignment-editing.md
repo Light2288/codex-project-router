@@ -4,7 +4,7 @@
 
 **Type:** feature
 
-**Status:** APPROVED
+**Status:** APPROVED — implemented and verified
 
 **Created:** 2026-11-16
 
@@ -12,7 +12,7 @@
 
 **Stage:** 4 — specification and plan separately approved; Subagent-driven implementation selected
 
-**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final whole-branch specification review passed; quality review requested one Important stopped-helper rejection-boundary correction. Its combined final fix passed focused backend 40/controller 111 and the full ordered 314 native → matching signed build → 958 Node → exactly 3 package checks, all exit 0. The one scoped sequential follow-up remains PENDING. The final controller report is PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+**Execution evidence:** Tasks 1–7 and Task 8 are implemented, verified and locally committed, including scoped fixes. Historical native 298/304/310 chains, the separate post-OS supplement, bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup remain recorded with their limits. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole whole-branch specification review passed; original quality requested one Important stopped-helper rejection-boundary correction. The combined fix at `f842b509064c3269659f541d965452c4ff6fd757` passed focused backend 40/controller 111 and ordered 314 native → matching signed build → 958 Node → exactly 3 package checks, all exit 0. Its one scoped sequential follow-up actually returned specification PASS then quality PASS—Approved, original Important ADDRESSED, residual findings NONE. Stage 4 implementation and final gate are complete; the verified local endpoint and final controller report are prepared for delivery. No new human/live run is claimed for the backend-only fix. No push, merge or later increment is authorized. See [assignment validation](../../validation/companion-project-assignment-editing.md).
 
 **Storage:** Saved in the existing checkout on `feat/companion-project-assignment-editing`; the approved pair was committed together before product changes. Current lifecycle updates remain local to this branch.
 

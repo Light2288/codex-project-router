@@ -12,9 +12,9 @@
 
 **Slug:** `companion-project-assignment-editing`
 
-**Status:** APPROVED — implementation in progress
+**Status:** APPROVED — complete, local delivery prepared
 
-**Execution evidence:** Tasks 1–7 implemented and task-reviewed, including scoped fixes. Task 8 final affected 310 native → matching signed build → 958 Node → exactly 3 package verification passed; the separate post-OS 310 native → 958 Node → 3 package supplement also passed without a rebuild. Bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup are recorded. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole final whole-branch specification review passed; quality review requested one Important stopped-helper rejection-boundary correction. Its combined final fix passed focused backend 40/controller 111 and the full ordered 314 native → matching signed build → 958 Node → exactly 3 package checks, all exit 0. The one scoped sequential follow-up remains PENDING. The final controller report is PENDING; Stage 4 is not complete. See [assignment validation](../../validation/companion-project-assignment-editing.md).
+**Execution evidence:** Tasks 1–7 and Task 8 are implemented, verified and locally committed, including scoped fixes. Historical native 298/304/310 chains, the separate post-OS supplement, bounded human native/live observations, exact recovery, original selection/automatic runtime restoration and private fixture cleanup remain recorded with their limits. Fresh B was human-visible while its initiator recorded 499/CANCELLED; the original partial run retains unobserved transport/drain limits. The sole whole-branch specification review passed; original quality requested one Important stopped-helper rejection-boundary correction. The combined fix at `f842b509064c3269659f541d965452c4ff6fd757` passed focused backend 40/controller 111 and ordered 314 native → matching signed build → 958 Node → exactly 3 package checks, all exit 0. Its one scoped sequential follow-up actually returned specification PASS then quality PASS—Approved, original Important ADDRESSED, residual findings NONE. Stage 4 implementation and final gate are complete; the verified local endpoint and final controller report are prepared for delivery. No new human/live run is claimed for the backend-only fix. No push, merge or later increment is authorized. See [assignment validation](../../validation/companion-project-assignment-editing.md).
 
 **Created:** 2026-11-16
 
@@ -312,16 +312,19 @@ XCTAssertEqual(unconfirmedPresentation.runningText, "Running assignment unconfir
 - [x] **Step 3 — complete final automated verification.** Run `npm run companion:test`, `npm run companion:build`, `npm test`, then `npm run companion:package-test` in that order. Expected: complete native and Node suites pass; fresh signed package passes all three cases with zero failures/cancellations/skips. Existing package tests invoke `/usr/bin/codesign --verify --deep --strict` and compare resources. Record actual counts/commands/build identity. Rebuild/retest only when subsequent changes affect those results.
 - [x] **Step 4 — bounded native and private live acceptance.** Freshly inspect selected context, actual saved setup, ownership, provider, listener, package and exact recovery records before live work. Use bounded private ready-schema-2 fixtures and already configured named accounts whose availability is freshly established; do not silently migrate normal legacy configuration. Coordinate explicit human launch/activation/restart/response confirmations where the existing workflow requires them. With On, assign → switch → remove on one identified project and show saved/running state plus initiating request evidence for each; successful assignment changes themselves require no Codex restart. Verify Off suspension, stopped Save/next Start Off, configured-only warning and unavailable-control presentation. Keep original recovery context and perform exact Direct restoration/manual response confirmation/guarded Stop and private fixture cleanup. Record human observations separately from automated transport evidence; qualify cancelled initiating requests and do not claim independent billing or general cross-account continuation. If a required live prerequisite/observation is unavailable, report it as incomplete and do not claim full acceptance.
 - [x] **Step 5 — finish documentation and commit.** Record only performed checks, actual outcomes, exact recovery and limitations. Verify artifact/local Markdown references and `git diff --check`; stage Task 8 paths only and commit with `git commit -m "feat: verify companion assignment editing"`. Preserve private raw evidence outside Git, completed branding branch and historical reports. No push/merge.
-- [ ] **Step 6 — sole sequential final gate.** Use `personal-workflows:code-review` on the complete assignment branch against its recorded implementation base and the approved pair. Dispatch specification review first; dispatch quality only after specification PASS. Follow the current workflow for findings/re-review and archive only actual reviews/results. Do not reopen completed predecessor reviews or count task checks/builder completeness as final approval. Commit required fixes/documentation locally, run affected checks and finalize the current gate against the actual resulting branch/package.
-- [ ] **Step 7 — report and stop.** Verify final local commits/status, main unchanged since execution preflight, the separate branding branch, actual package/evidence match and exact recovered operational state. Report delivered behavior, commands/results, human observations, incomplete evidence/limitations and local commit IDs. Stop before another increment, push or merge.
+- [x] **Step 6 — sole sequential final gate.** Use `personal-workflows:code-review` on the complete assignment branch against its recorded implementation base and the approved pair. Dispatch specification review first; dispatch quality only after specification PASS. Follow the current workflow for findings/re-review and archive only actual reviews/results. Do not reopen completed predecessor reviews or count task checks/builder completeness as final approval. Commit required fixes/documentation locally, run affected checks and finalize the current gate against the actual resulting branch/package.
+- [x] **Step 7 — report and stop.** Verify final local commits/status, main unchanged since execution preflight, the separate branding branch, actual package/evidence match and exact recovered operational state. Report delivered behavior, commands/results, human observations, incomplete evidence/limitations and local commit IDs. Stop before another increment, push or merge.
 
 ## Execution checklist evidence — 2026-11-18
 
 The checked steps record actual execution reported in the retained Task 1–8
 reports and task reviews, including scoped fixes; original step text remains for
 traceability. They do not claim that every proposed test name or intermediate
-expected failure occurred verbatim. Task 8 Steps 6 and 7 remain pending, and
-Stage 4 is open until the sole final gate and final controller report finish.
+expected failure occurred verbatim. Task 8 Step 6 is complete from the actual
+sequential final gate and its one scoped follow-up. Step 7 records the verified
+local endpoint and prepared final controller report; it does not claim an already
+sent chat message. Stage 4 implementation and final review are complete; execution
+stops here before another increment, push or merge.
 
 - Tasks 1/3 moved mechanical production allowlists forward under the recorded
   dependency-order ruling. Task 8 Step 1 added and ran positive package coverage
@@ -332,7 +335,7 @@ Stage 4 is open until the sole final gate and final controller report finish.
   the deferred divergence classification in Task 7. Task 3's no-yield guard
   coordinates participating writers without promising filesystem compare-and-swap.
 - Task 8 Step 3's historical native 298/build/Node 958/package 3 chain was followed
-  by acceptance correction chains. The final affected chain retains unchanged
+  by acceptance correction chains. The earlier affected chain retains unchanged
   native 310 and its matching signed build, then final Node 958/package 3 after the
   package observer correction. Two prior explicit package 2/3 failures and the
   causal diagnostic remain recorded; the same window predicate and absolute
@@ -355,8 +358,8 @@ Stage 4 is open until the sole final gate and final controller report finish.
   new desktop chats. Normal legacy configuration was not migrated.
 - Task 8 Step 5 records the existing package/docs commit and this evidence-led
   documentation closeout with local Markdown/reference/privacy/diff checks.
-  Subsequent final-gate bookkeeping remains with Steps 6/7; no final PASS is
-  pre-recorded. See the [validation record](../../validation/companion-project-assignment-editing.md)
+  Steps 6/7 now record the actual final gate and prepared delivery endpoint below.
+  See the [validation record](../../validation/companion-project-assignment-editing.md)
   for actual results, historical review outcomes and limits.
 
 ## Sole final fix execution evidence — 2026-11-18
@@ -369,9 +372,23 @@ wait/result boundary, preserving exact failure validation and all actual ambigui
 Production CLI stale-source/no-intent RED was observed before product edit;
 focused backend 40/controller 111 and the ordered native 314 → newly signed build
 → Node 958 → exactly 3 package checks passed, all exit 0 with zero skips. The
-existing seven build and 13 harness Security diagnostics remain. Exactly one
-controller-owned scoped sequential follow-up remains PENDING. Original frozen
-package/reports remain historical and unchanged; Task 8 Steps 6/7 remain open. No new human/live run is claimed.
+existing seven build and 13 harness Security diagnostics remain. The one scoped
+sequential follow-up actually returned specification PASS then quality PASS—Approved
+at `f842b509064c3269659f541d965452c4ff6fd757`: original Important ADDRESSED,
+residual findings NONE. Original frozen package/reports and the follow-up evidence
+remain immutable. No new human/live run is claimed.
+
+The controller independently verified all 101 current build/test inputs, exact
+executable/stat, 19 bundled modules, strict signature, recorded logs and clean
+reviewed source. Original selection/automatic runtime, exact provider/backup and
+bound Direct/restored recovery state, process/port absence and private cleanup
+were freshly verified. Local main, origin/main and actual remote main remain at
+`c0a5a53d8c41a6c394f28497fa39133d68a79683`; branding closeout remains separate at
+`2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73`. Task 8 Steps 6/7 are checked for
+the completed gate and verified endpoint/report preparation. The controller will
+deliver the final report after local bookkeeping verification; no already-sent
+chat message or unknown documentation commit ID is claimed. Stop at this local
+branch endpoint; no push, merge or subsequent increment.
 
 ## Criterion traceability
 

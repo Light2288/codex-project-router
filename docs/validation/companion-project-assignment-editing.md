@@ -3,17 +3,18 @@
 Created: 2026-11-17
 Updated: 2026-11-18
 
-Status: Stage 4 remains open. Implementation, task reviews, bounded human
-native/live observations, exact operational recovery and private fixture cleanup
-are recorded below. Earlier affected verification passed: 310 native tests, a
-matching signed build, 958 Node tests and exactly 3 package cases. A separate
-post-OS native/Node/package supplement also passed on the unchanged signed app.
-The sole final whole-branch specification review passed; quality requested one
-Important stopped-helper rejection-boundary correction. The combined correction
-passed the full ordered 314 native → matching signed build → 958 Node → exactly 3
-package checks, all exit 0. One scoped sequential follow-up and the final controller
-report remain **PENDING**. Task reviews do not close the increment.
-Work remains local; no push or merge.
+Status: Stage 4 implementation and the sole final gate are complete. Bounded
+human native/live observations, exact recovery and private cleanup remain recorded
+with their limits. Original whole-branch specification review passed; original
+quality requested one Important stopped-helper rejection-boundary correction. The
+combined fix at `f842b509064c3269659f541d965452c4ff6fd757` passed focused backend
+40/controller 111 and ordered 314 native → matching signed build → 958 Node →
+exactly 3 package checks, all exit 0. Its one scoped sequential follow-up actually
+returned specification PASS then quality PASS—Approved: original Important
+ADDRESSED, residual findings NONE. Historical 310 verification and the separate
+post-OS supplement remain below. The verified local endpoint and final controller
+report are prepared for delivery. No already-sent chat message is claimed.
+Work remains local; no push, merge or later increment.
 
 Scope: the approved `companion-project-assignment-editing` increment, governed by
 the [specification](../superpowers/specs/2026-11-16-companion-project-assignment-editing.md)
@@ -100,7 +101,7 @@ including Swift startup, and fails promptly on owned-child exit. It adds no case
 skip, off-screen fallback, fixed readiness delay or product launch/window change.
 The two historical failures and diagnostic remain retained as separate evidence.
 
-### Final affected ordered verification
+### Earlier affected ordered verification
 
 The native and matching build inputs stayed unchanged through the package-probe
 correction. The original ordered evidence is native 310 → matching signed build →
@@ -114,7 +115,7 @@ the test correction, while the unchanged native/build evidence was retained.
 | `npm test` | Exit 0; 958/958, zero failures/cancellations/skips/todo; 58151.69975 ms |
 | `npm run companion:package-test` | Exit 0; exactly 3/3, zero failures/cancellations/skips/todo; 26662.765208 ms |
 
-Executable source endpoint: `1a1fc687002d6e4df338945e6933555a9cb296f1`.
+Earlier acceptance executable source endpoint: `1a1fc687002d6e4df338945e6933555a9cb296f1`.
 The matching `dist/Codex Project Router.app` is arm64, ad-hoc signed, with 19
 explicit production modules and Node 24.21.0. Original build host: macOS 27.0.1.
 Ignored private proofs bind source inputs, packaged modules, executable bytes and
@@ -158,7 +159,8 @@ complete safe failure envelope and exits 1, while native wait classified that ex
 as uncertain before its strict parser ran. The fixture exited 0 and masked the
 mismatch. A proven prewrite rejection could therefore retain a phantom pending
 operation and block normal controls. The original quality finding remains recorded;
-no final PASS or increment completion is claimed.
+the one scoped sequential follow-up subsequently confirmed it addressed, with
+specification PASS and quality PASS—Approved.
 
 The regression first corrected the fixture to production exit 1. A separate real
 CLI regression uses bounded private synthetic ready-schema-2 files outside the
@@ -195,7 +197,12 @@ Existing helper lifetime, setup, ownership and Direct recovery cases also passed
 The native input snapshot remained unchanged through build/Node/package checks.
 Fresh deep/strict signature verification and all 19 bundled module comparisons
 passed; the current exact commit/executable/stat/input proof remains private. The
-single scoped sequential follow-up remains PENDING.
+single scoped follow-up actually passed specification first, then quality—Approved,
+with the original Important finding addressed and no residual findings. Exact
+reviewed/current source commit: `f842b509064c3269659f541d965452c4ff6fd757`. The
+controller independently verified all 101 current build/test inputs, executable
+bytes/stat, 19 bundled modules, strict signature, recorded logs and clean HEAD.
+This later literal lifecycle update changes no reviewed executable input.
 
 No human/live run was repeated. Prior ready/live/UI acceptance remains historical
 against its identified native source; this correction changes only the stopped
@@ -341,25 +348,26 @@ Start/activation, authentication-helper action or normal configuration migration
 
 ## Acceptance traceability
 
-These observations support the approved criteria. Criterion acceptance and the
-increment remain subject to the sole final whole-branch gate.
+These observations support the approved criteria with the qualifications below.
+The sole final gate passed after its one scoped correction and sequential follow-up;
+original review outcomes and all bounded acceptance limits remain recorded.
 
-| Criteria | Recorded evidence | Qualification / remaining gate |
+| Criteria | Recorded evidence | Qualification / final gate |
 | --- | --- | --- |
-| AC-01 assignment actions | Pure/native actions, both package flows and human A/B/C sequence | Final review |
-| AC-02 durable application | Persistence, exact-child publication, package health and live saved/runtime matches | B initiator cancelled; visible result separate; final review |
-| AC-03 stopped Save/Start Off | Guarded helper/controller/package checks and human stopped Save/next Start Off | Final review |
-| AC-04 truthful state | Saved/runtime/Off/unconfirmed tests; human labels, stable editor and unavailable retest | Human observed bounded states; automated dismissal/Refresh coverage; final review |
-| AC-05 identity/catalog/repair | Catalog/unresolved tests and human configured-only warning/unavailable guidance | No unsafe editing authority; final review |
-| AC-06 isolation/presence | Exact-key/optional-presence tests, package and independent live preservation reads | All prior bindings retained; final review |
-| AC-07 request consistency | Deterministic auth/identity/credential/stream/reused-connection barriers | No live in-flight/billing/general continuation claim; final review |
-| AC-08 stale authority | Source/catalog/lease, generation/exact-child/editor-baseline tests | Fresh authority after reboot; final review |
-| AC-09 ambiguity | Injected writer phases, ordered/lost-ack/helper/no-retry tests | B cancellation is transport evidence, not an inferred assignment rollback; final review |
-| AC-10 reconciliation/recovery | Serialized reads, retained runtime, guarded Direct and exact human recovery | Metadata invalidation caveat retained; final review |
-| AC-11 confirmation continuity | Exact-transition versus recovery-drift tests and observed conservative invalidation | Account/default boundary unchanged; final review |
-| AC-12 process lifetime | Helper/child/drain/relaunch/ownership tests; exact live child/logger exit and final Quit | Original partial drain unobserved; retry drain verified; final review |
-| AC-13 routing safeguards | Auth/pairing/no fallback, Stop/Quit, zero control-time upstream package checks and exact Direct restoration | Final review |
-| AC-14 package/live/docs | Final native/build/Node/package chain, post-OS supplement, bounded human evidence and recovery | Original specification PASS; final-fix scoped follow-up **PENDING** |
+| AC-01 assignment actions | Pure/native actions, both package flows and human A/B/C sequence | Final gate passed |
+| AC-02 durable application | Persistence, exact-child publication, package health and live saved/runtime matches | B initiator cancelled; visible result separate; final gate passed |
+| AC-03 stopped Save/Start Off | Guarded helper/controller/package checks and human stopped Save/next Start Off | Final gate passed |
+| AC-04 truthful state | Saved/runtime/Off/unconfirmed tests; human labels, stable editor and unavailable retest | Human observed bounded states; automated dismissal/Refresh coverage; final gate passed |
+| AC-05 identity/catalog/repair | Catalog/unresolved tests and human configured-only warning/unavailable guidance | No unsafe editing authority; final gate passed |
+| AC-06 isolation/presence | Exact-key/optional-presence tests, package and independent live preservation reads | All prior bindings retained; final gate passed |
+| AC-07 request consistency | Deterministic auth/identity/credential/stream/reused-connection barriers | No live in-flight/billing/general continuation claim; final gate passed |
+| AC-08 stale authority | Source/catalog/lease, generation/exact-child/editor-baseline tests | Fresh authority after reboot; final gate passed |
+| AC-09 ambiguity | Injected writer phases, ordered/lost-ack/helper/no-retry tests | B cancellation is transport evidence, not an inferred assignment rollback; final gate passed |
+| AC-10 reconciliation/recovery | Serialized reads, retained runtime, guarded Direct and exact human recovery | Metadata invalidation caveat retained; final gate passed |
+| AC-11 confirmation continuity | Exact-transition versus recovery-drift tests and observed conservative invalidation | Account/default boundary unchanged; final gate passed |
+| AC-12 process lifetime | Helper/child/drain/relaunch/ownership tests; exact live child/logger exit and final Quit | Original partial drain unobserved; retry drain verified; final gate passed |
+| AC-13 routing safeguards | Auth/pairing/no fallback, Stop/Quit, zero control-time upstream package checks and exact Direct restoration | Final gate passed |
+| AC-14 package/live/docs | Final native/build/Node/package chain, post-OS supplement, bounded human evidence and recovery | Original specification PASS; one scoped follow-up specification PASS then quality PASS—Approved |
 
 ## Task reviews and implementation rulings
 
@@ -380,7 +388,10 @@ harness Security diagnostics remain disclosed warning debt. None of those task
 reviews is the sole final whole-branch gate. The actual sole whole-branch
 specification review subsequently passed; quality requested the one
 Important stopped-helper rejection-boundary correction above. Original reports
-remain immutable. Its single scoped sequential follow-up remains PENDING.
+remain immutable. After the one combined fix at `f842b50`, the single scoped
+sequential follow-up actually returned specification PASS then quality PASS—Approved.
+The original Important finding is ADDRESSED; residual findings NONE. This closes
+the sole final gate without reopening completed predecessor reviews.
 
 Recorded rulings include earlier synchronized source allowlists/matching builds,
 process-scoped idle-sleep assertions, pure transformation/source-identity separation,
@@ -402,16 +413,23 @@ Branch: `feat/companion-project-assignment-editing`. Implementation base remains
 `c0a5a53d8c41a6c394f28497fa39133d68a79683`. The separate branding closeout remains
 on its own branch at `2f6c4ea09f7ec61e8ded355464acf7f68dc8ca73` and is not merged
 here. Original human acceptance executable source is `1a1fc68`. The sole final fix
-changes only the stopped assignment rejection boundary and regression tests; its
-current signed build and full ordered checks passed as recorded above. Exact
-code/package proof remains private; the scoped final follow-up and reviewed
-endpoint remain pending.
+changes only the stopped assignment rejection boundary and regression tests. Exact
+reviewed and current executable source is `f842b509064c3269659f541d965452c4ff6fd757`;
+its matching signed build, full ordered checks and one scoped sequential final
+follow-up passed as recorded above. This later documentation commit is literal
+lifecycle bookkeeping; it does not change reviewed executable inputs or claim
+that the reviewers reviewed later product changes. Exact code/package proof
+remains private. The controller freshly verified original operational restoration
+and cleanup, unchanged local/origin/actual-remote main, and separate branding
+closeout. The verified local endpoint and final delivery report are prepared; no
+already-sent chat message or unknown documentation commit ID is claimed.
 
 Evidence sources are the retained Task 1–8 reports/reviews, scoped editor-stability
 and unavailable-correction reports/reviews, sanitized controller live summary and
-latest progress, and completed post-OS verification report. Their historical
-pending statements describe their original observation time; this record adds
-later actual observations without rewriting that history. No new full test/build
-run accompanies prose-only updates. The controller owns the frozen whole-branch
-specification-first then quality gate, actual final lifecycle results and final
-report. Stage 4 and Task 8 remain open until those steps are actually completed.
+latest progress, completed post-OS verification report, actual final-fix report
+and original/follow-up final review reports. Their historical pending statements
+describe their original observation time; this record adds actual later results
+without rewriting that history. No suite or rebuild accompanies this literal
+lifecycle update. Stage 4 implementation, verification, acceptance record and final
+gate are complete. The controller will deliver the prepared final report after
+local bookkeeping verification, then stop before any later increment, push or merge.

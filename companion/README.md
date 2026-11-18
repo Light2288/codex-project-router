@@ -598,7 +598,7 @@ guidance. No fallback, redirect or model-request retry is added.
 
 The [assignment validation record](../docs/validation/companion-project-assignment-editing.md)
 separates automated results, bounded human native/live observations and exact
-recovery/cleanup from the pending final whole-branch review. Readiness and
-configured labels do not prove gateway/account acceptance,
+recovery/cleanup from the completed final whole-branch gate and scoped follow-up.
+Readiness and configured labels do not prove gateway/account acceptance,
 billing attribution or general cross-account continuation. Existing viewport and
 off-screen Tab observations remain; broader UI simplification is deferred.

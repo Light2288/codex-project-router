@@ -145,7 +145,7 @@ attribution are separate facts.
 
 The [assignment-editing validation](docs/validation/companion-project-assignment-editing.md)
 records automated coverage, bounded human native/live observations, exact recovery
-and cleanup separately from the pending final whole-branch review.
+and cleanup with the completed final whole-branch gate and its scoped follow-up.
 
 The listener is loopback-only. Keep actual endpoints, mappings, credentials,
 Keychain references, backups, and runtime evidence outside Git. Unresolved or

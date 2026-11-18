@@ -141,8 +141,9 @@ references, checkpoints and raw evidence private; they are not UI diagnostics.
 
 See the [assignment validation record](validation/companion-project-assignment-editing.md)
 for automated evidence, bounded native/live observations, exact recovery/cleanup
-and the pending final whole-branch review. Readiness and configured account labels
-do not establish credential access, gateway acceptance, billing attribution or
+and the completed final whole-branch gate and scoped follow-up. Readiness and
+configured account labels do not establish credential access, gateway acceptance,
+billing attribution or
 general cross-account continuation.
 
 ## Schema-1 project credential routing compatibility
