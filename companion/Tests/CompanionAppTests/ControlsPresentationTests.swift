@@ -132,6 +132,66 @@ import CompanionCore
             XCTAssertEqual(backend.startCount, 0); XCTAssertEqual(backend.controlCount, 0)
         }
     }
+    func testOriginalConnectionGuidanceOnlyAppearsForAccounts() async throws {
+        // Routing status cannot grant or hide policy guidance for an inspected account configuration.
+        try await withPendingDirectController { controller, backend, _ in
+            let expected = "Chats outside projects use the original Codex connection in On and Off. Model lists and permitted automatic titles use it too."
+            XCTAssertEqual(controller.projectRoutingStatus, .notRunning)
+            XCTAssertEqual(ControlsPresentation(controller: controller).originalConnectionGuidance, expected)
+            backend.routingError = nil
+            await controller.start()
+            XCTAssertEqual(controller.projectRoutingStatus, .known(.off))
+            XCTAssertEqual(ControlsPresentation(controller: controller).originalConnectionGuidance, expected)
+            await controller.setProjectRouting(.on)
+            XCTAssertEqual(controller.projectRoutingStatus, .known(.on))
+            XCTAssertEqual(ControlsPresentation(controller: controller).originalConnectionGuidance, expected)
+            backend.routingError = CompanionError.routingModeUnavailable
+            await controller.refresh()
+            XCTAssertEqual(controller.projectRoutingStatus, .unavailable)
+            XCTAssertEqual(ControlsPresentation(controller: controller).originalConnectionGuidance, expected)
+            for mode: String? in ["legacy", "credential", nil] {
+                backend.snapshot.configuration.mode = mode
+                await controller.refresh()
+                XCTAssertNil(ControlsPresentation(controller: controller).originalConnectionGuidance)
+            }
+        }
+        try await withController { controller, _ in
+            XCTAssertNil(ControlsPresentation(controller: controller).originalConnectionGuidance)
+        }
+    }
+    func testOriginalConnectionGuidanceDoesNotImplyReadinessOrChangeRecovery() async throws {
+        // Explanatory copy cannot promote retained recovery evidence into response or control authority.
+        try await withPendingDirectController { controller, backend, store in
+            backend.snapshot.configuration.defaultAccount = .init(id: "default", displayName: "Personal")
+            await controller.refresh()
+            let journal = try store.load()
+            let quitGuidance = QuitGuidance.current(for: controller)
+            let inspections = backend.inspectCount
+            let display = ControlsPresentation(controller: controller)
+            XCTAssertEqual(display.originalConnectionGuidance, "Chats outside projects use the original Codex connection in On and Off. Model lists and permitted automatic titles use it too.")
+            XCTAssertEqual(display.globalAccount, "Default account: Personal")
+            XCTAssertEqual(display.readiness, "No matching listener ready")
+            XCTAssertEqual(display.ownership, "No owned router")
+            XCTAssertEqual(display.confirmation, "Not confirmed")
+            XCTAssertEqual(display.recoveryGuidance, "The direct response check is still pending. You can close this idle app after Quit verifies the saved recovery information.")
+            XCTAssertEqual(display.quitGuidance, "Closing this idle app does not confirm that Codex has reloaded its settings.")
+            XCTAssertNil(controller.error)
+            XCTAssertNil(controller.routingModeError)
+            XCTAssertTrue(controller.canStart)
+            XCTAssertTrue(controller.canConfirmDirectResponse)
+            XCTAssertFalse(controller.canSetProjectRouting)
+            XCTAssertFalse(controller.canConfirmRoutedResponse)
+            XCTAssertFalse(controller.canStop)
+            XCTAssertFalse(controller.canQuit)
+            XCTAssertEqual(QuitGuidance.current(for: controller), quitGuidance)
+            XCTAssertEqual(try store.load(), journal)
+            XCTAssertEqual(backend.inspectCount, inspections)
+            XCTAssertEqual(backend.startCount, 0)
+            XCTAssertEqual(backend.controlCount, 0)
+            XCTAssertEqual(backend.modeSetCount, 0)
+            XCTAssertEqual(backend.stopCount, 0)
+        }
+    }
     func testRoutingOnDoesNotProveSavedAccountOverrideIsRunning() async throws {
         // Mode-only evidence cannot attest to the saved account snapshot in the child.
         try await withPendingDirectController { controller, backend, _ in

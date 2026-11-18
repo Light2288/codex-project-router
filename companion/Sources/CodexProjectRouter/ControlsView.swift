@@ -30,6 +30,10 @@ import CompanionCore
         guard let account = controller.inspection?.configuration.defaultAccount else { return "No default account designated" }
         return "Default account: \(account.displayName)"
     }
+    var originalConnectionGuidance: String? {
+        guard controller.inspection?.configuration.mode == "accounts" else { return nil }
+        return "Chats outside projects use the original Codex connection in On and Off. Model lists and permitted automatic titles use it too."
+    }
     var accountSetupGuidance: String? {
         switch controller.inspection?.configuration.setupState {
         case "migration_required": return "Import this configuration to choose named accounts, an incoming credential and an explicit default. Saved project bindings will be preserved."
@@ -269,6 +273,9 @@ struct ControlsDisclosureState {
                     .disabled(controller.ownedRouter == nil ? !controller.canStart : !controller.canSetProjectRouting)
                 }
                 Text(display.globalAccount).font(.headline)
+                if let guidance = display.originalConnectionGuidance {
+                    Text(guidance).font(.caption).foregroundStyle(.secondary)
+                }
                 if accountSetup != nil {
                     HStack {
                         if controller.inspection?.configuration.mode == "accounts" {
