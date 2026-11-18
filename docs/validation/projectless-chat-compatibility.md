@@ -3,19 +3,14 @@
 Created: 2026-11-18
 Updated: 2026-11-19
 
-Status: Stage 4 acceptance is **in progress**. Automated current-source checks
-passed in the required order below. The first live run observed fresh projectless
-Off/On replies, then failed its controller-project check because of a validation
-fixture error. That run's exact recovery is verified. A corrected run observed
-reopened projectless Off→On→Off replies on one retained listener and the intended
-control selection categories, with cancelled control streams retained separately.
-Both runs ended with human Direct confirmation, guarded Stop/Quit and independently
-verified exact recovery. A separate confirmation-only run now directly proves
-Task 6 Step 3's guarded routed-response confirmation action and resulting state;
-its exact Direct recovery is also verified. The earlier specification **MISSING**
-result remains historical. A fresh sequential specification → quality gate is
-**PENDING**; quality has **not yet run**. The increment and lifecycle closeout are
-not complete, and no later increment is authorized.
+Status: Stage 4 local delivery is **COMPLETE**. Ordered automated checks and
+bounded native/live acceptance passed with the explicit limits below. The initial
+fixture failure and earlier specification **MISSING** verdict remain historical;
+a separate authorized confirmation-only continuation directly proved the missing
+guarded action/state. All three runs ended with verified exact Direct recovery.
+The fresh sequential specification and quality reviews both **PASS**, with no
+findings. This closes only the approved compatibility increment; no later
+increment, push or merge is authorized.
 
 Scope: the approved [specification](../superpowers/specs/2026-11-18-projectless-chat-compatibility.md)
 and separate [implementation plan](../superpowers/plans/2026-11-18-projectless-chat-compatibility.md).
@@ -116,10 +111,10 @@ source, bundle, executable bytes, physical identities and strict signature still
 matched. A file/signature match alone is not used to attribute a running app or
 listener.
 
-Private raw command logs and exact source/bundle manifests remain outside Git in
-the ignored task-evidence directory. No actual configuration, endpoint, mapping,
-credential reference/value, chat identifier, checkpoint or raw live trace is
-reproduced here.
+Private raw command logs, exact source/bundle manifests and final review reports
+are retained in the private acceptance archive outside the checkout. No actual
+configuration, endpoint, mapping, credential reference/value, chat identifier,
+checkpoint or raw live trace is reproduced here.
 
 ## Native/live selection and transport matrix
 
@@ -372,17 +367,32 @@ history. The earlier partial stopped boundary remains preserved as history.
 | AC-06 | Scoped managed schema-2 policy, unchanged legacy/standalone behavior and setup/control boundaries covered by Tasks 1–5; final current-source chain PASS |
 | AC-07 | Diagnostic privacy/current guidance and relocated source-denied package coverage pass; read-only native observation confirms exact guidance and guarded On/owned-ready presentation |
 | AC-08 | Required ordered current-source checks PASS with disclosed intentional warnings |
-| AC-09 | Original fresh/reopened projectless replies, distinct-default and control selection evidence retain their limits. Separate confirmation-only run directly proves the guarded routed-response confirmation action/state; Task 6 Step 3 observation is complete, subject to the fresh final gate |
+| AC-09 | Original fresh/reopened projectless replies, distinct-default and control selection evidence retain their limits. Separate confirmation-only run directly proves the guarded routed-response confirmation action/state; Task 6 Step 3 observation is complete and accepted by the final gate |
 | AC-10 | Human projectless replies separated from initiating HTTP 200, control/ancillary 499, unknown-identity 503 and initial controller 401. Disabled titles and unperformed live compaction/ancestry/in-flight cases UNRUN |
 | AC-11 | All three runs recovered with required human restart/direct confirmation and guarded Stop/Quit; final independent owned-process/listener absence, all three Direct/restored contexts, byte-exact owned settings/journal/backups and original optional-property absence verified |
-| AC-12 | Tasks 1–5 task reviews Approved. Earlier specification MISSING retained as history; confirmation gap now resolved by direct evidence. Fresh sequential specification → quality review PENDING, quality NOT YET RUN; final gate/lifecycle closeout incomplete |
+| AC-12 | All task reviews Approved. Earlier specification MISSING retained as history and resolved by direct evidence. Fresh SPEC REVIEW: PASS followed by QUALITY REVIEW: PASS, no findings; local lifecycle closeout complete |
 
-The controller owns the sole final sequential review against implementation base
-`91b53e0` and the approved pair. Task-level approvals do not replace that gate.
-The previously missing guarded routed-response confirmation action/state is now
-proven in the separate continuation, and all three runs' exact recovery is
-verified. The earlier MISSING result remains historical. A fresh sequential
-specification → quality gate is pending, with quality not yet run; acceptance
-approval and increment/lifecycle completion are not claimed. Account editing/deletion,
-project visibility, broader UI and distribution remain deferred. This evidence
-continuation adds no product fix or new scope.
+The sole integrated final gate reviewed the complete branch from `5d2e44b` to
+`c4575414e3f9ec1d905b8819a3ed4f5f6e0c72cd`, including implementation base
+`91b53e0`, against the approved pair. It returned **SPEC REVIEW: PASS**, then
+**QUALITY REVIEW: PASS**, with **no findings** on 2026-11-19 (Europe/Rome).
+Both reviewers verified the same immutable package and echoed matching identity:
+
+| Review identity | Value |
+| --- | --- |
+| Gate run | `projectless-final-resumed-934c4f2d-d32b-49a4-8b89-86280f398953` |
+| Reviewed state | `c4575414e3f9ec1d905b8819a3ed4f5f6e0c72cd-bc08d8e9-5d35-4320-9b8d-ce40701b260f` |
+| Package SHA-256 | `6062c86e1c5d68c5890996ef0022e0fd86fd18884df503366a4d759cb2e03efc` |
+
+The earlier MISSING finding remains historical and is resolved by the separately
+observed guarded confirmation. Review approval retains every failed, limited and
+UNRUN observation above; it does not establish complete control-stream delivery,
+a single uninterrupted three-run scenario, general cross-account continuation,
+billing attribution or production Keychain acceptance from synthetic seams.
+
+Local closeout changes only lifecycle/checklist/evidence metadata after the
+reviewed endpoint. The tested executable inputs and signed bundle remain unchanged;
+whitespace, identity and exact stopped/restored-state checks cover closeout.
+The branch is retained locally without push or merge. Account editing/deletion,
+project visibility, broader UI and distribution remain deferred. This increment
+adds no further product fix or scope.

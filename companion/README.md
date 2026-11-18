@@ -503,8 +503,8 @@ relevant ancestry/session consistency checks; absence of a project assignment is
 insufficient. A first message with unavailable or contradictory evidence blocks.
 The [bounded native/live acceptance record](../docs/validation/projectless-chat-compatibility.md)
 records fresh/reopened replies, transport limits, the separately proven guarded
-routed-response confirmation and exact recovery. A fresh sequential final review
-remains pending; quality has not yet run. Standalone schema-1/schema-2 and managed
+routed-response confirmation and exact recovery. Sequential specification and
+quality final reviews passed with no findings. Standalone schema-1/schema-2 and managed
 schema-1 retain their historical behavior; no schema, migration, selector or policy
 switch is added.
 

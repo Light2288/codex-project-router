@@ -126,7 +126,7 @@ retains both runs, cancelled control transports, the initial fixture failure and
 exact restoration evidence separately. A separate user-authorized continuation
 now directly proves guarded routed-response confirmation and verifies exact
 restoration of all three retained contexts. The historical MISSING finding is
-retained; a fresh sequential final review is pending and quality has not yet run.
+retained; fresh sequential specification and quality reviews passed with no findings.
 Synthetic evidence cannot substitute for required live checks. No new desktop-state
 source or unresolved-request fallback is introduced.
 
@@ -430,8 +430,8 @@ and final review, qualified native/live observations and accepted viewport/Tab
 limitations. The separate [projectless acceptance record](validation/projectless-chat-compatibility.md)
 records bounded native/live observations, the separately proven guarded
 routed-response confirmation and exact recovery. The earlier specification MISSING
-result remains historical; a fresh sequential final gate is pending and quality
-has not yet run. Increment completion is not claimed.
+result remains historical; fresh sequential specification and quality reviews
+passed with no findings. Local delivery of this increment is complete.
 Historical validation reports retain their original scope and limitations.
 
 ## Development checks
