@@ -148,3 +148,39 @@ test("managed diagnostic selection cannot imply suspended override", () => {
   assert.equal(Object.hasOwn(invalid, "routeSelection"), false);
   assert.doesNotMatch(output, /SENTINEL/);
 });
+
+
+test("projectless diagnostics retain validated owners without fabricated project attribution", () => {
+  let output = "";
+  const stream = new Writable({write(chunk, encoding, cb) {output += chunk; cb();}});
+  for (const routingMode of ["on", "off"]) for (const routeSelection of [undefined, "original"]) emitDiagnostic(stream, {
+    event: "started", source: "projectless", requestId: T1, threadId: T1, ownerThreadId: T1,
+    projectId: P1, routeAlias: "route-a", routingMode, routeSelection,
+    authorization: "KEY_SENTINEL", body: "PROMPT_SENTINEL",
+  });
+  const events = output.trim().split("\n").map(JSON.parse);
+  assert.deepEqual(events.map(event => event.routeSelection), [undefined, "original", undefined, "original"]);
+  for (const event of events) {
+    assert.equal(event.source, "projectless");
+    assert.equal(event.ownerThreadId, T1);
+    assert.equal(event.threadId, T1);
+    for (const field of ["projectId", "routeAlias"]) assert.equal(Object.hasOwn(event, field), false);
+  }
+  assert.doesNotMatch(output, /SENTINEL/);
+});
+
+test("original diagnostics suppress fabricated project attribution while legacy records retain it", () => {
+  let output = "";
+  const stream = new Writable({write(chunk, encoding, cb) {output += chunk; cb();}});
+  for (const source of ["catalog", "unassigned_title", "direct", "ancestor"]) emitDiagnostic(stream, {
+    event: "started", source, routingMode: "on", routeSelection: "original", projectId: P1, routeAlias: "route-a",
+  });
+  emitDiagnostic(stream, {event: "started", source: "direct", projectId: P1, routeAlias: "route-a"});
+  const events = output.trim().split("\n").map(JSON.parse);
+  for (const event of events.slice(0, 4)) {
+    assert.equal(event.routeSelection, "original");
+    for (const field of ["projectId", "routeAlias"]) assert.equal(Object.hasOwn(event, field), false);
+  }
+  assert.equal(events[4].projectId, P1);
+  assert.equal(events[4].routeAlias, "route-a");
+});
