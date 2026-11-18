@@ -133,8 +133,9 @@ Account editing/deletion remains deferred.
 
 A fresh chat must have positive supported saved-state evidence of projectless
 membership before its first request can route; missing or conflicting identity
-still blocks. Native/live first-message compatibility for this increment remains
-pending and is not established by synthetic checks. For an existing installation,
+still blocks. The [bounded native/live acceptance record](docs/validation/projectless-chat-compatibility.md)
+records fresh and reopened projectless replies, transport limits and verified
+recovery; final whole-branch review remains pending. For an existing installation,
 follow the [safe update and restart sequence](docs/operating-guide.md#original-connection-and-projectless-chats)
 before replacing or restarting the app/router. Neither original nor selected
 account failures trigger fallback, retries, or redirects.

@@ -501,8 +501,9 @@ an alternate route, retry, redirect following or request translation.
 Projectless routing requires positive supported saved-state evidence and complete
 relevant ancestry/session consistency checks; absence of a project assignment is
 insufficient. A first message with unavailable or contradictory evidence blocks.
-Fresh native/live projectless first-message acceptance remains pending; synthetic
-checks and policy copy do not establish it. Standalone schema-1/schema-2 and managed
+The [bounded native/live acceptance record](../docs/validation/projectless-chat-compatibility.md)
+records observed fresh/reopened replies, transport limits and exact recovery;
+final whole-branch review remains pending. Standalone schema-1/schema-2 and managed
 schema-1 retain their historical behavior; no schema, migration, selector or policy
 switch is added.
 

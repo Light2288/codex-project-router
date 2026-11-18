@@ -10,7 +10,7 @@
 
 **Updated:** 2026-11-18
 
-**Current stage:** 4 — specification and separate implementation plan approved; subagent-driven implementation authorized.
+**Current stage:** 4 — specification and separate implementation plan approved; subagent-driven implementation authorized. Execution preflight and Tasks 1–5 are complete with independent task reviews Approved and no findings. Task 6 ordered automated acceptance passed; the first live run established fresh projectless Off/On responses, retained a failed controller-project validation case and completed verified recovery. The corrected run recorded reopened projectless Off→On→Off responses on one retained listener and control selection categories, with cancelled control transports explicitly retained. Both live runs now have human Direct confirmation, guarded Stop/Quit and independently verified exact operational restoration. Task 6 acceptance evidence is recorded with its explicit transport/unrun limits; the sole final sequential review and lifecycle closeout remain pending. The increment is not yet declared complete.
 
 **Storage:** Saved after leaving Plan mode at `docs/superpowers/specs/2026-11-18-projectless-chat-compatibility.md`. The complete unsaved DRAFT was previously presented in chat; its requirements below are unchanged.
 

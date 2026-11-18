@@ -118,8 +118,13 @@ of the complete relevant saved ancestry/session relationship. No project assignm
 unknown identity, an unsupported parent hint, or a title marker alone grants this
 authority. Conflicting project/projectless evidence blocks. A fresh chat's first
 message must satisfy the same proof; if that evidence is not yet available, the
-request blocks. Native/live fresh first-message compatibility for this increment
-remains pending; synthetic evidence cannot substitute for it. No new desktop-state
+request blocks. The first bounded live run observed a positively proven fresh
+projectless first reply. A corrected run also observed reopened Off→On→Off
+projectless replies on one retained listener. Both runs ended with verified Direct
+recovery. The [current acceptance record](validation/projectless-chat-compatibility.md)
+retains both runs, cancelled control transports, the initial fixture failure and
+exact restoration evidence separately; final whole-branch review remains pending.
+Synthetic evidence cannot substitute for required live checks. No new desktop-state
 source or unresolved-request fallback is introduced.
 
 The separate `allowUnassignedThreadTitles` option stays off by default. Its strict
@@ -419,7 +424,9 @@ See [companion setup, lifecycle, packaging and recovery](../companion/README.md)
 custom activation contexts and recovery details. The [managed-routing validation
 record](validation/companion-routing-on-off.md) records completed local acceptance
 and final review, qualified native/live observations and accepted viewport/Tab
-limitations. Projectless native/live acceptance is a separate pending obligation.
+limitations. The separate [projectless acceptance record](validation/projectless-chat-compatibility.md)
+now records bounded native/live observations and verified recovery; its final
+whole-branch review remains pending.
 Historical validation reports retain their original scope and limitations.
 
 ## Development checks
