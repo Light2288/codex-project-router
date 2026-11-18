@@ -9,19 +9,24 @@ export function emitDiagnostic(stream, event) {
       : "rejected",
   };
   const unattributedTitle = event.source === "unassigned_title";
-  for (const key of unattributedTitle ? ["requestId", "threadId"] : ["requestId", "threadId", "ownerThreadId", "projectId"])
+  const unattributedProject = unattributedTitle || event.source === "projectless" ||
+    event.routeSelection === "original";
+  const identityKeys = ["requestId", "threadId"];
+  if (!unattributedTitle) identityKeys.push("ownerThreadId");
+  if (!unattributedProject) identityKeys.push("projectId");
+  for (const key of identityKeys)
     if (typeof event[key] === "string" && UUID.test(event[key]))
       record[key] = event[key];
   if (
-    !unattributedTitle && event.routingMode !== "off" && event.routeSelection !== "global" &&
+    !unattributedProject && event.routingMode !== "off" && event.routeSelection !== "global" &&
     typeof event.routeAlias === "string" &&
     /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(event.routeAlias)
   )
     record.routeAlias = event.routeAlias;
-  if (["direct", "ancestor", "catalog", "unassigned_title"].includes(event.source))
+  if (["direct", "ancestor", "catalog", "unassigned_title", "projectless"].includes(event.source))
     record.source = event.source;
   if (["on", "off"].includes(event.routingMode)) record.routingMode = event.routingMode;
-  if (event.routeSelection === "global" || event.routeSelection === "override" && event.routingMode !== "off")
+  if (["global", "original"].includes(event.routeSelection) || event.routeSelection === "override" && event.routingMode !== "off")
     record.routeSelection = event.routeSelection;
   if (["responses", "compact", "catalog", "health"].includes(event.operation))
     record.operation = event.operation;

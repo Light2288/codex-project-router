@@ -404,6 +404,9 @@ syncBuiltinESMExports();`);
   proc.stderr.on("data", chunk => { stderr += chunk; });
   const replies = lines(proc.stdout);
   const ready = await replies.next();
+  const childPid = proc.pid;
+  assert.equal(ready.type, "ready");
+  assert.equal(ready.sessionId, sessionId);
   assert.equal(ready.mode, "off");
   if (schemaVersion === 2) {
     assert.deepEqual(ready.capabilities, ["project_assignments_v1"]);
@@ -418,6 +421,11 @@ syncBuiltinESMExports();`);
   for (const [index, mode] of ["on", "off"].entries()) {
     proc.stdin.write(frame("set_mode", requestIds[index], mode));
     assert.deepEqual(await replies.next(), { schemaVersion: 1, type: "mode", sessionId, requestId: requestIds[index], mode });
+    proc.stdin.write(frame("get_mode", requestIds[index]));
+    assert.deepEqual(await replies.next(), { schemaVersion: 1, type: "mode", sessionId, requestId: requestIds[index], mode });
+    assert.equal(proc.pid, childPid);
+    assert.equal(proc.exitCode, null);
+    process.kill(childPid, 0);
   }
   proc.stdin.end();
   assert.equal((await fetch(`http://127.0.0.1:${f.config.listenPort}/healthz`)).status, 200);

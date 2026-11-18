@@ -164,6 +164,8 @@ export function createProxy(
         let authorization = req.headers.authorization,
           upstreamBaseUrl = config.upstreamBaseUrl;
         const accounts = config.accountRouting;
+        const managedAccounts = config.schemaVersion === 2 && Boolean(accounts) &&
+          routingMode !== undefined;
         if (accounts || config.credentialRouting) {
           const incomingCredential = await credentialReader(
             accounts ? accounts.incomingCredential : config.credentialRouting.globalCredential,
@@ -185,13 +187,16 @@ export function createProxy(
                 signal: controller.signal,
                 allowUnassignedTitle: operation === "responses",
                 requireRoute: routingMode === undefined,
+                allowProjectless: managedAccounts,
               })
             : { source: "catalog" };
         if (controller.signal.aborted || res.destroyed || completed) return;
+        const selectOriginal = managedAccounts &&
+          ["projectless", "catalog", "unassigned_title"].includes(resolution.source);
         let selectOverride = Boolean(accounts || config.credentialRouting) &&
           resolution.routeAlias !== undefined && routingMode !== "off";
         let selectedAccount;
-        if (accounts) {
+        if (accounts && !selectOriginal) {
           let accountId = accounts.defaultAccountId;
           if (selectOverride) {
             if (!Object.hasOwn(accounts.routeAccounts, resolution.routeAlias))
@@ -208,7 +213,7 @@ export function createProxy(
             throw new RouterError("CREDENTIAL_UNMAPPED");
         }
         if (routingMode !== undefined) {
-          routeSelection = selectOverride ? "override" : "global";
+          routeSelection = selectOriginal ? "original" : selectOverride ? "override" : "global";
           if (!selectOverride) {
             const { routeAlias: _suspendedAlias, ...membership } = resolution;
             resolution = membership;

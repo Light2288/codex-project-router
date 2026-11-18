@@ -368,7 +368,11 @@ The focused window leads with project-routing state, the configured default
 account and searchable project overrides. Setup, operational facts, activation and
 recovery are available in disclosures. It shows exact selected local paths, mode,
 on-disk provider state, matching readiness, session ownership and manual desktop
-confirmation separately.
+confirmation separately. In inspected account mode, secondary guidance beside
+the default explains that chats outside projects, model lists and permitted
+automatic titles use the original Codex connection. This policy text does not
+prove readiness, which child version is running, or an upstream response; no
+original endpoint or credential is displayed there.
 Provider errors do not hide a readable project catalog. Search filters local names
 and aliases without changing assignments or mappings; stale mapping-only projects
 and missing route targets are visibly marked. An unavailable catalog is displayed
@@ -477,11 +481,41 @@ without a Codex restart or any provider URL rewrite. Saved overrides remain visi
 Saving an account/default change requires the safe stop/save/explicit Start boundary
 above. Assignment changes use the guarded flow below.
 
-With schema 2, Off selects the explicit default endpoint/item after separate incoming
-authentication; On selects an explicit saved account or inherits the default. The
-original top-level URL remains direct recovery. Missing targets/access failures
-never fall back. Unassigned title requests also substitute the selected outgoing
-credential, including at a different origin.
+In companion-managed, ready schema-2 account routing, identified project requests
+use their complete saved account destination/credential pair while On, or the
+explicit default pair while Off or inheriting. Proven projectless responses and
+compaction use the original Codex connection in both modes. Model lists and
+already-eligible unassigned automatic titles use that original connection across
+all chats, including project chats. The separate title option remains off unless
+explicitly enabled; its strict matching, fresh absence proof and ordinary
+project/projectless identity precedence remain required.
+
+The original connection pairs the preserved top-level `upstreamBaseUrl`, including
+its full API prefix, with the exact accepted incoming Authorization value after
+incoming authentication. It can differ from the companion default. Original paths
+read no outgoing default/project item. Project paths retain their complete selected
+URL/key pair, even if a selected URL happens to equal the original. Missing targets,
+credential failures, original/selected upstream errors and redirects never trigger
+an alternate route, retry, redirect following or request translation.
+
+Projectless routing requires positive supported saved-state evidence and complete
+relevant ancestry/session consistency checks; absence of a project assignment is
+insufficient. A first message with unavailable or contradictory evidence blocks.
+The [bounded native/live acceptance record](../docs/validation/projectless-chat-compatibility.md)
+records fresh/reopened replies, transport limits, the separately proven guarded
+routed-response confirmation and exact recovery. Sequential specification and
+quality final reviews passed with no findings. Standalone schema-1/schema-2 and managed
+schema-1 retain their historical behavior; no schema, migration, selector or policy
+switch is added.
+
+To update an existing installation, restore Direct for the retained context,
+manually restart Codex and confirm a working direct response, then use guarded
+Stop/Quit and verify the exact owned app/router have exited before replacing the
+bundle. Rebuild and relaunch explicitly, Start in Off, and activate/restart/confirm
+again if integrating the provider. Keep private checkpoints and preserve unrelated
+settings and optional-property absence. There is no general configuration reload;
+ordinary mode/assignment changes retain their existing live boundaries. See the
+[operating sequence](../docs/operating-guide.md#original-connection-and-projectless-chats).
 
 The retained schema-1 engine uses top-level `upstreamBaseUrl` and the
 existing incoming authorization, verified against a fresh `globalCredential` read.
@@ -499,6 +533,10 @@ historical behavior and has no managed mode channel.
 Each HTTP request captures mode and its immutable configured assignment snapshot
 before authentication or any other asynchronous lookup. A later mode
 change affects later requests, while active streams retain their initial selection.
+Project membership is resolved from fresh supported saved state after incoming
+authentication; receipt-time configuration/mode capture is not a membership snapshot.
+Later coherent project/projectless movement affects the next request, while
+contradictory transition evidence blocks.
 No request is retried or migrated to make a switch appear successful. Gateways'
 model, payload, continuation and cross-account errors remain errors.
 

@@ -43,7 +43,10 @@ every desktop version, gateway, or account; see the [validation evidence](#valid
   separate from the selected outgoing account.
 - **Everyday routing controls:** New managed starts begin Off. On applies saved
   project overrides; identified projects without an override inherit the default.
-  Off uses the default through the running router.
+  Off uses the default for identified projects through the running router.
+- **Original connection for chats outside projects:** In companion-managed, ready
+  schema-2 account routing, proven projectless chats use the original Codex
+  connection in On and Off. Model lists and permitted automatic titles use it too.
 - **Native companion:** Search projects and assign, switch, or remove an existing
   account override, with separate saved/running state and setup,
   activation, and recovery available from the same controls window.
@@ -99,8 +102,17 @@ Use **Turn project routing On** / **Turn project routing Off** after initial
 integration. These switches affect subsequent requests without restarting Codex
 or rewriting the provider URL. Existing streams keep their original selection.
 
-**Off still needs the router listener.** It suspends project overrides and uses
-the saved default; it does not restore direct settings or authorize Stop/Quit.
+In companion-managed, ready schema-2 account routing, identified projects use
+their saved override while On, or the explicit default when Off or inheriting.
+Chats positively identified outside projects use the preserved original Codex
+destination and accepted incoming credential in both modes. Model lists and
+already-permitted unassigned automatic titles use that original connection across
+all chats; the title option stays off unless explicitly enabled. No outgoing
+default/project key is read for these original-connection requests. Standalone
+schema-1/schema-2 and managed schema-1 behavior stays unchanged.
+
+**Off still needs the router listener.** It suspends project overrides; it does
+not restore direct settings or authorize Stop/Quit.
 When recovery is required, use **Restore direct**, restart Codex, verify and
 confirm a direct response, then stop the owned listener when permitted. Closing
 the controls window leaves the companion running.
@@ -118,6 +130,16 @@ it. Off suspends overrides. A saved choice alone does not prove running applicat
 Unavailable control or uncertain outcomes block writes while preserving guarded
 Direct recovery. See [assignment editing](docs/operating-guide.md#project-assignment-editing).
 Account editing/deletion remains deferred.
+
+A fresh chat must have positive supported saved-state evidence of projectless
+membership before its first request can route; missing or conflicting identity
+still blocks. The [bounded native/live acceptance record](docs/validation/projectless-chat-compatibility.md)
+records fresh/reopened replies, transport limits, a separately observed guarded
+routed-response confirmation and verified recovery. Sequential specification and
+quality final reviews passed with no findings. For an existing installation,
+follow the [safe update and restart sequence](docs/operating-guide.md#original-connection-and-projectless-chats)
+before replacing or restarting the app/router. Neither original nor selected
+account failures trigger fallback, retries, or redirects.
 
 ## Documentation
 

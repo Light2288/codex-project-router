@@ -4,7 +4,7 @@ Detailed configuration, CLI operation, recovery, compatibility, and validation.
 Run commands from the repository root. For a quick introduction and companion
 installation, see the [project README](../README.md).
 
-Experimental local proxy for automatic project identification in Codex desktop. The native companion creates or imports named accounts, saves an explicit default, and starts project routing Off. Off uses that default account's HTTPS destination and Keychain credential; On applies saved project overrides, while identified projects without an override inherit the default. The incoming desktop credential is verified separately. Schema-1 standalone configurations remain supported.
+Experimental local proxy for automatic project identification in Codex desktop. The native companion creates or imports named accounts, saves an explicit default, and starts project routing Off. For identified projects, Off uses that default account's HTTPS destination and Keychain credential; On applies saved project overrides, while projects without an override inherit the default. In companion-managed, ready schema-2 account routing, proven projectless chats, model lists and permitted unassigned automatic titles use the original Codex connection in both modes. The incoming desktop credential is verified separately. Standalone schema-1/schema-2 and managed schema-1 behavior stays unchanged.
 
 The router relies on observed internal request headers and local desktop state. Check the [validation report](validation/desktop-project-identification-validation.md) for what has actually been tested. Passing local tests does not establish desktop-to-gateway compatibility. Live testing passed the primary chat lifecycle matrix. The [metadata validation](validation/auxiliary-request-metadata-validation.md) identified additional title-generation requests whose temporary IDs have no proven project origin. They remain blocked by default. The optional narrow title policy below allows qualifying initial-title requests without project attribution; see its [validation report](validation/unassigned-title-request-policy.md) for current evidence.
 
@@ -86,7 +86,87 @@ or stale `.activation.lock` evidence is never adopted, signalled or removed
 automatically; independently inspect its origin and resolve it locally, preserving
 receipts/checkpoints and recovery evidence. Account editing/deletion remains
 deferred. See the [account setup validation record](validation/companion-account-default-setup.md)
-for observed evidence and pending native/live acceptance.
+for its completed local acceptance, bounded native/live observations and remaining
+evidence limits.
+
+## Original connection and projectless chats
+
+This behavior applies only to companion-managed, ready `schemaVersion: 2` account
+routing. Standalone schema-1/schema-2 and managed schema-1 retain their historical
+routing semantics. Existing configurations need no migration or new option.
+
+| Request | Project routing On | Project routing Off |
+| --- | --- | --- |
+| Identified project with an override | Selected complete account pair | Explicit default account pair |
+| Identified project without an override | Explicit default account pair | Explicit default account pair |
+| Positively proven projectless response or compaction | Original Codex connection | Original Codex connection |
+| Model list, across all chats | Original Codex connection | Original Codex connection |
+| Already-eligible unassigned automatic title, across all chats | Original Codex connection | Original Codex connection |
+
+The original connection is the preserved top-level `upstreamBaseUrl`, with its full
+API prefix, paired with the exact accepted incoming Authorization value after
+incoming authentication. It is independent of the companion default, which can
+use another destination and outgoing credential. Original paths read no outgoing
+default/project key; project paths retain the complete selected URL/key pair even
+when that URL equals the original. Authentication, missing-target, credential and
+upstream failures remain failures. Neither path falls back to another account,
+retries a model request, follows a redirect, or translates bodies, models or
+continuations.
+
+Projectless membership requires a positive supported saved marker and validation
+of the complete relevant saved ancestry/session relationship. No project assignment,
+unknown identity, an unsupported parent hint, or a title marker alone grants this
+authority. Conflicting project/projectless evidence blocks. A fresh chat's first
+message must satisfy the same proof; if that evidence is not yet available, the
+request blocks. The first bounded live run observed a positively proven fresh
+projectless first reply. A corrected run also observed reopened Off→On→Off
+projectless replies on one retained listener. Both runs ended with verified Direct
+recovery. The [current acceptance record](validation/projectless-chat-compatibility.md)
+retains both runs, cancelled control transports, the initial fixture failure and
+exact restoration evidence separately. A separate user-authorized continuation
+now directly proves guarded routed-response confirmation and verifies exact
+restoration of all three retained contexts. The historical MISSING finding is
+retained; fresh sequential specification and quality reviews passed with no findings.
+Synthetic evidence cannot substitute for required live checks. No new desktop-state
+source or unresolved-request fallback is introduced.
+
+The separate `allowUnassignedThreadTitles` option stays off by default. Its strict
+metadata matching and fresh absence proof still apply. Ordinary proven project or
+projectless membership takes priority over the title exception. Changing the shared
+model-list/title destination applies across all chats using this managed provider;
+it does not make other auxiliary request families eligible.
+
+Configuration and routing mode are captured together at HTTP request receipt,
+before asynchronous authentication. Membership resolves freshly afterward; this is
+not a receipt-time membership promise or an atomic multi-file snapshot. Once a
+request selects a destination, its stream retains that selection. A later coherent
+move into or out of a project affects the next request; conflicting transition
+state blocks. Continuing a chat across upstream accounts retains gateway-specific
+limitations.
+
+For a safe update/restart of an existing installation:
+
+1. Retain private checkpoints for the selected/normal configuration, provider,
+   recovery context and original option presence. Use **Restore direct** for the
+   retained context, preserving unrelated edits.
+2. Manually restart Codex, receive and confirm a working direct response, then use
+   guarded **Stop** / **Quit**. Verify the exact owned app/router exited and its
+   listener is absent before replacing the bundle. Do not adopt or stop an external
+   listener.
+3. Build the current app, relaunch it, and explicitly **Start router (routing Off)**.
+   Initial/repeated provider integration still requires activation, manual Codex
+   restart and a separately confirmed routed response. Keep recovery available.
+4. Use ordinary On/Off or guarded assignment changes without routine restarts.
+   Account/default saves retain their safe Direct/stopped boundary. Other external
+   configuration or bundled-code changes require the safe restart sequence; no
+   general reload is added.
+
+After a validation failure as well as success, restore the exact prior private
+settings and optional-property presence while preserving unrelated edits, Restore
+direct, manually restart and confirm a working direct response before guarded
+owned Stop/Quit. Retain recovery evidence outside Git. If a new projectless first
+message cannot satisfy supported proof, report compatibility incomplete and return
+to scope/design; do not broaden identity authority to complete a run.
 
 ## Project assignment editing
 
@@ -208,7 +288,7 @@ node src/cli.js activate --config "$HOME/.codex-project-router/config.json"
 
 Activation checks provider compatibility and a matching local health fingerprint, saves an exclusive private backup, and replaces only the supported provider's base-URL value. It preserves the existing authentication command, models, comments, and unrelated configuration. Supported editing is deliberately limited to a simple `[model_providers.PROVIDER_ID]` table with a single-line double-quoted `base_url`; ambiguous forms are rejected.
 
-Restart the desktop app when the command reports `restartRequired`. The helper never restarts it. The provider setting affects every chat using that provider: model requests without a resolvable, explicitly mapped project will block, except qualifying initial titles when their separate policy is enabled. Arrange validation while other work is idle.
+Restart the desktop app when the command reports `restartRequired`. The helper never restarts it. The provider setting affects every chat using that provider. In standalone schema-1 serving, model requests without a resolvable, explicitly mapped project block, except qualifying initial titles when their separate policy is enabled. Companion-managed schema-2 account routing follows the original/default policy above. Arrange validation while other work is idle.
 
 Restore direct access before stopping the proxy:
 
@@ -232,7 +312,7 @@ The helper checks the current file before replacement. Avoid editing Codex confi
 
 For model execution, the router validates `thread-id`, `session-id`, and the identity fields in `x-codex-turn-metadata`. It reads explicit local project assignments, following saved subagent parent edges when necessary. Completed parent-edge records remain relevant. Distinct current/session identities require proven ancestry; parent hints alone are insufficient.
 
-It re-reads desktop state per request and fixes the chosen assignment for that request. Transient lookup failures get a one-second window with 50 ms retries. Ancestry is limited to 32 nodes. Projectless, conflicting, and unsupported identities remain blocked, except for the explicitly enabled narrow initial-title policy below. Standalone schema-1 serving requires an explicit project mapping and has no default Global route. Managed routing uses the configured default for identified projects without an override, and for admitted requests while routing is Off; this inheritance never resolves an unknown or ambiguous identity. There is no working-directory inference, foreground-window inference, or prompt inspection.
+It re-reads desktop state per request and fixes the chosen assignment for that request. Transient lookup failures get a one-second window with 50 ms retries. Ancestry is limited to 32 nodes. Companion-managed, ready schema-2 account routing accepts positively proven projectless identity as described above; conflicting and unsupported identities remain blocked. Outside that scope, projectless requests retain their historical rejection. The separate explicitly enabled narrow initial-title policy below remains available. Standalone schema-1 serving requires an explicit project mapping and has no default Global route. Managed routing uses the configured default for identified projects without an override and project requests while Off; inheritance never resolves an unknown or ambiguous identity. There is no working-directory inference, foreground-window inference, or prompt inspection.
 
 Allowed local operations:
 
@@ -240,24 +320,24 @@ Allowed local operations:
 |---|---|
 | `GET /healthz` | Local readiness; no authentication, credential lookup or upstream request |
 | `GET /v1/models` | Provider-wide catalog; bearer authentication required, chat identity optional |
-| `POST /v1/responses` | Bearer authentication and resolved project required; optional narrow initial-title exception below |
+| `POST /v1/responses` | Bearer authentication and resolved project required, or positively proven projectless identity in scoped managed account mode; optional narrow initial-title exception below |
 | `POST /v1/responses/compact` | Same identity and authentication requirements |
 
-Other routes, methods, and WebSocket upgrades are rejected. Allowed queries retain their original content. Forwarding preserves body bytes, model names, and streaming status/content. Authorization follows the selected mode: unchanged caller authorization in legacy mode, or the verified global/selected project credential as described above. Hop-by-hop headers are removed while the intended routed authorization is retained, client disconnects cancel pending lookups and upstream work, and upstream inactivity is limited to five minutes. The router introduces no model-request retries and follows no redirects.
+Other routes, methods, and WebSocket upgrades are rejected. Allowed queries retain their original content. Forwarding preserves body bytes, model names, and streaming status/content. Authorization follows the selected mode: accepted incoming authorization on scoped original-connection paths, unchanged caller authorization in legacy mode, or the verified global/selected account credential as described above. Hop-by-hop headers are removed while the intended routed authorization is retained, client disconnects cancel pending lookups and upstream work, and upstream inactivity is limited to five minutes. The router introduces no model-request retries and follows no redirects.
 
 Diagnostics contain only fixed event/error codes, timestamps, correlation IDs, required chat/project IDs, aliases, resolution source, fixed operation labels, status, and timing. Prompts, responses, credentials, whole headers, raw metadata, raw desktop state, and exception text are excluded, including failure paths.
 
 ## Optional unassigned initial-title policy
 
-Set `allowUnassignedThreadTitles` to `true` in private configuration to permit the observed initial-title pattern through `POST /v1/responses`. This strict boolean defaults to `false` under `schemaVersion: 1`. Restart the foreground proxy after changing it. Readiness distinguishes both policy and observation modes; rollback remains usable after mode changes and with the proxy offline. Existing activation records need no migration.
+Set `allowUnassignedThreadTitles` to `true` in private configuration to permit the observed initial-title pattern through `POST /v1/responses`. This strict boolean defaults to `false` in both configuration schemas. Restart the foreground proxy after changing it. Readiness distinguishes both policy and observation modes; rollback remains usable after mode changes and with the proxy offline. Existing activation records need no migration.
 
-Ordinary mapped resolution always wins. The exception requires exactly one valid metadata object with singleton `thread_source` and `turn_trigger` strings both equal to `thread_title`. Header `thread-id`/`session-id` and metadata `thread_id`/`session_id` must all contain the same valid UUID. Header `x-codex-parent-thread-id` and metadata parent/fork-source members must be absent, including no null or empty occurrences. Duplicate allowlisted metadata members, including escaped key spellings, disqualify the exception. `request_kind` values do not authorize it.
+Ordinary project resolution and scoped proven projectless resolution always win. The exception requires exactly one valid metadata object with singleton `thread_source` and `turn_trigger` strings both equal to `thread_title`. Header `thread-id`/`session-id` and metadata `thread_id`/`session_id` must all contain the same valid UUID. Header `x-codex-parent-thread-id` and metadata parent/fork-source members must be absent, including no null or empty occurrences. Duplicate allowlisted metadata members, including escaped key spellings, disqualify the exception. `request_kind` values do not authorize it.
 
 Fresh healthy JSON and read-only SQLite checks must prove that the temporary ID has no assignment entry, projectless marker, saved thread, or incoming/outgoing spawn edge. Malformed state, missing schema, detected file/database changes, failed final checks and cancellation cannot grant the exception. Transient failures share the existing one-second lookup budget and 50 ms retry cadence. The checks use current readable snapshots, not an atomic transaction across both state files. No prior absence is cached for later attempts or requests.
 
-Accepted titles use the top-level global upstream and caller credential unchanged; credential-routing mode first verifies that credential against the global Keychain item. Their diagnostics use `source: unassigned_title` with no project, owner or route alias. They have no project cost attribution. Client-supplied markers can be imitated by a local caller with an accepted credential; enabling this option accepts that limitation. The router does not inspect the body to prove that it generates a title.
+In scoped managed schema-2 account mode, accepted titles use the preserved original upstream and exact accepted incoming authorization after separate incoming verification, without reading an outgoing account item. Schema-1 titles use the top-level global upstream and caller credential unchanged; credential-routing mode first verifies the global Keychain item. Standalone schema-2 retains its historical default-account selection and outgoing credential substitution. Their diagnostics use `source: unassigned_title` with no project, owner or route alias. They have no project cost attribution. Client-supplied markers can be imitated by a local caller with an accepted credential; enabling this option accepts that limitation. The router does not inspect the body to prove that it generates a title.
 
-This policy works independently of `observeRequestMetadata` and enables no additional metadata logging. Compaction, title reconsideration, other auxiliary families, known projectless/unmapped identities and other unresolved requests retain their existing behavior. There is no general unresolved-request fallback. Mapped requests retain priority and use their configured destination/credential pair when routing is enabled.
+This policy works independently of `observeRequestMetadata` and enables no additional metadata logging. The title policy does not admit compaction, title reconsideration, other auxiliary families, known projectless/unmapped identities or other unresolved requests. Independently proven projectless requests can use scoped managed original routing as described above. There is no general unresolved-request fallback. Mapped requests retain priority and use their configured destination/credential pair when routing is enabled.
 
 For a controlled run, checkpoint each flag's prior presence/value and the direct provider URL privately before enabling it. Use the existing activation and rollback commands. Restore the prior flags while preserving unrelated edits, restart the desktop when required, verify a direct response, then stop the foreground proxy. Keep backups and run evidence outside Git.
 
@@ -319,13 +399,15 @@ Choose **Start router (routing Off)** explicitly. Initial integration changes th
 selected provider to the stable loopback URL once: activate, restart Codex yourself,
 receive a working response and confirm it independently in the app. Once integrated,
 use **Turn project routing On** / **Turn project routing Off** for everyday changes
-without restarting Codex or rewriting its provider URL. Off keeps saved overrides and sends admitted requests
-through the running listener using the explicitly saved default account. Incoming
-authorization must match the separately configured incoming item, then the router
-reads the selected outgoing item and substitutes its token. Off makes no project
-override-item lookup. The top-level `upstreamBaseUrl` remains the original direct
-recovery destination. Existing schema-1 files require an explicit import before
-companion Start; their standalone semantics remain unchanged.
+without restarting Codex or rewriting its provider URL. Off keeps saved overrides
+and sends identified project requests through the explicitly saved default account.
+In ready schema-2 managed account mode, proven projectless requests, model lists and
+permitted unassigned automatic titles instead preserve the original connection in
+both modes. Incoming authorization must match the separately configured incoming
+item; only project/default paths read and substitute the selected outgoing token.
+Off makes no project override-item lookup. The top-level `upstreamBaseUrl` is the
+original destination for scoped original routing and Direct recovery. Existing
+schema-1 files require an explicit import before companion Start; their standalone semantics remain unchanged.
 Identity and admission failures still block; inheritance does not resolve ambiguity.
 
 The app can move independently of this checkout and uses only its bundled router
@@ -343,9 +425,14 @@ Named-account addition, explicit default selection and guarded project assignmen
 
 See [companion setup, lifecycle, packaging and recovery](../companion/README.md) for
 custom activation contexts and recovery details. The [managed-routing validation
-record](validation/companion-routing-on-off.md) distinguishes fresh automated
-evidence from pending native/live acceptance and final review. Historical validation
-reports retain their original scope and limitations.
+record](validation/companion-routing-on-off.md) records completed local acceptance
+and final review, qualified native/live observations and accepted viewport/Tab
+limitations. The separate [projectless acceptance record](validation/projectless-chat-compatibility.md)
+records bounded native/live observations, the separately proven guarded
+routed-response confirmation and exact recovery. The earlier specification MISSING
+result remains historical; fresh sequential specification and quality reviews
+passed with no findings. Local delivery of this increment is complete.
+Historical validation reports retain their original scope and limitations.
 
 ## Development checks
 

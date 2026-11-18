@@ -66,7 +66,7 @@ function identity(raw) {
     parentId: id(meta.parent_thread_id),
   };
 }
-async function resolveOnce(ids, config, requireRoute) {
+async function resolveOnce(ids, config, requireRoute, allowProjectless) {
   let db;
   try {
     const state = JSON.parse(
@@ -84,21 +84,30 @@ async function resolveOnce(ids, config, requireRoute) {
       !Array.isArray(projectless)
     )
       throw new RouterError("STATE_UNAVAILABLE");
+    if (allowProjectless && projectless.some(value => typeof value !== "string" || !UUID.test(value)))
+      throw new RouterError("STATE_UNAVAILABLE");
+    const projectlessIds = allowProjectless ? new Set(projectless.map(id => id.toLowerCase())) : undefined;
     db = new DatabaseSync(join(config.codexHome, "state_5.sqlite"), {
       readOnly: true,
     });
     const parent = db.prepare(
-      "SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id = ?",
+      "SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id = ?" + (allowProjectless ? " COLLATE NOCASE" : ""),
     );
     const seen = new Set(),
-      memberships = [];
+      memberships = [],
+      projectlessOwners = [];
     let current = ids.threadId;
     for (let depth = 0; current; depth++) {
       if (depth >= 32 || seen.has(current))
         throw new RouterError("IDENTITY_CONFLICT");
       seen.add(current);
-      const assignment = Object.hasOwn(assignments, current) ? assignments[current] : undefined;
-      if (projectless.includes(current))
+      const assignmentKeys = allowProjectless
+        ? Object.keys(assignments).filter(id => id.toLowerCase() === current)
+        : Object.hasOwn(assignments, current) ? [current] : [];
+      if (assignmentKeys.length > 1) throw new RouterError("IDENTITY_CONFLICT");
+      const assignment = assignmentKeys.length ? assignments[assignmentKeys[0]] : undefined;
+      if (allowProjectless && projectlessIds.has(current)) projectlessOwners.push(current);
+      else if (!allowProjectless && projectless.includes(current))
         throw new RouterError(
           assignment ? "IDENTITY_CONFLICT" : "PROJECT_UNRESOLVED",
         );
@@ -138,6 +147,14 @@ async function resolveOnce(ids, config, requireRoute) {
     }
     if (ids.sessionId && !seen.has(ids.sessionId))
       throw new RouterError("IDENTITY_CONFLICT");
+    if (projectlessOwners.length) {
+      if (memberships.length) throw new RouterError("IDENTITY_CONFLICT");
+      return Object.freeze({
+        threadId: ids.threadId,
+        ownerThreadId: projectlessOwners[0],
+        source: "projectless",
+      });
+    }
     if (!memberships.length) throw new RouterError("STATE_UNAVAILABLE");
     if (new Set(memberships.map((m) => requireRoute ? m.projectId : m.projectId.toLowerCase())).size > 1)
       throw new RouterError("IDENTITY_CONFLICT");
@@ -162,7 +179,7 @@ async function resolveOnce(ids, config, requireRoute) {
     db?.close();
   }
 }
-export async function identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false, requireRoute = true } = {}) {
+export async function identifyProject(rawHeaders, config, { signal, allowUnassignedTitle = false, requireRoute = true, allowProjectless = false } = {}) {
   if (signal?.aborted) throw new RouterError("CANCELLED");
   const ids = identity(rawHeaders),
     deadline = Date.now() + 1000,
@@ -171,7 +188,8 @@ export async function identifyProject(rawHeaders, config, { signal, allowUnassig
   for (;;) {
     if (signal?.aborted) throw new RouterError("CANCELLED");
     try {
-      return await resolveOnce(ids, config, requireRoute !== false);
+      return await resolveOnce(ids, config, requireRoute !== false,
+        allowProjectless === true && config.schemaVersion === 2 && Boolean(config.accountRouting));
     } catch (e) {
       if (titleId && e instanceof RouterError && e.code === "STATE_UNAVAILABLE" && Date.now() < deadline) {
         try {

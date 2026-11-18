@@ -37,7 +37,8 @@ async function setupProxy(t, handler, options = {}) {
     captured.push({ url: req.url, headers: req.headers, body: bodyBytes.toString(), bodyBytes });
     await handler(req, res, captured);
   });
-  const port = await listening(upstream(handler, calls), t);
+  const originalUpstream = upstream(handler, calls);
+  const port = await listening(originalUpstream, t);
   const globalBaseUrl = `https://127.0.0.1:${port}/api/v1`;
   const projectUpstream = options.projectHandler ? upstream(options.projectHandler, projectCalls) : undefined;
   const projectPort = projectUpstream ? await listening(projectUpstream, t) : undefined;
@@ -82,7 +83,7 @@ async function setupProxy(t, handler, options = {}) {
   const acceptedSockets = [];
   proxy.on("request", req => acceptedSockets.push(req.socket));
   const proxyPort = await listening(proxy, t);
-  return { ...f, calls, projectCalls, defaultCalls, acceptedSockets, globalBaseUrl, projectBaseUrl, defaultBaseUrl, projectUpstream, proxy, proxyPort, logs: () => output };
+  return { ...f, calls, projectCalls, defaultCalls, acceptedSockets, globalBaseUrl, projectBaseUrl, defaultBaseUrl, originalUpstream, projectUpstream, defaultUpstream, proxy, proxyPort, logs: () => output };
 }
 function request(
   f,
@@ -1953,9 +1954,12 @@ function accountReader(reads) {
   return async (reference, { signal }) => {
     assert.equal(signal.aborted, false);
     reads.push(reference);
-    if (reference === incomingAccountReference) return "INCOMING_SENTINEL";
-    if (reference === defaultAccountReference) return "DEFAULT_SENTINEL";
-    if (reference === overrideAccountReference) return "OVERRIDE_SENTINEL";
+    for (const [expected, value] of [[incomingAccountReference, "INCOMING_SENTINEL"],
+      [defaultAccountReference, "DEFAULT_SENTINEL"], [overrideAccountReference, "OVERRIDE_SENTINEL"]]) {
+      if (reference.service !== expected.service) continue;
+      assert.deepEqual(reference, expected);
+      return value;
+    }
     throw new Error("Unexpected account reference");
   };
 }
@@ -1973,6 +1977,159 @@ function assertAccountCall(call, base, token, path, body) {
   assert.equal(call.headers.authorization, `Bearer ${token}`);
   assert.deepEqual(call.bodyBytes, body);
 }
+// Selecting a companion account for a proven projectless request would cross its URL/key boundary.
+nodeTest("managed projectless requests preserve original endpoint and authorization", async t => {
+  for (const mode of ["on", "off"]) for (const seam of ["mode", "snapshot"]) {
+    const reads = [];
+    let receivedConfig;
+    const f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: seam === "mode" ? () => mode : undefined,
+      getRequestRoutingSnapshot: seam === "snapshot" ? () => ({config: receivedConfig, mode}) : undefined,
+    }));
+    receivedConfig = f.config;
+    f.state["projectless-thread-ids"] = [CHILD];
+    f.edge(CHILD, A1);
+    await f.saveState();
+    const body = Buffer.from(' {"model":"original-model","previous_response_id":"continuation-original","input":"π"} \n');
+    const authorization = "bEaReR INCOMING_SENTINEL";
+    for (const [raw, path, owner] of [
+      [headers(CHILD), "/responses?x=a%2Fb&x=2", CHILD],
+      [headers(A1), "/responses/compact?resume=a%2Fb", CHILD],
+      [titleHeaders(CHILD), "/responses?title=1", CHILD],
+    ]) {
+      assert.equal((await request(f, {raw, path: "/v1" + path, authorization, body})).body, "original");
+      const call = f.calls.at(-1);
+      assert.equal(call.url, "/api/v1" + path);
+      assert.equal(call.headers.host, new URL(f.globalBaseUrl).host);
+      assert.equal(call.headers.authorization, authorization);
+      assert.deepEqual(call.bodyBytes, body);
+      const event = diagnosticEvents(f).filter(event => event.event === "started").at(-1);
+      assert.equal(event.source, "projectless");
+      assert.equal(event.ownerThreadId, owner);
+      assert.equal(event.routingMode, mode);
+      assert.equal(event.routeSelection, "original");
+      for (const field of ["projectId", "routeAlias"]) assert.equal(Object.hasOwn(event, field), false);
+    }
+    assert.equal(f.defaultCalls.length + f.projectCalls.length, 0);
+    assert.deepEqual(reads, Array(3).fill(incomingAccountReference));
+    assert.doesNotMatch(f.logs(), /SENTINEL|original-model|continuation-original|https:/);
+  }
+});
+
+// Original selection belongs to shared producers; known project/title identities still choose their account.
+nodeTest("managed shared requests use original while identified projects retain account selection", async t => {
+  for (const mode of ["on", "off"]) {
+    const reads = [], f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: () => mode, allowUnassignedThreadTitles: true,
+    }));
+    const body = Buffer.from(' {"model":"shared-original","previous_response_id":"unchanged","input":"π"} \n');
+    const authorization = "bEaReR INCOMING_SENTINEL";
+    const modelList = {method: "GET", path: "/v1/models?raw=a%2Fb&x=2", raw: [], body: ""};
+    assert.equal((await request(f, {...modelList, authorization})).body, "original");
+    assert.equal((await request(f, {raw: titleHeaders(CHILD), path: "/v1/responses?title=a%2Fb", authorization, body})).body, "original");
+    for (const [index, path, bytes] of [[0, "/api/v1/models?raw=a%2Fb&x=2", Buffer.alloc(0)], [1, "/api/v1/responses?title=a%2Fb", body]]) {
+      assert.equal(f.calls[index].url, path);
+      assert.equal(f.calls[index].headers.host, new URL(f.globalBaseUrl).host);
+      assert.equal(f.calls[index].headers.authorization, authorization);
+      assert.deepEqual(f.calls[index].bodyBytes, bytes);
+    }
+    assert.deepEqual(reads, Array(2).fill(incomingAccountReference));
+    for (const raw of [headers(T1), titleHeaders(T1), headers(T2)]) {
+      const selected = mode === "on" && raw[1] === T1 ? "override" : "default";
+      assert.equal((await request(f, {raw, authorization, body})).body, selected);
+      assertAccountCall((selected === "override" ? f.projectCalls : f.defaultCalls).at(-1),
+        selected === "override" ? f.projectBaseUrl : f.defaultBaseUrl,
+        selected === "override" ? "OVERRIDE_SENTINEL" : "DEFAULT_SENTINEL", "/responses", body);
+    }
+    assert.equal(f.calls.length, 2);
+    const starts = diagnosticEvents(f).filter(event => event.event === "started");
+    assert.deepEqual(starts.slice(0, 2).map(event => [event.source, event.routeSelection]), [["catalog", "original"], ["unassigned_title", "original"]]);
+    for (const event of starts.slice(0, 2)) for (const field of ["ownerThreadId", "projectId", "routeAlias"])
+      assert.equal(Object.hasOwn(event, field), false);
+    assert.deepEqual(starts.slice(2).map(event => event.projectId), [P1, P1, P2]);
+    assert.equal(f.projectCalls.length, mode === "on" ? 2 : 0);
+    assert.equal(f.defaultCalls.length, mode === "off" ? 3 : 1);
+  }
+});
+
+// Unavailable outgoing secrets must not be consulted for original traffic; caller authentication still runs first.
+nodeTest("original routing requires incoming auth but no outgoing credential", async t => {
+  for (const mode of ["on", "off"]) {
+    const reads = [], reader = accountReader(reads);
+    const f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: () => mode, allowUnassignedThreadTitles: true,
+      credentialReader: async (reference, options) => {
+        if (reference !== incomingAccountReference) throw new RouterError("CREDENTIAL_UNAVAILABLE");
+        return reader(reference, options);
+      },
+    }));
+    f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    const requests = [
+      {raw: headers(CHILD)},
+      {method: "GET", path: "/v1/models", raw: [], body: ""},
+      {raw: titleHeaders(A1)},
+    ];
+    for (const options of requests) {
+      assert.equal((await request(f, {...options, token: "WRONG_SENTINEL"})).status, 401);
+      assert.equal((await request(f, {...options, authenticated: false})).status, 401);
+    }
+    assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+    assert.deepEqual(reads, Array(3).fill(incomingAccountReference));
+    for (const options of requests) assert.equal((await request(f, {...options, authorization: "bEaReR INCOMING_SENTINEL"})).body, "original");
+    assert.deepEqual(reads, Array(6).fill(incomingAccountReference));
+    assert.equal(f.calls.length, 3);
+    assert.equal(f.defaultCalls.length + f.projectCalls.length, 0);
+  }
+});
+
+// Failed or unsupported identity never grants authority to use the original connection.
+nodeTest("project failures never fall back to original", async t => {
+  const reads = [], f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {allowUnassignedThreadTitles: true}));
+  f.state["projectless-thread-ids"] = [CHILD];
+  f.edge(T1, CHILD);
+  await f.saveState();
+  const cases = [
+    [{raw: headers(CHILD)}, 409],
+    [{raw: titleHeaders(CHILD)}, 409],
+    [{raw: headers(A1)}, 503],
+    [{raw: headers(A1, {thread_source: "thread_title_reconsideration", turn_trigger: "thread_title_reconsideration"})}, 503],
+    [{raw: titleHeaders(A1), path: "/v1/responses/compact"}, 503],
+    [{raw: titleHeaders(A1), path: "/v1/chat/completions"}, 404],
+    [{raw: ["thread-id", "invalid"]}, 400],
+  ];
+  for (const [options, status] of cases) assert.equal((await request(f, {...options, token: "INCOMING_SENTINEL"})).status, status);
+  delete f.config.accountRouting.routeAccounts["route-a"];
+  assert.equal(JSON.parse((await request(f, {token: "INCOMING_SENTINEL"})).body).error.code, "CREDENTIAL_UNMAPPED");
+  await writeFile(f.statePath, "broken");
+  assert.equal(JSON.parse((await request(f, {raw: headers(CHILD), token: "INCOMING_SENTINEL"})).body).error.code, "STATE_UNAVAILABLE");
+  assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+  assert.ok(diagnosticEvents(f).every(event => event.routeSelection !== "original"));
+});
+
+// Missing managed mode or schema-2 eligibility retains the old account/default behavior.
+nodeTest("original policy is confined to managed accounts", async t => {
+  for (const kind of ["standalone", "managed schema-1"]) {
+    const reads = [], f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      allowUnassignedThreadTitles: true,
+      getProjectRoutingMode: kind === "standalone" ? undefined : () => "on",
+    }));
+    if (kind === "managed schema-1") f.config.schemaVersion = 1;
+    f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    assert.equal((await request(f, {raw: headers(CHILD), token: "INCOMING_SENTINEL"})).status, 422);
+    assert.equal((await request(f, {method: "GET", path: "/v1/models", raw: [], body: "", token: "INCOMING_SENTINEL"})).body, "default");
+    assert.equal((await request(f, {raw: titleHeaders(A1), token: "INCOMING_SENTINEL"})).body, "default");
+    assert.equal(f.calls.length + f.projectCalls.length, 0);
+    assert.equal(f.defaultCalls.length, 2);
+    assert.deepEqual(reads, [incomingAccountReference, incomingAccountReference, defaultAccountReference, incomingAccountReference, defaultAccountReference]);
+    assert.ok(diagnosticEvents(f).every(event => event.routeSelection !== "original"));
+  }
+  const reads = [], f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads));
+  assert.equal((await request(f, {raw: titleHeaders(), token: "INCOMING_SENTINEL"})).status, 503);
+  assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+});
+
 nodeTest("independent incoming token never reaches selected default origin", async t => {
   let mode = "off";
   const reads = [], agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
@@ -1986,25 +2143,26 @@ nodeTest("independent incoming token never reaches selected default origin", asy
     ["off", [...headers(), "Connection", "keep-alive, authorization"], "/responses?x=a%2Fb&x=2", "default"],
     ["on", headers(), "/responses/compact?x=a%2Fb", "override"],
     ["on", headers(T2), "/responses?inherit=1", "default"],
-    ["on", titleHeaders(CHILD), "/responses?title=1", "default"],
+    ["on", titleHeaders(CHILD), "/responses?title=1", "direct"],
   ];
   for (const [receivedMode, raw, path, selected] of cases) {
     mode = receivedMode;
     assert.equal((await request(f, { agent, token: "INCOMING_SENTINEL", raw, path: "/v1" + path, body })).body, selected);
-    assertAccountCall((selected === "default" ? f.defaultCalls : f.projectCalls).at(-1),
-      selected === "default" ? f.defaultBaseUrl : f.projectBaseUrl,
-      selected === "default" ? "DEFAULT_SENTINEL" : "OVERRIDE_SENTINEL", path, body);
+    const [calls, base, token] = selected === "direct"
+      ? [f.calls, f.globalBaseUrl, "INCOMING_SENTINEL"]
+      : selected === "default" ? [f.defaultCalls, f.defaultBaseUrl, "DEFAULT_SENTINEL"]
+      : [f.projectCalls, f.projectBaseUrl, "OVERRIDE_SENTINEL"];
+    assertAccountCall(calls.at(-1), base, token, path, body);
   }
-  assert.equal((await request(f, { agent, token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models?raw=a%2Fb", raw: [], body: "" })).body, "default");
-  assertAccountCall(f.defaultCalls.at(-1), f.defaultBaseUrl, "DEFAULT_SENTINEL", "/models?raw=a%2Fb", Buffer.alloc(0));
+  assert.equal((await request(f, { agent, token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models?raw=a%2Fb", raw: [], body: "" })).body, "direct");
+  assertAccountCall(f.calls.at(-1), f.globalBaseUrl, "INCOMING_SENTINEL", "/models?raw=a%2Fb", Buffer.alloc(0));
   assert.equal((await request(f, { agent, path: "/healthz", method: "GET", raw: [], authenticated: false, body: "" })).status, 200);
-  assert.equal(f.calls.length, 0);
-  assert.equal(f.defaultCalls.length, 4);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.defaultCalls.length, 2);
   assert.equal(f.projectCalls.length, 1);
   assert.ok(f.acceptedSockets.every(socket => socket === f.acceptedSockets[0]));
   assert.deepEqual(reads, [incomingAccountReference, defaultAccountReference, incomingAccountReference, overrideAccountReference,
-    incomingAccountReference, defaultAccountReference, incomingAccountReference, defaultAccountReference,
-    incomingAccountReference, defaultAccountReference]);
+    incomingAccountReference, defaultAccountReference, incomingAccountReference, incomingAccountReference]);
   assert.doesNotMatch(f.logs(), /INCOMING|DEFAULT|OVERRIDE|synthetic|https:/);
 });
 nodeTest("explicit old-global override survives default change", async t => {
@@ -2017,10 +2175,13 @@ nodeTest("explicit old-global override survives default change", async t => {
     },
   }));
   assert.equal((await request(f, {token: "INCOMING_SENTINEL"})).body, "old-global");
-  assert.equal((await request(f, {token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models", raw: [], body: ""})).body, "default");
+  assert.equal((await request(f, {token: "INCOMING_SENTINEL", method: "GET", path: "/v1/models", raw: [], body: ""})).body, "old-global");
   assertAccountCall(f.calls[0], f.globalBaseUrl, "OVERRIDE_SENTINEL", "/responses", Buffer.from('{"model":"unchanged","input":"PROMPT_SENTINEL"}'));
+  assertAccountCall(f.calls[1], f.globalBaseUrl, "INCOMING_SENTINEL", "/models", Buffer.alloc(0));
+  assert.equal(f.calls.length, 2);
   assert.equal(f.projectCalls.length, 0);
-  assert.equal(f.defaultCalls.length, 1);
+  assert.equal(f.defaultCalls.length, 0);
+  assert.deepEqual(reads, [incomingAccountReference, overrideAccountReference, incomingAccountReference]);
 });
 nodeTest("legacy inherited label is not a missing override", async t => {
   let mode = "on";
@@ -2217,11 +2378,13 @@ nodeTest("incoming and outgoing shared references still retrieve independently",
     credentialReader: async reference => { reads.push(reference); return values.shift(); },
   }));
   assert.equal((await request(f, {token: "caller-one"})).body, "override");
-  assert.equal((await request(f, {token: "caller-two", path: "/v1/models", method: "GET", raw: [], body: ""})).body, "default");
+  assert.equal((await request(f, {token: "caller-two", path: "/v1/models", method: "GET", raw: [], body: ""})).body, "direct");
   assert.equal(f.projectCalls[0].headers.authorization, "Bearer outgoing-one");
-  assert.equal(f.defaultCalls[0].headers.authorization, "Bearer outgoing-two");
-  assert.equal(f.calls.length, 0);
-  assert.deepEqual(reads, Array(4).fill(incomingAccountReference));
+  assert.equal(f.calls[0].headers.authorization, "Bearer caller-two");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.defaultCalls.length, 0);
+  assert.deepEqual(reads, Array(3).fill(incomingAccountReference));
+  assert.deepEqual(values, ["outgoing-two"]);
 });
 
 function freezeAssignment(value) {
@@ -2435,4 +2598,334 @@ nodeTest("assignment health reports the applied snapshot and invalid getters fai
   assert.throws(() => createProxy(f.config, {
     getProjectRoutingMode: () => "on", getRequestRoutingSnapshot: () => current,
   }), TypeError);
+});
+
+// Re-reading mode/config after authentication would lose the received snapshot even for original traffic.
+nodeTest("projectless selection survives mode and assignment snapshot changes", async t => {
+  for (const mode of ["on", "off"]) await t.test(mode, async t => {
+    let current, held = true;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [];
+    t.after(() => release.resolve());
+    const reader = accountReader(reads);
+    const f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: undefined, getRequestRoutingSnapshot: () => current,
+      credentialReader: async (reference, options) => {
+        const value = await reader(reference, options);
+        if (held && reference.service === incomingAccountReference.service) {
+          held = false; entered.resolve(); await release.promise;
+        }
+        return value;
+      },
+    }));
+    f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    current = assignmentSnapshot(f, {mode});
+    const body = Buffer.from(' {"model":"original","previous_response_id":"keep","input":"π"} \n');
+    const authorization = "bEaReR INCOMING_SENTINEL", path = "/v1/responses/compact?raw=a%2Fb";
+    const pending = request(f, {raw: headers(CHILD, {turn_trigger: "background"}), authorization, path, body});
+    await within(entered.promise, "projectless incoming authentication was not held");
+    const nextMode = mode === "on" ? "off" : "on";
+    current = assignmentSnapshot(f, {inherited: true, mode: nextMode});
+    release.resolve();
+    assert.equal((await within(pending, "received projectless snapshot did not finish")).body, "original");
+    assert.equal((await request(f, {raw: headers(CHILD), authorization, body})).body, "original");
+    assert.equal((await request(f, {raw: headers(T1), authorization, body})).body, "default");
+    assert.equal(f.calls[0].url, "/api/v1/responses/compact?raw=a%2Fb");
+    for (const call of f.calls) {
+      assert.equal(call.headers.authorization, authorization);
+      assert.deepEqual(call.bodyBytes, body);
+    }
+    assert.equal(f.calls.length, 2);
+    assert.equal(f.projectCalls.length, 0);
+    assert.equal(f.defaultCalls.length, 1);
+    assertAccountCall(f.defaultCalls[0], f.defaultBaseUrl, "DEFAULT_SENTINEL", "/responses", body);
+    assert.deepEqual(reads, [incomingAccountReference, incomingAccountReference, incomingAccountReference, defaultAccountReference]);
+    assertRoutingCompletions(f, [[mode, "original"], [nextMode, "original"], [nextMode, "global"]]);
+  });
+});
+
+// Membership belongs to resolution after auth; only configuration/mode belong to request receipt.
+nodeTest("membership resolves after held incoming authentication", async t => {
+  for (const movement of ["projectless to project", "project to projectless", "overlapping marker and project"]) await t.test(movement, async t => {
+    let current, held = true;
+    const entered = Promise.withResolvers(), release = Promise.withResolvers(), reads = [];
+    t.after(() => release.resolve());
+    const reader = accountReader(reads);
+    const f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: undefined, getRequestRoutingSnapshot: () => current,
+      credentialReader: async (reference, options) => {
+        const value = await reader(reference, options);
+        if (held && reference.service === incomingAccountReference.service) {
+          held = false; entered.resolve(); await release.promise;
+        }
+        return value;
+      },
+    }));
+    if (movement === "project to projectless") f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+    else f.state["projectless-thread-ids"] = [CHILD];
+    await f.saveState();
+    current = assignmentSnapshot(f);
+    const options = {raw: headers(CHILD), token: "INCOMING_SENTINEL"};
+    const pending = request(f, options);
+    await within(entered.promise, "membership request did not reach incoming authentication");
+    if (movement === "project to projectless") {
+      delete f.state["thread-project-assignments"][CHILD];
+      f.state["projectless-thread-ids"] = [CHILD];
+    } else {
+      if (movement === "projectless to project") f.state["projectless-thread-ids"] = [];
+      f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+    }
+    await f.saveState();
+    current = assignmentSnapshot(f, {inherited: true, mode: "off"});
+    release.resolve();
+    const first = await within(pending, "fresh membership did not resolve"), next = await request(f, options);
+    if (movement === "overlapping marker and project") {
+      for (const result of [first, next]) {
+        assert.equal(result.status, 409);
+        assert.equal(JSON.parse(result.body).error.code, "IDENTITY_CONFLICT");
+      }
+      assert.equal(f.calls.length + f.defaultCalls.length + f.projectCalls.length, 0);
+      assert.deepEqual(reads, [incomingAccountReference, incomingAccountReference]);
+      assert.ok(diagnosticEvents(f).every(event => event.event === "completed" && event.routeSelection !== "original"));
+    } else if (movement === "projectless to project") {
+      assert.equal(first.body, "override", "new membership must use the received On assignment snapshot");
+      assert.equal(next.body, "default", "the next request must use the newly published Off snapshot");
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.projectCalls.length, 1);
+      assert.equal(f.defaultCalls.length, 1);
+      assert.equal(f.projectCalls[0].headers.authorization, "Bearer OVERRIDE_SENTINEL");
+      assert.equal(f.defaultCalls[0].headers.authorization, "Bearer DEFAULT_SENTINEL");
+      assert.deepEqual(reads, [incomingAccountReference, overrideAccountReference, incomingAccountReference, defaultAccountReference]);
+      assertRoutingCompletions(f, [["on", "override"], ["off", "global"]]);
+    } else {
+      assert.equal(first.body, "original");
+      assert.equal(next.body, "original");
+      assert.equal(f.calls.length, 2);
+      assert.equal(f.projectCalls.length + f.defaultCalls.length, 0);
+      assert.deepEqual(f.calls.map(call => call.headers.authorization), ["Bearer INCOMING_SENTINEL", "Bearer INCOMING_SENTINEL"]);
+      assert.deepEqual(reads, [incomingAccountReference, incomingAccountReference]);
+      assertRoutingCompletions(f, [["on", "original"], ["off", "original"]]);
+    }
+  });
+});
+
+// Once bytes arrive from the selected origin, a membership/mode change affects only later requests.
+nodeTest("selected stream survives projectless to project movement", async t => {
+  for (const toProject of [true, false]) for (const nextMode of ["on", "off"]) await t.test(`${toProject ? "into" : "out of"} project, next ${nextMode}`, async t => {
+    let current;
+    const started = Promise.withResolvers(), finish = Promise.withResolvers(), reads = [];
+    t.after(() => finish.resolve());
+    const handler = origin => async (req, res) => {
+      if (!req.url.includes("held=1")) { res.end(origin); return; }
+      res.writeHead(200, {"content-type": "text/event-stream"});
+      res.write(`data: ${origin}-first\n\n`);
+      await finish.promise;
+      res.end(`data: ${origin}-last\n\n`);
+    };
+    const f = await setupProxy(t, handler("original"), accountOptions(reads, {
+      getProjectRoutingMode: undefined, getRequestRoutingSnapshot: () => current,
+      defaultHandler: handler("default"), projectHandler: handler("override"),
+    }));
+    if (toProject) f.state["projectless-thread-ids"] = [CHILD];
+    else f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+    await f.saveState();
+    const mode = nextMode === "on" ? "off" : "on";
+    current = assignmentSnapshot(f, {mode});
+    const body = Buffer.from(' {"model":"unchanged","previous_response_id":"stream-keep","input":"π"}\n');
+    const authorization = "bEaReR INCOMING_SENTINEL";
+    const pending = request(f, {raw: headers(CHILD), path: "/v1/responses?held=1", authorization, body, onChunk: () => started.resolve()});
+    await within(started.promise, "selected stream did not deliver its first chunk");
+    if (toProject) {
+      f.state["projectless-thread-ids"] = [];
+      f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+    } else {
+      delete f.state["thread-project-assignments"][CHILD];
+      f.state["projectless-thread-ids"] = [CHILD];
+    }
+    await f.saveState();
+    current = assignmentSnapshot(f, {mode: nextMode});
+    const nextOrigin = toProject ? nextMode === "on" ? "override" : "default" : "original";
+    assert.equal((await request(f, {raw: headers(CHILD), authorization, body})).body, nextOrigin);
+    finish.resolve();
+    const oldOrigin = toProject ? "original" : mode === "on" ? "override" : "default";
+    assert.equal((await within(pending, "selected stream did not finish on its original origin")).body, `data: ${oldOrigin}-first\n\ndata: ${oldOrigin}-last\n\n`);
+    const starts = diagnosticEvents(f).filter(event => event.event === "started");
+    assert.deepEqual(starts.map(event => [event.routingMode, event.routeSelection]), [
+      [mode, oldOrigin === "default" ? "global" : oldOrigin],
+      [nextMode, nextOrigin === "default" ? "global" : nextOrigin],
+    ]);
+    const completions = diagnosticEvents(f).filter(event => event.event === "completed");
+    assert.equal(completions.length, 2);
+    for (const start of starts) {
+      const completed = completions.find(event => event.requestId === start.requestId);
+      assert.equal(completed.routeSelection, start.routeSelection);
+      assert.equal(completed.source, start.source);
+      assert.equal(completed.status, 200);
+    }
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.projectCalls.length + f.defaultCalls.length, 1);
+    assert.equal(f.calls[0].headers.authorization, authorization);
+    for (const call of f.projectCalls) assert.equal(call.headers.authorization, "Bearer OVERRIDE_SENTINEL");
+    for (const call of f.defaultCalls) assert.equal(call.headers.authorization, "Bearer DEFAULT_SENTINEL");
+    for (const call of [...f.calls, ...f.projectCalls, ...f.defaultCalls]) assert.deepEqual(call.bodyBytes, body);
+    assert.equal(reads.filter(reference => reference.service === incomingAccountReference.service).length, 2);
+    assert.equal(reads.length, 3);
+  });
+});
+
+// A keep-alive socket and unchanged assignment snapshot must not cache membership across requests.
+nodeTest("reused connection resolves coherent membership in both directions", async t => {
+  for (const mode of ["on", "off"]) await t.test(mode, async t => {
+    const reads = [], agent = new http.Agent({keepAlive: true, maxSockets: 1});
+    t.after(() => agent.destroy());
+    let current;
+    const f = await setupProxy(t, async (_req, res) => res.end("original"), accountOptions(reads, {
+      getProjectRoutingMode: undefined, getRequestRoutingSnapshot: () => current,
+    }));
+    current = assignmentSnapshot(f, {mode});
+    const body = Buffer.from(' {"model":"unchanged","previous_response_id":"reused-keep","input":"π"}\n');
+    const authorization = "bEaReR INCOMING_SENTINEL";
+    for (const [index, projectless] of [true, false, true].entries()) {
+      f.state["projectless-thread-ids"] = projectless ? [CHILD] : [];
+      if (projectless) delete f.state["thread-project-assignments"][CHILD];
+      else f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+      await f.saveState();
+      const path = index === 1 ? "/v1/responses/compact?raw=a%2Fb" : `/v1/responses?step=${index}`;
+      const result = await request(f, {agent, raw: headers(CHILD, {turn_trigger: "background"}), path, authorization, body});
+      assert.equal(result.body, projectless ? "original" : mode === "on" ? "override" : "default");
+    }
+    assert.equal(f.acceptedSockets.length, 3);
+    assert.equal(f.acceptedSockets[0], f.acceptedSockets[1]);
+    assert.equal(f.acceptedSockets[0], f.acceptedSockets[2]);
+    assert.deepEqual(f.calls.map(call => call.url), ["/api/v1/responses?step=0", "/api/v1/responses?step=2"]);
+    for (const call of f.calls) assert.equal(call.headers.authorization, authorization);
+    const selected = mode === "on" ? f.projectCalls : f.defaultCalls;
+    assert.equal(selected.length, 1);
+    assertAccountCall(selected[0], mode === "on" ? f.projectBaseUrl : f.defaultBaseUrl,
+      mode === "on" ? "OVERRIDE_SENTINEL" : "DEFAULT_SENTINEL", "/responses/compact?raw=a%2Fb", body);
+    assert.equal(mode === "on" ? f.defaultCalls.length : f.projectCalls.length, 0);
+    for (const call of f.calls) assert.deepEqual(call.bodyBytes, body);
+    assert.deepEqual(reads, [incomingAccountReference, incomingAccountReference,
+      mode === "on" ? overrideAccountReference : defaultAccountReference, incomingAccountReference]);
+    assertRoutingCompletions(f, [[mode, "original"], [mode, mode === "on" ? "override" : "global"], [mode, "original"]]);
+  });
+});
+
+// Original is a fixed selection, including failure and cancellation, never a fallback gateway.
+nodeTest("projectless cancellation and original failures never reroute", async t => {
+  for (const mode of ["on", "off"]) for (const failure of [401, 402, 429, 500, 503, 307, "TLS", "connection", "stream", "cancel stream", "late incoming reader"]) {
+    await t.test(`${mode}: ${failure}`, async t => {
+      let current, lookupSignal;
+      const entered = Promise.withResolvers(), release = Promise.withResolvers(), firstChunk = Promise.withResolvers();
+      const closed = Promise.withResolvers(), handled = Promise.withResolvers(), tlsRejected = Promise.withResolvers();
+      const abort = new AbortController(), reads = [], chunks = [];
+      t.after(() => release.resolve("INCOMING_SENTINEL"));
+      const reader = accountReader(reads);
+      const f = await setupProxy(t, async (_req, res) => {
+        res.once("close", () => closed.resolve());
+        if (failure === "stream" || failure === "cancel stream") {
+          res.writeHead(200, {"content-type": "text/event-stream"});
+          res.write("data: original-first\n\n");
+          await release.promise;
+          if (failure === "stream") res.destroy(new Error("synthetic original stream failure"));
+          return;
+        }
+        entered.resolve();
+        await release.promise;
+        res.writeHead(failure, {location: `${f.projectBaseUrl}/responses?redirected=1`});
+        res.end("original failure");
+      }, accountOptions(reads, {
+        getProjectRoutingMode: undefined, getRequestRoutingSnapshot: () => current,
+        untrusted: failure === "TLS",
+        credentialReader: (reference, options) => {
+          if (failure !== "late incoming reader") return reader(reference, options);
+          assert.deepEqual(reference, incomingAccountReference, "cancelled original traffic requested an outgoing key");
+          reads.push(reference);
+          lookupSignal = options.signal;
+          entered.resolve();
+          return release.promise;
+        },
+      }));
+      f.state["projectless-thread-ids"] = [CHILD];
+      await f.saveState();
+      current = assignmentSnapshot(f, {mode});
+      let alternateConnections = 0;
+      for (const server of [f.projectUpstream, f.defaultUpstream]) server.on("connection", () => alternateConnections++);
+      if (failure === "connection") await new Promise(resolve => f.originalUpstream.close(resolve));
+      if (failure === "TLS") f.originalUpstream.once("tlsClientError", () => tlsRejected.resolve());
+      if (failure === "late incoming reader") {
+        // Await the actual async request handler after releasing a cancelled reader, not a timer drain.
+        const handler = f.proxy.listeners("request")[0];
+        f.proxy.off("request", handler);
+        f.proxy.prependListener("request", (...args) => {
+          Promise.resolve(handler(...args)).then(handled.resolve, handled.reject);
+        });
+      }
+      const body = Buffer.from(' {"model":"original","previous_response_id":"failure-keep","input":"π"}\n');
+      const pending = request(f, {
+        raw: headers(CHILD, {turn_trigger: "background"}), authorization: "bEaReR INCOMING_SENTINEL",
+        path: "/v1/responses/compact?raw=a%2Fb", body, signal: abort.signal,
+        onChunk: chunk => { chunks.push(chunk); firstChunk.resolve(); },
+      });
+      // Attach rejection handling before any socket can fail.
+      const outcome = pending.then(value => ({value}), error => ({error}));
+      if (failure !== "TLS" && failure !== "connection") {
+        await within(failure === "stream" || failure === "cancel stream" ? firstChunk.promise : entered.promise,
+          "original request did not reach its causal barrier");
+        f.state["projectless-thread-ids"] = [];
+        f.state["thread-project-assignments"][CHILD] = {projectKind: "local", projectId: P1};
+        await f.saveState();
+        current = assignmentSnapshot(f, {mode: mode === "on" ? "off" : "on"});
+      }
+      if (failure === "late incoming reader" || failure === "cancel stream") {
+        abort.abort();
+        const rejected = await within(outcome, "cancelled projectless client did not settle");
+        assert.equal(rejected.error?.code, "ABORT_ERR");
+        if (failure === "late incoming reader") {
+          if (!lookupSignal.aborted) await within(once(lookupSignal, "abort"), "incoming lookup did not observe cancellation");
+          release.resolve("INCOMING_SENTINEL");
+          await within(handled.promise, "cancelled handler did not finish after its late reader");
+        } else {
+          await within(closed.promise, "cancelled original stream stayed open");
+          release.resolve();
+          assert.equal(Buffer.concat(chunks).toString(), "data: original-first\n\n");
+        }
+      } else {
+        release.resolve();
+        const result = await within(outcome, "original failure did not settle");
+        if (failure === "stream") {
+          assert.equal(result.error?.code, "ECONNRESET");
+          assert.equal(Buffer.concat(chunks).toString(), "data: original-first\n\n");
+        } else {
+          assert.equal(result.error, undefined);
+          assert.equal(result.value.status, typeof failure === "number" ? failure : 502);
+          if (typeof failure === "number") {
+            assert.equal(result.value.body, "original failure");
+            assert.equal(result.value.headers.location, `${f.projectBaseUrl}/responses?redirected=1`);
+          } else assert.equal(JSON.parse(result.value.body).error.code, "UPSTREAM_FAILED");
+        }
+      }
+      if (failure === "TLS") await within(tlsRejected.promise, "original origin did not reject TLS");
+      const expectedCalls = ["TLS", "connection", "late incoming reader"].includes(failure) ? 0 : 1;
+      assert.equal(f.calls.length, expectedCalls, "original request was retried");
+      assert.equal(f.projectCalls.length + f.defaultCalls.length, 0);
+      assert.equal(alternateConnections, 0, "original failure attempted an alternate connection");
+      assert.deepEqual(reads, [incomingAccountReference]);
+      if (expectedCalls) {
+        assert.equal(f.calls[0].url, "/api/v1/responses/compact?raw=a%2Fb");
+        assert.equal(f.calls[0].headers.authorization, "bEaReR INCOMING_SENTINEL");
+        assert.deepEqual(f.calls[0].bodyBytes, body);
+      }
+      const completed = diagnosticEvents(f).filter(event => event.event === "completed");
+      assert.equal(completed.length, 1);
+      assert.equal(completed[0].status, failure === "late incoming reader" || failure === "cancel stream" ? 499 : typeof failure === "number" ? failure : 502);
+      if (failure === "late incoming reader") assert.equal(Object.hasOwn(completed[0], "routeSelection"), false);
+      else {
+        assert.equal(completed[0].routeSelection, "original");
+        assert.equal(completed[0].routingMode, mode);
+      }
+      if (failure === "late incoming reader" || failure === "cancel stream") assert.equal(completed[0].errorCode, "CANCELLED");
+      assert.doesNotMatch(f.logs(), /SENTINEL|failure-keep|https:/);
+    });
+  }
 });
