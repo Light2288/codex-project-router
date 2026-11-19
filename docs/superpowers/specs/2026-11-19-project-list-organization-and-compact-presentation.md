@@ -9,9 +9,9 @@
 
 **Current stage:** Stage 4 — specification and separate implementation plan approved; execution authorized.  
 **Storage:** Saved in the existing checkout after leaving Plan mode. Requirements below are unchanged from the complete DRAFT presented in chat.  
-**Approval evidence:** The complete Stage 2 DRAFT was presented in the preceding assistant response. The user's subsequent **“Please implement the plan.”** approves that pending specification under the supplied separate-gate rules. No implementation plan had been presented; this message authorizes planning only. Plan approval and implementation authorization remain pending.
+**Approval evidence:** The complete Stage 2 DRAFT was presented in the preceding assistant response. The user's subsequent **“Please implement the plan.”** approves that pending specification under the supplied separate-gate rules. At that time no implementation plan had been presented, so this authorized planning only. The separate Stage 3 plan was later presented and explicitly approved with **“approve”**; the user then selected **“Subagent-driven (recommended): independent implementation and review per task; higher context cost.”** Stage 4 execution is authorized for the saved pair.
 
-Artifact resolution before saving found no existing specification or plan with this slug and no conflicting candidate. This specification is now saved at `docs/superpowers/specs/2026-11-19-project-list-organization-and-compact-presentation.md`. The eventual implementation plan must reuse this specification’s exact basename. Keep both artifacts uncommitted until the implementation branch is created after separate plan approval.
+Artifact resolution before saving found no existing specification or plan with this slug and no conflicting candidate. This specification is now saved at `docs/superpowers/specs/2026-11-19-project-list-organization-and-compact-presentation.md`. The approved implementation plan uses this specification’s exact basename. Both artifacts were committed on `feat/project-list-organization` after separate plan approval. Execution evidence is recorded in `docs/validation/project-list-organization.md`; final integrated review and local closeout remain pending.
 
 ## 1. Problem, current behavior, and desired outcome
 

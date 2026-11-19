@@ -556,3 +556,29 @@ test("state loss after opening SQLite closes the observation before degrading di
   assert.equal(events.filter(e=>e==="open").length,events.filter(e=>e==="close").length);
   assert.equal(events.filter(e=>e==="BEGIN").length,events.filter(e=>e==="ROLLBACK").length);
 });
+
+// Catches reading only the checkpointed main database and writes during WAL observation.
+test("activity observes committed current WAL records without changing application-store bytes", async t => {
+  const f = await projectActivityFixture(t);
+  const writer = new DatabaseSync(f.dbPath);
+  const checkpointPath = f.dbPath + '.checkpoint';
+  try {
+    writer.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; PRAGMA wal_checkpoint(TRUNCATE)");
+    await fs.copyFile(f.dbPath, checkpointPath);
+    const mainBefore = await fs.readFile(f.dbPath);
+    writer.prepare("UPDATE threads SET archived = 0 WHERE id = ?").run(T1);
+    assert.deepEqual(await fs.readFile(f.dbPath), mainBefore, "committed update must exist only in WAL");
+    assert.ok((await fs.stat(f.dbPath + '-wal')).size > 0);
+    const checkpoint = new DatabaseSync(checkpointPath, {readOnly:true});
+    try { assert.equal(checkpoint.prepare("SELECT archived FROM threads WHERE id = ?").get(T1).archived, 1); }
+    finally { checkpoint.close(); }
+    const paths = [f.statePath, f.dbPath, f.dbPath + '-wal', f.configPath];
+    const before = await Promise.all(paths.map(path => fs.readFile(path)));
+    const observed = await activity.readProjectActivitySnapshot(f.dir);
+    assert.deepEqual(observed.activityByProject.get(P1), active);
+    assert.deepEqual(observed.activityByProject.get(P2), inactive);
+    assert.deepEqual(await Promise.all(paths.map(path => fs.readFile(path))), before,
+      "global JSON, main DB, committed WAL and configuration bytes must be unchanged");
+    // SQLite may create/update its SHM coordination sidecar; directory immutability is not claimed.
+  } finally { writer.close(); }
+});

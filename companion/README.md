@@ -464,6 +464,53 @@ account editing or deletion, startup automation, bundled Node, automatic Codex
 restart, automatic prompts, or improved gateway/billing attribution. Later
 increments require their own scope and approval.
 
+## Organized project list
+
+Account-mode browsing now groups projects as **Needs attention**, **Custom account**,
+**Default account**, then **No active chats (N)**. Empty sections are omitted.
+**Accounts selected for individual projects.** explains Custom account; an explicit
+selection of the current default remains custom. Inheritance says **Uses default**
+and keeps the default name at section level. Off preserves groups and saved policy.
+Unclassifiable policy takes precedence over inactive placement. Legacy/no-config
+browsing keeps its flat fallback.
+
+**Projects with no chats or only archived chats.** explains the initially collapsed
+inactive section. Active means unarchived, not recent or running. Unknown chat
+status stays neutral and visible in the known account group. Deleted chats can
+leave membership references behind and therefore remain unknown. The observer
+supports only the narrow checkpoint/source profile in the
+[operating guide](../docs/operating-guide.md#project-list-organization); unsupported,
+migrated, unavailable or contradictory evidence never proves an empty project.
+Read-only WAL observation preserves application-store bytes but SQLite may create
+or update an SHM coordination sidecar. No transcript scan or metadata repair occurs.
+
+Compact rows wrap long names and retain Edit/Details. Technical identity, aliases
+and matching state move into Details; actionable warnings remain visible. Collapsed
+problems have named Edit/Details previews; expanded rows replace previews without
+adding to counts. Search covers names, IDs, aliases and applicable saved account
+names across every section, temporarily opens matching inactive rows and shows
+matches of total. Clear search restores collapse. Hidden problems retain a global
+warning; shared runtime/default notices survive empty results. Query/Details survive
+refresh. Editing pins placement until dismissal while fresh warnings/authority
+continue to update; saves/background refresh do not rebase drafts or close sheets.
+
+Schema-2 catalog entries optionally add `chatActivity` with `state` equal to
+`unarchived`, `no_active_chats` or `unknown`, plus a fixed safe `reason`. Observation
+never grants mutation authority. Ready advertises `project_list_v1` alongside
+`project_assignments_v1`; serialized `get_project_list` accepts up to eight unique
+project UUIDs and an optional expected runtime snapshot. Replies bind context,
+running revision/identity/fingerprint and mode, retained default ID/name and ordered
+assignment summaries. Native aggregation uses one one-second deadline for all
+pages and rejects mixed snapshots. Tokens never enter rendered view state.
+The existing 16 KiB frame, 32 KiB buffer, five-second operation deadline and 2/5-second
+visible/hidden refresh cadence are preserved. Reads perform no credential lookup,
+upstream request, assignment publication or provider/configuration write.
+
+Account labels and a coherent running summary cannot establish routing acceptance.
+See the [validation record](../docs/validation/project-list-organization.md) for actual
+synthetic/native/package evidence and unobserved live behavior. Manual hiding and
+later roadmap work remain outside this increment.
+
 ## Managed project routing On/Off
 
 Choose **Start router (routing Off)** explicitly after selecting a valid private
