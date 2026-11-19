@@ -3,7 +3,7 @@
 Created: 2026-11-19
 
 Updated: 2026-11-19
-Scope: approved project-list increment only. Stage 4 implementation; integrated correction review/follow-up and local closeout pending.
+Scope: approved project-list increment only. Stage 4 COMPLETE — verified and reviewed; local commits retained.
 
 ## Evidence boundaries
 
@@ -43,8 +43,7 @@ acceptance is claimed by list labels.
 ## Acceptance matrix
 
 The matrix began with all current-source slots marked unobserved. The completed
-current-source chain below now supplies their results. Prior task reports are retained in the ignored `.superpowers/sdd/2026-11-19-project-list-organization-and-compact-presentation/`
-workspace. Each result below refers to the completed current-source commands, with
+current-source chain below now supplies their results. Per-task reports and raw logs were inspected during execution. This record preserves decisive results, review verdicts and rulings after cleanup of that temporary review workspace. Each result below refers to the completed current-source commands, with
 fixture-native observations distinguished from new live behavior.
 
 | Criterion | Evidence | Current-source final result |
@@ -73,9 +72,9 @@ The quality-fix chain ran in this exact order on current source after the bounde
 three-finding quality correction below. Product and test sources stayed unchanged
 throughout this final chain. This supersedes the initial specification-correction
 chain (375 native tests) and earlier Task 7 chain (373 native tests); their raw
-evidence remains in the scratch workspace and earlier reports:
+results are superseded by the current-source results below:
 
-| Command | Exit | Result | Log in scratch evidence workspace |
+| Command | Exit | Result | Execution log name (temporary workspace) |
 |---|---:|---|---|
 | `npm run companion:test` | 0 | 268 core + 111 app tests, 0 failures/skips | `quality-fix-companion-test.log` |
 | `npm run companion:build` | 0 | Built and ad-hoc signed current app | `quality-fix-companion-build.log` |
@@ -122,7 +121,7 @@ The first chain stopped at `npm test`: 1094/1095 passed, with the sole failure a
 standalone native package-probe source list missing `AssignmentTypes.swift` now
 required by `ProjectListTypes.swift`. Direct RED/typecheck, the minimal source-list
 fix, direct GREEN and the affected relocated acceptance pass preceded the entire
-final chain above. Initial logs and RED/GREEN evidence remain in `task-7-report.md`.
+final chain above. The initial RED/GREEN diagnosis was recorded in the temporary Task 7 report; the decisive outcome is retained here.
 The failed compile created no native process or Keychain item; its empty owned
 scratch directory was verified and removed. No product source or safety assertion
 changed for the fix.
@@ -140,9 +139,7 @@ then passed after the three-file display correction. The focused covering run pa
 configuration, aliases/no alias, On/Off/uncertain/unavailable/not-running, no account
 name inference, and both real ControlsView pending-mode transitions. The missing
 configuration fixture also preserves its disabled Start and reachable flat rows.
-Exact commands, exits, raw logs, the initial test-only actor-annotation compile
-correction and RED/GREEN summaries are in `final-fix-report.md` in the scratch
-workspace. No required full-chain command failed or was repeated for this correction.
+`swift test --package-path companion --filter 'ControlsPresentationTests.testFlat'` exited 1 with 38 expected assertion failures before the fix, then 0 afterward. The covering `--filter 'ProjectList|ControlsPresentationTests'` run passed 26 core + 45 app tests. A test-only actor annotation was corrected before behavioral RED. No required full-chain command failed or was repeated for this correction.
 
 The initial specification correction subsequently passed its targeted specification
 follow-up. The initial quality review identified three further display gaps: a flat
@@ -162,15 +159,11 @@ passed 63 app tests, including 23 presentation tests and existing controls, nati
 layout/disclosure/Edit/search and editor safeguards. Preview/pin fixtures that need
 established custom policy now use an explicit override with an unavailable account;
 all original preview/count/pin assertions remain. An earlier native-only pass on the
-pre-identity source is retained as superseded evidence. Exact commands, exits,
-RED/GREEN details and the test-only initial RED array-index correction are in
-`quality-fix-report.md`; raw logs remain beside it. The final four-command chain
+pre-identity source was superseded. `swift test --package-path companion --filter ProjectListPresentationTests` first exited 1 (22 tests, 31 expected failures). The combined-failure identity case then exited 1 with one expected failure before the distinct issue kind. The covering `--filter 'ProjectListPresentationTests|ControlsPresentationTests|ProjectListLayoutTests|ProjectAssignmentPresentationTests'` run passed all 63 app tests after the fixes. A test-only array index was replaced with XCTUnwrap before behavioral RED was rerun. The final four-command chain
 above had no failures or retries. No new image inspection or live production
 behavior is inferred from the new presentation-model assertions.
 
-The controller owns integrated correction review/follow-up and local closeout.
-Those stages remain pending; this evidence does not declare the overall increment
-closed.
+The corrected state passed the scoped specification and quality follow-ups below. The parent also re-inspected the regenerated collapsed-problems image at 720×640 logical size: named warning, Edit and Details fit without clipping, overlap or duplicate rows. Local delivery is complete.
 
 ## Compatibility and limitations
 
@@ -184,3 +177,75 @@ sidecar; directory immutability is not claimed. Missing-record deletion and newe
 canonical/migrated representations can keep projects visible indefinitely as unknown.
 No manual hiding, second backend, automatic metadata repair or later roadmap work
 is included. New live production interaction/routing behavior remains unobserved.
+
+## Final integrated review and local delivery
+
+The gate was one logical sequential specification → quality review. Initial findings were corrected in local commits c5cc3e1 (flat mode preservation) and ed3754e (missing-target warnings, policy placement and distinct warning identities). The final reviewed production/test state is `ed3754e0b108d166d745a6d2b435cc9601645828`. Only documentation/evidence changed during closeout; the verified sources remain unchanged.
+
+All task gates passed. The final gate checked one immutable current-state package; both reviewers matched its gate ID, state ID and SHA-256. Complete final reports follow. Historical failures remain described above; no unresolved review finding is parked.
+
+The existing normal checkout and local commits are retained on `feat/project-list-organization`, based on `b735f37825d527f937bba85093fd37b96cd7361c`. No worktree, push or merge was performed. The temporary plan-specific review workspace was removed after preserving this evidence. Nine synthetic native PNGs remain ignored under `companion/.build/project-list-qa/`. Raw temporary log names above identify the executed checks rather than durable file links.
+
+This completes only increment 4. Broader UI simplification, startup and distribution remain provisional and unstarted.
+
+### Specification verdict
+
+```text
+GATE_RUN_ID: gate-3c8feb4f-c5b4-4642-a6f5-e657039c47ee
+REVIEWED_STATE_ID: state-19e02627-99f0-400a-88ad-4c96bc874895-ed3754e0b108d166d745a6d2b435cc9601645828
+PACKAGE_SHA256: c8def5eb15a2a9a6269de7d8b278a4904f36a8a1c467719a1976cda6726cce13
+
+SPEC REVIEW: PASS
+
+All three quality findings are addressed:
+
+- Flat credential routes with missing targets show an actionable warning in On and Off, including filtered search.
+- Missing running targets show a distinct actionable warning, appear in collapsed inactive previews, and remain counted in hidden-search summaries.
+- Missing saved bindings enter Needs attention before inactive placement. Established overrides with unavailable account summaries remain Custom account with a warning.
+
+Saved and running target warnings use distinct issue identities, preventing SwiftUI from dropping either. Regression tests cover that combination, and the updated fixtures preserve prior pin, search, count, and preview assertions. The prior flat-row mode-preservation fix remains intact; the scoped changes do not alter routing or authority.
+
+The package records behavioral RED/GREEN, focused tests, and a fresh ordered chain: 379 native tests, signed build, 1095 Node tests, and 3 package tests, all successful with zero failures or skips. Its 37-file boundary matches the 37 complete branch diff sections. The recorded bounded-correction ruling and unchanged approved scope are included. No new specification gap or out-of-scope behavior was found.
+```
+
+### Quality verdict
+
+```text
+GATE_RUN_ID: gate-3c8feb4f-c5b4-4642-a6f5-e657039c47ee
+REVIEWED_STATE_ID: state-19e02627-99f0-400a-88ad-4c96bc874895-ed3754e0b108d166d745a6d2b435cc9601645828
+PACKAGE_SHA256: c8def5eb15a2a9a6269de7d8b278a4904f36a8a1c467719a1976cda6726cce13
+
+Current, expected and fresh SPEC REVIEW: PASS identity values all match. The package remained unchanged.
+
+QUALITY REVIEW: APPROVED
+
+Findings: NONE. All three previous findings are addressed.
+
+- Flat credential rows restore immediate missing-target warnings in On/Off and search.
+- Running missing targets now produce actionable warnings, collapsed previews and hidden-search summaries. Saved and running warnings use distinct .targetMissing and .runningTargetMissing identities.
+- Missing saved bindings enter Needs attention before inactivity; established explicit policy with an unavailable account retains its custom classification and warning.
+
+The scoped correction preserves identity comparisons, prior flat-mode behavior, pinning, search, counts and editor safeguards. No fix-introduced defect was supported by the reviewed evidence. Prior untouched whole-branch coverage is retained.
+
+Recorded current-source verification passed: 379 native tests, signed build, 1095 Node tests and 3 package tests, with zero failures/skips. Existing qualified diagnostics and manual/live limitations remain documented. No files were changed or suites rerun during this review.
+```
+
+## Rulings I made
+
+Ruling: Follow approved ordered final verification in Task 7; baseline uses current sources before edits — packaged artifacts are rebuilt before final acceptance, and any stale-bundle baseline failure is recorded — cost if wrong: delay, never weaker acceptance.
+
+Ruling: Synthetic schema contains all supported projection fields, not unrelated database columns — avoids invented schema dependency — cost if wrong: fixture adjustment. Spawned internal exclusion requires parsed source parent matching saved incoming edge; optional attached parent must agree. Guardian source/role requires no contradictory parent evidence — conservative supported evidence — cost if wrong: unknown status remains visible rather than hiding a project.
+
+Ruling: Additional owner checkpoints for this home must share the signed-out checkpoint normalized pendingThreadAssignmentIds set to permit negative classification — divergent owner queues are unsupported completeness evidence — cost if wrong: conservative unknown visibility. Positive supported unambiguous membership remains usable absent a membership conflict. Task 1 adds direct regression.
+
+Ruling: Task 2 raw relevant-branch duplicate JSON keys are guarded locally (including escaped names); unlocalizable contradictory claims yield unknown activity, independent catalog path retains existing parsing/authority. Exhausted changing activity retains newest valid state with unknown/changed_during_read; continued project identity/name changes yield unavailable catalog, matching Task 2 explicit test. Cost if wrong: temporary conservative unknown/unavailable until next successful refresh.
+
+Ruling: Fold WAL fixture and documentation into Task 7 verification (test/project-activity.test.js additional ownership), with no product behavior change — fills concrete validation gap in approved WAL-aware observer requirement — cost if wrong: test/wording adjustment.
+
+Ruling: Task 5 adds usesAccountSections: Bool and flatRows(state:) -> [ProjectListRow]; sections returns empty outside accounts mode — minimal presentation-only API supports explicitly approved flat legacy/no-config fallback while preserving four section kinds — cost if wrong: small view/model adjustment. Legacy route aliases remain detail and unavailable named policy never becomes Uses default.
+
+Ruling: Task 5 pinQuery/pinVisibleIndex transient state preserves displayed position under unchanged search when new nonmatching rows appear — full collection index alone is insufficient — cost if wrong: small transient-state fix.
+
+Ruling: A pinned inactive editing row remains temporarily visible among collapsed previews even if its final issue is repaired; keep fresh isActionable false and exclude it from issue counts, retain captured preview index and placement notice until dismissal. Do not auto-expand all inactive rows — preserves approved editor placement and user collapse state — cost if wrong: presentation-only rework. Task 6 must honor this editing exception without duplicate full rows/counts.
+
+Ruling: Correct all three concrete quality findings in one additional bounded wave within the existing approved increment, overriding the skill default of one final fix wave — the user explicitly requires autonomous completion, no new approval gates between ordinary implementation tasks, and preserved actionable warnings; higher-priority developer instructions require carrying the authorized task to completion. The first wave resolved a specification-stage preservation gap before quality could run. Preserve the same logical review seat, perform only scoped followups, and change no approved requirement — cost if wrong: one additional focused fix/review cycle and full verification chain.
