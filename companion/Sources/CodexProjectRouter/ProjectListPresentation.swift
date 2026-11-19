@@ -101,15 +101,19 @@ enum ProjectListEmptyState: Equatable {
 struct ProjectListPresentation {
     let inspection: Inspection?
     let runtimeState: ProjectListRuntimeState
+    let routingStatus: RouterController.ProjectRoutingStatus
+    let pendingRoutingMode: ProjectRoutingMode?
     let selectedAssignment: AssignmentState?
     let assignmentStatus: RouterController.AssignmentStatus
     let assignmentError: String?
     let pendingProjectID: String?
 
-    init(inspection: Inspection?, runtimeState: ProjectListRuntimeState, selectedAssignment: AssignmentState?,
-         assignmentStatus: RouterController.AssignmentStatus, assignmentError: String?, pendingProjectID: String?) {
+    init(inspection: Inspection?, runtimeState: ProjectListRuntimeState, routingStatus: RouterController.ProjectRoutingStatus,
+         selectedAssignment: AssignmentState?, assignmentStatus: RouterController.AssignmentStatus,
+         assignmentError: String?, pendingProjectID: String?, pendingRoutingMode: ProjectRoutingMode? = nil) {
         self.inspection = inspection; self.runtimeState = runtimeState; self.selectedAssignment = selectedAssignment
         self.assignmentStatus = assignmentStatus; self.assignmentError = assignmentError; self.pendingProjectID = pendingProjectID
+        self.routingStatus = routingStatus; self.pendingRoutingMode = pendingRoutingMode
     }
 
     var usesAccountSections: Bool { inspection?.configuration.mode == "accounts" }
@@ -257,12 +261,21 @@ struct ProjectListPresentation {
         var details = ["Project ID: \(entry.id)"]
         if let alias = entry.routeAlias { details.append("Route alias: \(alias)") }
         if !usesAccountSections {
-            let label: String
-            if inspection?.configuration.mode == "legacy" {
-                label = entry.routeAlias == nil ? "Global credential" : "Global credential; saved label retained"
-            } else { label = entry.routeAlias == nil ? "Assignment unconfirmed" : "Override saved (routing unconfirmed)" }
+            let routing: String
+            if let pendingRoutingMode {
+                routing = "Switching project routing \(pendingRoutingMode == .on ? "On" : "Off")…"
+            } else {
+                switch routingStatus {
+                case .known(.on): routing = "On"
+                case .known(.off): routing = "Off"
+                case .uncertain: routing = "Uncertain — refresh to check"
+                case .unavailable: routing = "Unavailable"
+                case .notRunning: routing = "Router not running"
+                }
+            }
+            details.append("Project routing: \(routing)")
             if entry.routeState == "catalog_missing" { issues.append(.init(kind: .discoveryMissing, text: "Saved project absent from current discovery.")) }
-            return .init(project: entry, section: nil, accountText: label, issues: issues, chatStatusText: nil,
+            return .init(project: entry, section: nil, accountText: flatAccountText(entry), issues: issues, chatStatusText: nil,
                          chatStatusDetail: nil, details: details, runningStatus: .unconfirmed)
         }
         let accountText: String
@@ -322,6 +335,29 @@ struct ProjectListPresentation {
         return .init(project: entry, section: naturalSection(entry), accountText: accountText, issues: issues,
                      chatStatusText: chat.state == .unknown ? "Chat status unknown" : nil,
                      chatStatusDetail: chat.reason.map(reasonText), details: details, runningStatus: runningStatus)
+    }
+
+    private func flatAccountText(_ entry: Inspection.Entry) -> String {
+        if entry.routeAlias != nil {
+            if inspection?.configuration.mode == "legacy" { return "Global credential; saved label retained" }
+            if inspection?.configuration.mode == "credential", pendingRoutingMode == nil {
+                switch routingStatus {
+                case .known(.on): return "Override saved (running assignment unconfirmed)"
+                case .known(.off): return "Override saved; inactive while Off"
+                default: break
+                }
+            }
+            return "Override saved (routing unconfirmed)"
+        }
+        // Routing-mode confirmation does not establish a running account assignment.
+        if pendingRoutingMode == nil {
+            switch routingStatus {
+            case .known(.on): return "Global (inherited)"
+            case .known(.off): return "Global (routing Off)"
+            default: break
+            }
+        }
+        return "Global (inheritance policy; routing unconfirmed)"
     }
 
     private func normalizedQuery(_ state: ProjectListViewState) -> String { state.query.trimmingCharacters(in: .whitespacesAndNewlines) }

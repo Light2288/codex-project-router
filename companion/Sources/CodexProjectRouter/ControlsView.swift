@@ -159,7 +159,7 @@ struct ControlsDisclosureState {
                     VStack(alignment: .leading, spacing: 14) {
                         routingSection
                         ProjectListView(controller: controller, editingProjectID: editingProjectID,
-                                        canOpenEditor: accountSheet == nil) { project in
+                                        canOpenEditor: accountSheet == nil, pendingRoutingMode: pendingRoutingMode) { project in
                             editingProjectID = project.id
                             assignmentProject = project
                         }

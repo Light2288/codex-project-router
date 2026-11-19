@@ -7,14 +7,16 @@ import CompanionCore
     let controller: RouterController
     let editingProjectID: String?
     let canOpenEditor: Bool
+    var pendingRoutingMode: ProjectRoutingMode? = nil
     let onEdit: (Inspection.Entry) -> Void
     @State private var state = ProjectListViewState()
 
     private var presentation: ProjectListPresentation {
-        .init(inspection: controller.inspection, runtimeState: controller.projectListRuntimeState,
+        .init(inspection: controller.inspection, runtimeState: controller.projectListRuntimeState, routingStatus: controller.projectRoutingStatus,
               selectedAssignment: controller.selectedAssignment, assignmentStatus: controller.assignmentStatus,
               assignmentError: controller.assignmentError,
-              pendingProjectID: controller.pendingAssignmentOperationID != nil && controller.busy ? controller.selectedAssignment?.projectId : nil)
+              pendingProjectID: controller.pendingAssignmentOperationID != nil && controller.busy ? controller.selectedAssignment?.projectId : nil,
+              pendingRoutingMode: pendingRoutingMode)
     }
 
     var body: some View {

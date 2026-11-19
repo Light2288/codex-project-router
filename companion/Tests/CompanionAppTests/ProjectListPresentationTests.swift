@@ -18,7 +18,7 @@ final class ProjectListPresentationTests: XCTestCase {
     }
     private func display(_ snapshot: Inspection?, runtime: ProjectListRuntimeState = .notRunning, selected: AssignmentState? = nil,
                          status: RouterController.AssignmentStatus = .ready, error: String? = nil, pending: String? = nil) -> ProjectListPresentation {
-        .init(inspection: snapshot, runtimeState: runtime, selectedAssignment: selected, assignmentStatus: status,
+        .init(inspection: snapshot, runtimeState: runtime, routingStatus: .notRunning, selectedAssignment: selected, assignmentStatus: status,
               assignmentError: error, pendingProjectID: pending)
     }
     private func runtime(_ summaries: [String: AssignmentSummary], defaultAccount: AccountSummary? = nil, mode: ProjectRoutingMode = .on) -> ProjectListRuntimeState {
