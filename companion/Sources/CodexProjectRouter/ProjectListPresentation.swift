@@ -40,7 +40,7 @@ struct ProjectListViewState: Equatable {
 
 struct ProjectListIssue: Equatable {
     enum Kind: Hashable {
-        case policyUnknown, targetMissing, discoveryMissing, runtimeDifference
+        case policyUnknown, targetMissing, runningTargetMissing, discoveryMissing, runtimeDifference
         case assignmentPending, assignmentUncertain, assignmentDiverged, assignmentFailure
     }
     let kind: Kind
@@ -220,7 +220,7 @@ struct ProjectListPresentation {
     private func policy(_ kind: String?) -> Policy {
         switch kind {
         case "inherited", "legacy_inherited": return .inherited
-        case "override", "target_missing": return .custom
+        case "override": return .custom
         default: return .unknown
         }
     }
@@ -274,6 +274,7 @@ struct ProjectListPresentation {
                 }
             }
             details.append("Project routing: \(routing)")
+            if entry.routeState == "target_missing" { issues.append(.init(kind: .targetMissing, text: "Route target missing.")) }
             if entry.routeState == "catalog_missing" { issues.append(.init(kind: .discoveryMissing, text: "Saved project absent from current discovery.")) }
             return .init(project: entry, section: nil, accountText: flatAccountText(entry), issues: issues, chatStatusText: nil,
                          chatStatusDetail: nil, details: details, runningStatus: .unconfirmed)
@@ -285,14 +286,17 @@ struct ProjectListPresentation {
             details.append("Saved: Uses default — \(savedDefault?.displayName ?? "No default designated")")
             if savedDefault == nil { issues.append(.init(kind: .targetMissing, text: "No default account designated.")) }
         case .custom:
-            accountText = entry.assignmentKind == "target_missing" ? "Missing account target" : entry.account?.displayName ?? "Missing account target"
+            accountText = entry.account?.displayName ?? "Missing account target"
             details.append("Saved: \(accountText)")
-            if entry.assignmentKind == "target_missing" || entry.account == nil {
+            if entry.account == nil {
                 issues.append(.init(kind: .targetMissing, text: "Missing account target. Choose an existing account or Use default."))
             }
         case .unknown:
             accountText = "Assignment unconfirmed"
             issues.append(.init(kind: .policyUnknown, text: "Saved assignment policy is unavailable. Refresh to inspect it."))
+            if entry.assignmentKind == "target_missing" {
+                issues.append(.init(kind: .targetMissing, text: "Missing account target. Choose an existing account or Use default."))
+            }
         }
         if entry.assignmentKind == "legacy_inherited" { details.append("Inherited label retained") }
         if entry.routeState == "catalog_missing" { issues.append(.init(kind: .discoveryMissing, text: "Saved project absent from current discovery.")) }
@@ -300,6 +304,9 @@ struct ProjectListPresentation {
         let runningStatus: ProjectListRunningStatus
         if let running, let summary = running.assignments.first(where: { sameID($0.key, entry.id) })?.value {
             let runningPolicy = policy(summary.kind)
+            if summary.kind == "target_missing" {
+                issues.append(.init(kind: .runningTargetMissing, text: "Running account target missing. Refresh to inspect the running assignment."))
+            }
             let defaultDifference = savedPolicy == .inherited && runningPolicy == .inherited &&
                 savedDefault.map { !sameID($0.id, running.defaultAccount.id) } == true
             if savedPolicy == .unknown || runningPolicy == .unknown {

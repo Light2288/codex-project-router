@@ -54,17 +54,19 @@ final class ProjectListPresentationTests: XCTestCase {
     // Missing bindings cannot disappear into inactive/default, while established explicit policy survives a missing target.
     func testMissingPolicyAndUnresolvedProjectsRemainRecognizable() throws {
         let entries = [entry("a", "Missing binding", kind: nil, activity: .init(state: .noActiveChats)),
-                       entry("b", "Missing target", kind: "target_missing", alias: "lost"),
+                       entry("b", "Missing target", kind: "target_missing", activity: .init(state: .noActiveChats), alias: "lost", routeState: "target_missing"),
                        entry("c", "Unavailable explicit", kind: "override"),
                        entry("d", "Saved absent", kind: "override", account: work, activity: .init(state: .unknown, reason: .projectUnresolved), routeState: "catalog_missing")]
         let sections = display(inspection(entries)).sections(state: .init())
         XCTAssertEqual(sections.map(\.kind), [.attention, .custom])
-        XCTAssertEqual(sections[0].rows.map(\.id), ["a"])
-        XCTAssertEqual(sections[1].rows.map(\.id), ["b", "d", "c"])
-        XCTAssertEqual(sections[1].rows[0].accountText, "Missing account target")
-        XCTAssertEqual(sections[1].rows[0].issues.map(\.kind), [.targetMissing])
-        XCTAssertEqual(sections[1].rows[1].issues.map(\.kind), [.discoveryMissing])
-        XCTAssertEqual(sections[1].rows[2].issues.map(\.kind), [.targetMissing])
+        XCTAssertEqual(sections[0].rows.map(\.id), ["a", "b"])
+        let missingBinding = try XCTUnwrap(sections[0].rows.first { $0.id == "b" })
+        XCTAssertEqual(missingBinding.accountText, "Assignment unconfirmed")
+        XCTAssertEqual(missingBinding.issues.map(\.kind), [.policyUnknown, .targetMissing])
+        XCTAssertEqual(sections[1].rows.map(\.id), ["d", "c"])
+        XCTAssertEqual(sections[1].rows[0].issues.map(\.kind), [.discoveryMissing])
+        XCTAssertEqual(sections[1].rows[1].accountText, "Missing account target")
+        XCTAssertEqual(sections[1].rows[1].issues.map(\.kind), [.targetMissing])
     }
 
     // A same-account explicit/inherited mismatch matters in both modes; aliases and display-name changes alone do not.
@@ -129,7 +131,7 @@ final class ProjectListPresentationTests: XCTestCase {
 
     // Previews replace collapsed full rows and never inflate the section's eight project identities.
     func testCollapsedPreviewsCountOnce() throws {
-        let entries = (0..<8).map { entry("\($0)", "Project \($0)", kind: $0 == 3 ? "target_missing" : "inherited", activity: .init(state: .noActiveChats), alias: $0 == 3 ? "missing" : nil) }
+        let entries = (0..<8).map { entry("\($0)", "Project \($0)", kind: $0 == 3 ? "override" : "inherited", activity: .init(state: .noActiveChats), alias: $0 == 3 ? "missing" : nil) }
         let model = display(inspection(entries))
         let collapsed = try XCTUnwrap(model.sections(state: .init()).first)
         XCTAssertEqual(collapsed.title, "No active chats (8)")
@@ -178,7 +180,8 @@ final class ProjectListPresentationTests: XCTestCase {
         state.clearSearch()
         XCTAssertEqual(model.hiddenActionableProjectCount(state: state), 0)
         XCTAssertFalse(state.inactiveExpanded)
-        XCTAssertEqual(model.sections(state: state).last?.problemPreviews.map(\.id), ["a"])
+        XCTAssertEqual(model.sections(state: state).first?.kind, .attention)
+        XCTAssertEqual(model.sections(state: state).first?.rows.map(\.id), ["a"])
     }
 
     // Editor pinning affects placement only: fresh policy, warnings, disclosure, search and counts remain live.
@@ -203,7 +206,7 @@ final class ProjectListPresentationTests: XCTestCase {
 
     // A vanished identity or unavailable catalog cannot be recreated by the presentation pin.
     func testPinFromCollapsedPreviewAndDisappearanceNeverInventRows() {
-        let item = entry("a", "Missing", kind: "target_missing", activity: .init(state: .noActiveChats), alias: "lost")
+        let item = entry("a", "Missing", kind: "override", activity: .init(state: .noActiveChats), alias: "lost")
         let model = display(inspection([item]))
         var state = ProjectListViewState(); state.beginEditing(projectID: "a", displayedSections: model.sections(state: state))
         XCTAssertEqual(state.pin, .init(projectID: "a", section: .noActive, index: 0))
@@ -239,7 +242,8 @@ final class ProjectListPresentationTests: XCTestCase {
         XCTAssertEqual(rows.first { $0.id == "a" }?.runningStatus, .unconfirmed)
         XCTAssertEqual(rows.first { $0.id == "a" }?.issues.map(\.kind), [.policyUnknown])
         XCTAssertEqual(rows.first { $0.id == "b" }?.runningStatus, .unconfirmed)
-        XCTAssertEqual(rows.first { $0.id == "b" }?.issues.map(\.kind), [.targetMissing])
+        XCTAssertEqual(rows.first { $0.id == "b" }?.section, .attention)
+        XCTAssertEqual(rows.first { $0.id == "b" }?.issues.map(\.kind), [.policyUnknown, .targetMissing])
     }
 
     // Filtered visible indices cannot be applied as full-list indices when a refreshed project changes section.
@@ -287,12 +291,12 @@ final class ProjectListPresentationTests: XCTestCase {
     // Repairing the last issue must keep the editing preview visible without marking it actionable or opening unrelated rows.
     func testRepairedEditingPreviewKeepsItsPositionWithoutExpandingInactive() throws {
         let inactive = ChatActivity(state: .noActiveChats)
-        let initial = [entry("a", "Alpha problem", kind: "target_missing", activity: inactive, alias: "lost-a"),
+        let initial = [entry("a", "Alpha problem", kind: "override", activity: inactive, alias: "lost-a"),
                        entry("b", "Beta healthy", activity: inactive),
-                       entry("c", "Charlie editing", kind: "target_missing", activity: inactive, alias: "lost-c")]
+                       entry("c", "Charlie editing", kind: "override", activity: inactive, alias: "lost-c")]
         var state = ProjectListViewState()
         state.beginEditing(projectID: "c", displayedSections: display(inspection(initial)).sections(state: state))
-        let refreshed = [entry("new", "Aardvark problem", kind: "target_missing", activity: inactive, alias: "lost-new"), initial[0], initial[1],
+        let refreshed = [entry("new", "Aardvark problem", kind: "override", activity: inactive, alias: "lost-new"), initial[0], initial[1],
                          entry("c", "Charlie editing", kind: "override", account: work, activity: inactive)]
         let model = display(inspection(refreshed))
         let section = try XCTUnwrap(model.sections(state: state).first)
@@ -327,6 +331,88 @@ final class ProjectListPresentationTests: XCTestCase {
             XCTAssertTrue(row?.details.contains("Route alias: private-route") == true)
             XCTAssertTrue(row?.issues.isEmpty == true)
         }
+    }
+
+    // A credential route with an absent target must warn before Details in either routing mode and after filtering.
+    @MainActor func testFlatCredentialMissingTargetsRemainActionableInOnOffAndSearch() throws {
+        let broken = entry("broken", "Broken credential", kind: nil, alias: "lost-route", routeState: "target_missing")
+        let healthy = entry("healthy", "Healthy credential", kind: nil)
+        for mode in [ProjectRoutingMode.on, .off] {
+            let model = ProjectListPresentation(inspection: inspection([broken, healthy], mode: "credential"), runtimeState: .unconfirmed,
+                                                routingStatus: .known(mode), selectedAssignment: nil, assignmentStatus: .ready,
+                                                assignmentError: nil, pendingProjectID: nil)
+            let row = try XCTUnwrap(model.flatRows(state: .init()).first { $0.id == "broken" })
+            XCTAssertEqual(row.issues.map(\.kind), [.targetMissing])
+            XCTAssertEqual(row.issues.map(\.text), ["Route target missing."])
+            XCTAssertTrue(row.isActionable)
+            XCTAssertTrue(row.details.contains("Project routing: \(mode == .on ? "On" : "Off")"))
+            var state = ProjectListViewState(); state.query = "LOST-route"
+            XCTAssertEqual(model.flatRows(state: state).map(\.id), ["broken"])
+            XCTAssertEqual(model.flatRows(state: state).first?.issues.map(\.kind), [.targetMissing])
+            state.query = "Healthy"
+            XCTAssertEqual(model.hiddenActionableProjectCount(state: state), 1)
+            XCTAssertEqual(model.hiddenAttentionActionTitle(state: state), "Clear search")
+            state.clearSearch()
+            XCTAssertEqual(model.flatRows(state: state).count, 2)
+        }
+    }
+
+    // Missing runtime targets are known failures even when account identity cannot be compared with a healthy saved override.
+    func testMissingRunningTargetWarnsOnHealthySavedCustomPolicy() throws {
+        let item = entry("a", "Healthy saved", kind: "override", account: work, alias: "saved-work")
+        for mode in [ProjectRoutingMode.on, .off] {
+            let model = display(inspection([item]), runtime: runtime(["a": .init(kind: "target_missing", routeAlias: "lost-running")], mode: mode))
+            let row = try XCTUnwrap(allRows(model.sections(state: .init())).first)
+            XCTAssertEqual(row.section, .custom)
+            XCTAssertEqual(row.accountText, "Work")
+            XCTAssertEqual(row.runningStatus, .unconfirmed)
+            XCTAssertEqual(row.issues.count, 1)
+            XCTAssertEqual(row.issues.map(\.text), ["Running account target missing. Refresh to inspect the running assignment."])
+            XCTAssertTrue(row.isActionable)
+            XCTAssertTrue(row.details.contains("Running: Missing account target"))
+            XCTAssertTrue(row.details.contains("Running route alias: lost-running"))
+        }
+    }
+
+    // Distinct saved/runtime warning identities keep SwiftUI from dropping either actionable issue.
+    func testMissingSavedAndRunningTargetsHaveDistinctVisibleIssueIdentities() throws {
+        let item = entry("a", "Both missing", kind: "target_missing", alias: "lost-saved", routeState: "target_missing")
+        let model = display(inspection([item]), runtime: runtime(["a": .init(kind: "target_missing", routeAlias: "lost-running")]))
+        let row = try XCTUnwrap(allRows(model.sections(state: .init())).first)
+        XCTAssertEqual(row.section, .attention)
+        XCTAssertEqual(row.runningStatus, .unconfirmed)
+        XCTAssertEqual(row.issues.count, 3)
+        XCTAssertEqual(Set(row.issues.map(\.kind)).count, 3)
+        XCTAssertTrue(row.issues.contains { $0.text == "Missing account target. Choose an existing account or Use default." })
+        XCTAssertTrue(row.issues.contains { $0.text == "Running account target missing. Refresh to inspect the running assignment." })
+    }
+
+    // Runtime failure previews must name the collapsed project, count once, and remain discoverable when search hides them.
+    func testMissingRunningTargetRemainsInCollapsedPreviewAndHiddenSearchSummary() throws {
+        let inactive = ChatActivity(state: .noActiveChats)
+        let entries = [entry("a", "Archived running failure", kind: "override", account: work, activity: inactive),
+                       entry("b", "Archived healthy", activity: inactive)]
+        let model = display(inspection(entries), runtime: runtime(["a": .init(kind: "target_missing", routeAlias: "lost-running"),
+                                                                 "b": .init(kind: "inherited", account: personal)]))
+        var state = ProjectListViewState()
+        let collapsed = try XCTUnwrap(model.sections(state: state).first)
+        XCTAssertEqual(collapsed.kind, .noActive)
+        XCTAssertEqual(collapsed.countText, "2")
+        XCTAssertTrue(collapsed.rows.isEmpty)
+        XCTAssertEqual(collapsed.problemPreviews.map(\.id), ["a"])
+        XCTAssertEqual(collapsed.problemPreviews.first?.project.name, "Archived running failure")
+        XCTAssertEqual(collapsed.problemPreviews.first?.issues.map(\.text), ["Running account target missing. Refresh to inspect the running assignment."])
+        state.query = "healthy"
+        XCTAssertEqual(model.sections(state: state).first?.rows.map(\.id), ["b"])
+        XCTAssertEqual(model.sections(state: state).first?.countText, "1 of 2")
+        XCTAssertEqual(model.hiddenActionableProjectCount(state: state), 1)
+        XCTAssertEqual(model.hiddenAttentionText(state: state), "1 project needing attention is hidden by search.")
+        XCTAssertEqual(model.hiddenAttentionActionTitle(state: state), "Clear search")
+        state.clearSearch(); state.inactiveExpanded = true
+        let expanded = try XCTUnwrap(model.sections(state: state).first)
+        XCTAssertEqual(expanded.rows.map(\.id), ["b", "a"])
+        XCTAssertTrue(expanded.problemPreviews.isEmpty)
+        XCTAssertEqual(Set(expanded.rows.map(\.id)).count, 2)
     }
 
     // Empty, filtered-empty and failed discovery need different user actions/messages.

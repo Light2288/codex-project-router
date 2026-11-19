@@ -3,7 +3,7 @@
 Created: 2026-11-19
 
 Updated: 2026-11-19
-Scope: approved project-list increment only. Stage 4 implementation; targeted specification follow-up, quality review and local closeout pending.
+Scope: approved project-list increment only. Stage 4 implementation; integrated correction review/follow-up and local closeout pending.
 
 ## Evidence boundaries
 
@@ -49,7 +49,7 @@ fixture-native observations distinguished from new live behavior.
 
 | Criterion | Evidence | Current-source final result |
 |---|---|---|
-| AC-01 | Policy/placement tables; configured-only and legacy fallback; editor default cases | PASS — native policy/editor suites, flat On/Off/unknown/pending-mode native regressions and Node catalog/assignment regressions |
+| AC-01 | Policy/placement tables; configured-only and legacy fallback; editor default cases | PASS — native policy/editor suites, missing-binding attention precedence, unavailable explicit-account distinction, flat On/Off/unknown/pending-mode and missing-target/search regressions, and Node catalog/assignment regressions |
 | AC-02 | Explicit-current-default retention and On/Off invariance | PASS — native policy/default regression cases |
 | AC-03 | Empty/archived/mixed/unarchived classifier and relocated inspection fixtures | PASS — full Node + both relocated/source-denied probes |
 | AC-04 | Missing/malformed/locked/unsupported/racing data and activity-failure isolation | PASS — full Node + native observation-failure regressions |
@@ -58,28 +58,29 @@ fixture-native observations distinguished from new live behavior.
 | AC-07 | Migration/bridge conflicts and incomplete-source conservative unknown | PASS — full Node conservative-profile cases + bundled unsupported checkpoint |
 | AC-08 | Unique section rows, order, empty-section omission | PASS — full native presentation and hosted view assertions |
 | AC-09 | Exact compact copy, Details and neutral unknown native fixture | PASS — full native presentation/layout assertions; nine Task 6 images inspected |
-| AC-10 | All-ID runtime paging, coherent defaults/names, shared/per-row differences | PASS — full native runtime/controller suites + bundled 8+1+empty pages |
-| AC-11 | Collapsed problem previews, expansion replacement and unique counts | PASS — full native preview/expansion/count assertions |
-| AC-12 | Search fields, matches/total, temporary reveal/clear and hidden warnings | PASS — full native search/count/disclosure assertions |
+| AC-10 | All-ID runtime paging, coherent defaults/names, shared/per-row differences | PASS — full native runtime/controller suites, running missing-target warnings independent of identity comparison, distinct saved/running issue identities + bundled 8+1+empty pages |
+| AC-11 | Collapsed problem previews, expansion replacement and unique counts | PASS — full native preview/expansion/count assertions, including named running-target failure previews |
+| AC-12 | Search fields, matches/total, temporary reveal/clear and hidden warnings | PASS — full native search/count/disclosure assertions, including hidden flat/running missing-target warnings |
 | AC-13 | Sheet refresh/save pinning, no rebase, discovery loss and stale guards | PASS — full native sheet/save/stale-authority regressions |
 | AC-14 | 200 rows, Unicode, native focus/actions, disclosures and batching/deadline | PASS — full native 200-entry/layout/focus/action/batching tests; manual limits below |
 | AC-15 | JSON/main DB/WAL/config/provider/source byte checks; zero credential/upstream/mutator reads | PASS — real committed-WAL test, bundled immutable-byte and zero-read assertions |
-| AC-16 | Ordered full native/build/Node/package chain; routing/setup/assignment/recovery/projectless regressions | PASS — all four ordered commands; 375 native / 1095 Node / 3 package tests, zero failures/skips |
+| AC-16 | Ordered full native/build/Node/package chain; routing/setup/assignment/recovery/projectless regressions | PASS — all four ordered commands; 379 native / 1095 Node / 3 package tests, zero failures/skips |
 | AC-17 | Operating guide/README and this evidence record | Documented — guide/README/profile/deletion/SHM and evidence boundaries reviewed |
 
 ## Current-source execution
 
-The final-fix chain ran in this exact order on current source after the sole initial
-specification-review correction below. Product and test sources stayed unchanged
-throughout the chain. This supersedes the earlier Task 7 chain (373 native tests),
-whose raw evidence remains in the scratch workspace and Task 7 report:
+The quality-fix chain ran in this exact order on current source after the bounded
+three-finding quality correction below. Product and test sources stayed unchanged
+throughout this final chain. This supersedes the initial specification-correction
+chain (375 native tests) and earlier Task 7 chain (373 native tests); their raw
+evidence remains in the scratch workspace and earlier reports:
 
 | Command | Exit | Result | Log in scratch evidence workspace |
 |---|---:|---|---|
-| `npm run companion:test` | 0 | 268 core + 107 app tests, 0 failures/skips | `final-fix-companion-test.log` |
-| `npm run companion:build` | 0 | Built and ad-hoc signed current app | `final-fix-companion-build.log` |
-| `npm test` | 0 | 1095 tests passed, 0 failures/cancellations/skips | `final-fix-node-test.log` |
-| `npm run companion:package-test` | 0 | All 3 top-level tests passed, 0 failures/cancellations/skips | `final-fix-package-test.log` |
+| `npm run companion:test` | 0 | 268 core + 111 app tests, 0 failures/skips | `quality-fix-companion-test.log` |
+| `npm run companion:build` | 0 | Built and ad-hoc signed current app | `quality-fix-companion-build.log` |
+| `npm test` | 0 | 1095 tests passed, 0 failures/cancellations/skips | `quality-fix-node-test.log` |
+| `npm run companion:package-test` | 0 | All 3 top-level tests passed, 0 failures/cancellations/skips | `quality-fix-package-test.log` |
 
 The package tests check the explicit source/dependency allowlist, compare every
 bundled production Node module byte-for-byte with the current checkout, verify
@@ -143,9 +144,33 @@ Exact commands, exits, raw logs, the initial test-only actor-annotation compile
 correction and RED/GREEN summaries are in `final-fix-report.md` in the scratch
 workspace. No required full-chain command failed or was repeated for this correction.
 
-The controller owns the targeted specification follow-up and ensuing quality review.
-Those stages and local closeout remain pending; this evidence does not declare the
-overall increment closed.
+The initial specification correction subsequently passed its targeted specification
+follow-up. The initial quality review identified three further display gaps: a flat
+credential missing target had no immediate warning, a known running missing target
+had no project warning/collapsed preview, and saved missing bindings were treated as
+established custom policy. This bounded correction restores the flat warning, adds
+a running-target warning independently of account comparison, and places missing
+saved bindings in Needs attention before inactivity while retaining their target
+warning. Established explicit policy with an unavailable account remains custom.
+Saved and running target warnings have distinct row issue identities.
+
+Three new native regression cases and corrected missing-binding expectations first
+failed with 31 expected assertions. A fourth combined saved/running failure case
+then exposed duplicate SwiftUI issue identities (one expected assertion failure)
+and passed after the dedicated running-target kind. The final focused covering run
+passed 63 app tests, including 23 presentation tests and existing controls, native
+layout/disclosure/Edit/search and editor safeguards. Preview/pin fixtures that need
+established custom policy now use an explicit override with an unavailable account;
+all original preview/count/pin assertions remain. An earlier native-only pass on the
+pre-identity source is retained as superseded evidence. Exact commands, exits,
+RED/GREEN details and the test-only initial RED array-index correction are in
+`quality-fix-report.md`; raw logs remain beside it. The final four-command chain
+above had no failures or retries. No new image inspection or live production
+behavior is inferred from the new presentation-model assertions.
+
+The controller owns integrated correction review/follow-up and local closeout.
+Those stages remain pending; this evidence does not declare the overall increment
+closed.
 
 ## Compatibility and limitations
 

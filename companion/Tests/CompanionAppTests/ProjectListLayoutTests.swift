@@ -9,7 +9,7 @@ import ApplicationServices
     // Losing previews or filtering them a second time removes the only repair/disclosure actions while collapsed.
     func testCollapsePreviewsRetainEditAndDisclosureAccess() async throws {
         try await withProjectListFixture { controller, backend in
-            backend.snapshot.catalog.entries = [Self.entry(1, "Archived repair", kind: "target_missing", inactive: true),
+            backend.snapshot.catalog.entries = [Self.entry(1, "Archived repair", kind: "override", inactive: true),
                 Self.entry(2, "Archived healthy", inactive: true)]
             await controller.refresh()
             var opened: String?
