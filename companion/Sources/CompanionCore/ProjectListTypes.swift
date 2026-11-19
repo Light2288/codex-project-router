@@ -44,3 +44,80 @@ public struct ChatActivity: Codable, Equatable, Sendable {
     }
     var isValid: Bool { (state == .unknown) == (reason != nil) }
 }
+
+
+/// Comparison evidence for core consumers; display state must not expose these tokens.
+public struct ProjectListSnapshotToken: Codable, Equatable, Sendable {
+    public let runningRevision: String
+    public let runningIdentity: String
+    public let runningFingerprint: String
+    public let mode: ProjectRoutingMode
+    public init(runningRevision: String, runningIdentity: String, runningFingerprint: String, mode: ProjectRoutingMode) {
+        self.runningRevision = runningRevision; self.runningIdentity = runningIdentity
+        self.runningFingerprint = runningFingerprint; self.mode = mode
+    }
+}
+
+public struct RunningProjectListPage: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Sendable {
+        public let projectId: String
+        public let assignment: AssignmentSummary
+        public init(projectId: String, assignment: AssignmentSummary) { self.projectId = projectId; self.assignment = assignment }
+    }
+    public let context: ActivationContext
+    public let runningRevision: String
+    public let runningIdentity: String
+    public let runningFingerprint: String
+    public let mode: ProjectRoutingMode
+    public let defaultAccount: AccountSummary
+    public let entries: [Entry]
+    public var snapshot: ProjectListSnapshotToken {
+        ProjectListSnapshotToken(runningRevision: runningRevision, runningIdentity: runningIdentity, runningFingerprint: runningFingerprint, mode: mode)
+    }
+    public init(context: ActivationContext, runningRevision: String, runningIdentity: String, runningFingerprint: String,
+                mode: ProjectRoutingMode, defaultAccount: AccountSummary, entries: [Entry]) {
+        self.context = context; self.runningRevision = runningRevision; self.runningIdentity = runningIdentity
+        self.runningFingerprint = runningFingerprint; self.mode = mode; self.defaultAccount = defaultAccount; self.entries = entries
+    }
+}
+
+public struct RunningProjectListObservation: Equatable, Sendable {
+    public let context: ActivationContext
+    public let snapshot: ProjectListSnapshotToken
+    public let defaultAccount: AccountSummary
+    public let assignments: [String: AssignmentSummary]
+    public init(context: ActivationContext, snapshot: ProjectListSnapshotToken, defaultAccount: AccountSummary, assignments: [String: AssignmentSummary]) {
+        self.context = context; self.snapshot = snapshot; self.defaultAccount = defaultAccount; self.assignments = assignments
+    }
+}
+
+internal enum ProjectListWire {
+    static func selection(_ ids: [String]) -> Bool {
+        ids.count <= 8 && ids.allSatisfy(AssignmentWire.uuid) && Set(ids.map { $0.lowercased() }).count == ids.count
+    }
+    static func token(_ value: ProjectListSnapshotToken) -> Bool {
+        [value.runningRevision, value.runningIdentity, value.runningFingerprint].allSatisfy(AssignmentWire.token)
+    }
+    static func page(_ object: Any, context: ActivationContext, projectIDs: [String]?, expectedSnapshot: ProjectListSnapshotToken?) -> RunningProjectListPage? {
+        guard AssignmentWire.exact(object, ["context", "runningRevision", "runningIdentity", "runningFingerprint", "mode", "defaultAccount", "entries"]),
+              let raw = object as? [String: Any], AssignmentWire.contextShape(raw["context"]!),
+              AssignmentWire.exact(raw["defaultAccount"]!, ["id", "displayName"]),
+              let entries = raw["entries"] as? [[String: Any]],
+              entries.allSatisfy({ AssignmentWire.exact($0, ["projectId", "assignment"]) && AssignmentWire.summaryShape($0["assignment"]!) }),
+              let value = AssignmentWire.decode(RunningProjectListPage.self, object), value.context == context, AssignmentWire.context(value.context),
+              token(value.snapshot), AssignmentWire.uuid(value.defaultAccount.id), AssignmentWire.name(value.defaultAccount.displayName),
+              selection(value.entries.map(\.projectId)), projectIDs.map({ value.entries.map(\.projectId) == $0 }) ?? true,
+              expectedSnapshot.map({ value.snapshot == $0 }) ?? true else { return nil }
+        var names = [value.defaultAccount.id.lowercased(): value.defaultAccount.displayName]
+        for entry in value.entries {
+            let summary = entry.assignment
+            if ["inherited", "legacy_inherited"].contains(summary.kind), summary.account != value.defaultAccount { return nil }
+            if let account = summary.account {
+                let id = account.id.lowercased()
+                if let name = names[id], name != account.displayName { return nil }
+                names[id] = account.displayName
+            }
+        }
+        return value
+    }
+}

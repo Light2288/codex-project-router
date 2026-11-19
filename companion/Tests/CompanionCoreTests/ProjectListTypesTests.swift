@@ -63,4 +63,75 @@ final class ProjectListTypesTests: XCTestCase {
         XCTAssertFalse(backend.mutationRequiresReconciliation)
     }
 
+    func testRunningPageRejectsConflictingAccountNamesAndInheritance() throws {
+        for kind in ["override", "inherited", "legacy_inherited"] {
+            var raw = ProjectListFixtures.page([ProjectListFixtures.ids[0]])
+            var summary: [String: Any] = ["kind": kind, "account": ["id": ProjectListFixtures.account, "displayName": "Conflicting name"]]
+            if kind != "inherited" { summary["routeAlias"] = "selected" }
+            raw["entries"] = [["projectId": ProjectListFixtures.ids[0], "assignment": summary]]
+            XCTAssertNil(ProjectListWire.page(raw, context: ProjectListFixtures.context, projectIDs: nil, expectedSnapshot: nil))
+        }
+        var raw = ProjectListFixtures.page([ProjectListFixtures.ids[0]])
+        raw["entries"] = [["projectId":ProjectListFixtures.ids[0], "assignment":["kind":"inherited", "account":["id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "displayName":"Different account"]]]]
+        XCTAssertNil(ProjectListWire.page(raw, context: ProjectListFixtures.context, projectIDs: nil, expectedSnapshot: nil))
+        let nondefault = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        raw["entries"] = ProjectListFixtures.ids.prefix(2).enumerated().map { offset, id in
+            ["projectId":id, "assignment":["kind":"override", "routeAlias":"selected", "account":["id":nondefault, "displayName":offset == 0 ? "One name" : "Different name"]]]
+        }
+        XCTAssertNil(ProjectListWire.page(raw, context: ProjectListFixtures.context, projectIDs: nil, expectedSnapshot: nil))
+    }
+
+    // A malformed account/token/context or mixed page must never become runtime evidence.
+    func testRunningPageValidatesExactShapeCoverageAndSnapshot() throws {
+        let context = ProjectListFixtures.context
+        let ids = ProjectListFixtures.ids
+        let raw = ProjectListFixtures.page(ids)
+        let page = try XCTUnwrap(ProjectListWire.page(raw, context: context, projectIDs: ids, expectedSnapshot: nil))
+        XCTAssertEqual(page.entries.map(\.projectId), ids)
+        XCTAssertEqual(page.defaultAccount.displayName, String(repeating: "😀", count: 80))
+        XCTAssertEqual(page.entries[0].assignment.kind, "override")
+        XCTAssertEqual(page.entries[1].assignment.kind, "target_missing")
+        XCTAssertEqual(page.mode, .off)
+        XCTAssertNotNil(ProjectListWire.page(raw, context: context, projectIDs: ids, expectedSnapshot: page.snapshot))
+        var changed = raw; changed["runningRevision"] = String(repeating: "d", count: 64)
+        XCTAssertNil(ProjectListWire.page(changed, context: context, projectIDs: ids, expectedSnapshot: page.snapshot))
+        for entries in [Array((raw["entries"] as! [[String: Any]]).reversed()),
+                        Array((raw["entries"] as! [[String: Any]]).dropLast()),
+                        (raw["entries"] as! [[String: Any]]) + [ProjectListFixtures.entry("ffffffff-ffff-4fff-8fff-ffffffffffff")]] {
+            var invalid = raw; invalid["entries"] = entries
+            XCTAssertNil(ProjectListWire.page(invalid, context: context, projectIDs: ids, expectedSnapshot: nil))
+        }
+        for (key, value): (String, Any) in [
+            ("extra", true), ("runningIdentity", "invalid"), ("mode", "unknown"),
+            ("defaultAccount", ["id": ProjectListFixtures.account, "displayName": String(repeating: "😀", count: 81)]),
+            ("context", ["configPath":"/wrong", "codexHome":context.codexHome, "providerId":context.providerId, "listenPort":context.listenPort])
+        ] {
+            var invalid = raw; invalid[key] = value
+            XCTAssertNil(ProjectListWire.page(invalid, context: context, projectIDs: ids, expectedSnapshot: nil))
+        }
+        var duplicate = raw; duplicate["entries"] = [ProjectListFixtures.entry(ids[0]), ProjectListFixtures.entry(ids[0].uppercased())]
+        XCTAssertNil(ProjectListWire.page(duplicate, context: context, projectIDs: nil, expectedSnapshot: nil))
+        XCTAssertNotNil(ProjectListWire.page(ProjectListFixtures.page([]), context: context, projectIDs: [], expectedSnapshot: nil))
+        var worstCase = raw; worstCase["entries"] = ids.map { ProjectListFixtures.entry($0) }
+        XCTAssertLessThanOrEqual(try AssignmentFixtures.data(worstCase).count + 1, 16_384)
+    }
+
+}
+
+
+internal enum ProjectListFixtures {
+    static let context = ActivationContext(configPath: "/synthetic/config.json", codexHome: "/synthetic/home", providerId: "fixture", listenPort: 43129)
+    static let account = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    static let ids = (0..<8).map { "aaaaaaaa-aaaa-4aaa-8aaa-" + String(format: "%012d", $0) }
+    static func entry(_ id: String, missing: Bool = false) -> [String: Any] {
+        ["projectId": id, "assignment": missing ? ["kind": "target_missing", "routeAlias": String(repeating: "a", count: 64)] :
+            ["kind": "override", "routeAlias": String(repeating: "a", count: 64), "account": ["id": account, "displayName": String(repeating: "😀", count: 80)]]]
+    }
+    static func page(_ ids: [String]) -> [String: Any] {
+        ["context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": context.providerId, "listenPort": context.listenPort],
+         "runningRevision": String(repeating: "a", count: 64), "runningIdentity": String(repeating: "b", count: 64),
+         "runningFingerprint": String(repeating: "c", count: 64), "mode": "off",
+         "defaultAccount": ["id": account, "displayName": String(repeating: "😀", count: 80)],
+         "entries": ids.enumerated().map { entry($0.element, missing: $0.offset == 1) }]
+    }
 }

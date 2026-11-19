@@ -2,11 +2,11 @@ import { realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { UUID, readRouterConfigurationSource } from "./config.js";
+import { UUID, configFingerprint, readRouterConfigurationSource } from "./config.js";
 import { createProxy } from "./proxy.js";
 import { RouterError, safeError } from "./errors.js";
 import { withConfigurationLock } from "./configuration-lock.js";
-import { commitProjectAssignment, readProjectAssignmentState } from "./project-assignments.js";
+import { assignmentSummary, commitProjectAssignment, readProjectAssignmentState } from "./project-assignments.js";
 export { withConfigurationLock as withRouterStartupLock } from "./configuration-lock.js";
 
 const maxFrameBytes = 16384;
@@ -21,16 +21,20 @@ const contextValid = value => exact(value, ["configPath", "codexHome", "provider
   typeof value.providerId === "string" && /^[a-zA-Z0-9_-]+$/.test(value.providerId) &&
   Number.isInteger(value.listenPort) && value.listenPort >= 1 && value.listenPort <= 65535;
 
+const snapshotValid = value => value === null || exact(value, ["runningRevision", "runningIdentity", "runningFingerprint", "mode"]) &&
+  [value.runningRevision, value.runningIdentity, value.runningFingerprint].every(token) && ["on", "off"].includes(value.mode);
+
 function commandFrom(frame, sessionId, assignmentsEnabled) {
   const command = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(frame));
   if (
     !command || typeof command !== "object" || Array.isArray(command) ||
     command.schemaVersion !== 1 || command.sessionId !== sessionId ||
     !uuid(command.requestId) ||
-    !["get_mode", "set_mode", ...(assignmentsEnabled ? ["get_assignment", "set_assignment"] : [])].includes(command.action)
+    !["get_mode", "set_mode", ...(assignmentsEnabled ? ["get_assignment", "set_assignment", "get_project_list"] : [])].includes(command.action)
   ) throw new RouterError("CONFIG_INVALID");
   const keys = ["schemaVersion", "sessionId", "requestId", "action", ...({
     get_mode: [], set_mode: ["mode"],
+    get_project_list: ["expectedContext", "projectIds", "expectedSnapshot"],
     get_assignment: ["expectedContext", "projectId", "operationId"],
     set_assignment: ["expectedContext", "expectedSavedRevision", "expectedConfigurationIdentity",
       "expectedRunningRevision", "expectedCatalogRevision", "projectId", "accountId"],
@@ -38,7 +42,10 @@ function commandFrom(frame, sessionId, assignmentsEnabled) {
   if (
     !exact(command, keys) ||
     (command.action === "set_mode" && !["on", "off"].includes(command.mode)) ||
-    (command.action.endsWith("assignment") && !contextValid(command.expectedContext)) ||
+    ((command.action.endsWith("assignment") || command.action === "get_project_list") && !contextValid(command.expectedContext)) ||
+    (command.action === "get_project_list" && (!Array.isArray(command.projectIds) || command.projectIds.length > 8 ||
+      !command.projectIds.every(uuid) || new Set(command.projectIds.map(id => id.toLowerCase())).size !== command.projectIds.length ||
+      !snapshotValid(command.expectedSnapshot))) ||
     (command.action === "get_assignment" &&
       (command.projectId !== null && !uuid(command.projectId) || command.operationId !== null && !uuid(command.operationId))) ||
     (command.action === "set_assignment" && (!uuid(command.projectId) ||
@@ -117,6 +124,22 @@ export async function startManagedRouter({
       } else {
         write({ ...envelope, type: "assignment_state",
           state: await readState(command.projectId, command.operationId) });
+      }
+      return;
+    }
+    if (command.action === "get_project_list") {
+      // Observation projects only the immutable running snapshot; it never reads saved/editor state.
+      const snapshot = { runningRevision: current.configurationRevision, runningIdentity: current.configurationIdentity,
+        runningFingerprint: configFingerprint(current.config), mode: current.mode };
+      if (!isDeepStrictEqual(command.expectedContext, context)) {
+        write({ ...envelope, type: "project_list_unavailable", code: "PROJECT_LIST_UNAVAILABLE" });
+      } else if (command.expectedSnapshot !== null && !isDeepStrictEqual(command.expectedSnapshot, snapshot)) {
+        write({ ...envelope, type: "project_list_unavailable", code: "PROJECT_LIST_CHANGED" });
+      } else {
+        const routing = current.config.accountRouting;
+        write({ ...envelope, type: "project_list_state", state: { context, ...snapshot,
+          defaultAccount: { id: routing.defaultAccountId, displayName: routing.accounts[routing.defaultAccountId].displayName },
+          entries: command.projectIds.map(projectId => ({ projectId, assignment: assignmentSummary(current.config, projectId) })) } });
       }
       return;
     }
@@ -271,7 +294,7 @@ export async function startManagedRouter({
       ready = true;
       write({ schemaVersion: 1, type: "ready", sessionId,
         context, mode: current.mode,
-        ...(assignmentsEnabled ? { capabilities: ["project_assignments_v1"] } : {}) });
+        ...(assignmentsEnabled ? { capabilities: ["project_assignments_v1", "project_list_v1"] } : {}) });
     }
     return { server, closeControl };
   } catch (error) {

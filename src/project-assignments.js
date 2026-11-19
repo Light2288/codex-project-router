@@ -15,7 +15,7 @@ const object = value => value !== null && typeof value === "object" && !Array.is
 const digest = source => createHash("sha256").update(source).digest("hex");
 const conflict = () => new RouterError("ACTIVATION_CONFLICT");
 const invalid = () => new RouterError("CONFIG_INVALID");
-function assignmentSummary(config, projectId) {
+export function assignmentSummary(config, projectId) {
   const routing = config.accountRouting;
   const hasMapping = Object.hasOwn(config.projectRoutes, projectId);
   const routeAlias = hasMapping ? config.projectRoutes[projectId] : undefined;

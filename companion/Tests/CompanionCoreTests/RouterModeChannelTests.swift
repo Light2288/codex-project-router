@@ -5,6 +5,125 @@ import Darwin
 @MainActor final class RouterModeChannelTests: XCTestCase {
     private let context = ActivationContext(configPath: "/synthetic/config.json", codexHome: "/synthetic/home", providerId: "fixture", listenPort: 43129)
 
+
+    func testListReadUsesBoundedPageAndEarlierDeadlineWithoutMutationUncertainty() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.listReady()
+        let reading = Task { try await peer.channel.readProjectList(projectIDs: ProjectListFixtures.ids, expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+        let command = try await peer.command()
+        XCTAssertEqual(command["action"] as? String, "get_project_list")
+        XCTAssertEqual(command["projectIds"] as? [String], ProjectListFixtures.ids)
+        XCTAssertTrue(command["expectedSnapshot"] is NSNull)
+        try await peer.listReply(to: command, state: ProjectListFixtures.page(ProjectListFixtures.ids))
+        let page = try await reading.value
+        XCTAssertEqual(page.entries.count, 8)
+        let started = Date()
+        let timeout = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: page.snapshot, deadline: Date().addingTimeInterval(0.08)) }
+        let retired = try await peer.command()
+        do { _ = try await timeout.value; XCTFail("Read exceeded deadline") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        let next = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+        let fresh = try await peer.command()
+        try await peer.listReply(to: retired, state: ProjectListFixtures.page([]))
+        try await peer.listReply(to: fresh, state: ProjectListFixtures.page([]))
+        let nextPage = try await next.value; XCTAssertTrue(nextPage.entries.isEmpty)
+        let setting = Task { try await peer.channel.setMode(.on) }
+        let set = try await peer.command(); try await peer.reply(to: set, mode: "on")
+        let appliedMode = try await setting.value; XCTAssertEqual(appliedMode, .on)
+        XCTAssertLessThanOrEqual(peer.channel.retainedInputByteCount, 32_768)
+        XCTAssertLessThanOrEqual(peer.channel.retainedOutputByteCount, 32_768)
+    }
+
+    func testOldCapabilitiesRetainOperationsWithoutListAuthority() async throws {
+        for assignment in [false, true] {
+            let peer = ModePeer(context: context); defer { peer.close() }
+            if assignment { try await peer.assignmentReady() } else { try await peer.readyAndWait() }
+            do { _ = try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)); XCTFail("Unsupported list read") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+            let reading = Task { try await peer.channel.readMode() }
+            let read = try await peer.command(); try await peer.reply(to: read, mode: "off")
+            let readMode = try await reading.value; XCTAssertEqual(readMode, .off)
+            XCTAssertEqual(peer.commands.count, 1)
+        }
+    }
+
+    func testListCancellationCannotSettlePendingAssignment() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }
+        try await peer.listReady()
+        let change = AssignmentFixtures.change()
+        let saving = Task { try await peer.channel.applyAssignment(change) }
+        _ = try await peer.command(); saving.cancel()
+        do { _ = try await saving.value; XCTFail("Save cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let reading = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+        let read = try await peer.command(); try await peer.listReply(to: read, state: ProjectListFixtures.page([])); _ = try await reading.value
+        do { _ = try await peer.channel.applyAssignment(AssignmentFixtures.change()); XCTFail("Observation reconciled mutation") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let cancelled = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+        _ = try await peer.command(); cancelled.cancel()
+        do { _ = try await cancelled.value; XCTFail("Observation cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+    }
+
+    func testListRejectsBadSelectionsBeforeDeliveryAndMalformedRepliesDisableControl() async throws {
+        for ids in [["invalid"], [ProjectListFixtures.ids[0], ProjectListFixtures.ids[0].uppercased()], ProjectListFixtures.ids + ["ffffffff-ffff-4fff-8fff-ffffffffffff"]] {
+            let peer = ModePeer(context: context); defer { peer.close() }; try await peer.listReady()
+            do { _ = try await peer.channel.readProjectList(projectIDs: ids, expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)); XCTFail("Bad selection delivered") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+            XCTAssertTrue(peer.commands.isEmpty)
+        }
+        for change: [String: Any] in [
+            ["sessionId": UUID().uuidString], ["extra": true],
+            ["state": ProjectListFixtures.page(Array(ProjectListFixtures.ids.reversed()))],
+            ["state": ProjectListFixtures.page(Array(ProjectListFixtures.ids.dropLast()))],
+            ["state": ProjectListFixtures.page(ProjectListFixtures.ids + ["ffffffff-ffff-4fff-8fff-ffffffffffff"])],
+            ["state": ProjectListFixtures.page([])]
+        ] {
+            let peer = ModePeer(context: context); defer { peer.close() }; try await peer.listReady()
+            let reading = Task { try await peer.channel.readProjectList(projectIDs: ProjectListFixtures.ids, expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+            let read = try await peer.command()
+            try await peer.listReply(to: read, state: ProjectListFixtures.page(ProjectListFixtures.ids), changes: change)
+            do { _ = try await reading.value; XCTFail("Unsafe list evidence accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+            do { _ = try await peer.channel.readMode(); XCTFail("Malformed list kept control") } catch { XCTAssertEqual(error as? CompanionError, .routingModeUnavailable) }
+        }
+    }
+
+    func testListReplyCannotCompleteMutationAndStaleTokenDisablesControl() async throws {
+        let mutation = ModePeer(context: context); defer { mutation.close() }; try await mutation.listReady()
+        let saving = Task { try await mutation.channel.applyAssignment(AssignmentFixtures.change()) }
+        let save = try await mutation.command()
+        try await mutation.listReply(to: save, state: ProjectListFixtures.page([]))
+        do { _ = try await saving.value; XCTFail("List reply completed save") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUncertain) }
+        let peer = ModePeer(context: context); defer { peer.close() }; try await peer.listReady()
+        let expected = ProjectListSnapshotToken(runningRevision: String(repeating: "d", count: 64), runningIdentity: String(repeating: "b", count: 64), runningFingerprint: String(repeating: "c", count: 64), mode: .off)
+        let reading = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: expected, deadline: Date().addingTimeInterval(1)) }
+        let read = try await peer.command(); try await peer.listReply(to: read, state: ProjectListFixtures.page([]))
+        do { _ = try await reading.value; XCTFail("Mixed snapshot accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+    }
+
+    func testMalformedRetiredListReplyStillDisablesControl() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }; try await peer.listReady()
+        let old = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+        let retired = try await peer.command(); old.cancel()
+        do { _ = try await old.value; XCTFail("Cancellation accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        let reading = Task { try await peer.channel.readMode() }; _ = try await peer.command()
+        var malformed = ProjectListFixtures.page([]); malformed["extra"] = true
+        try await peer.listReply(to: retired, state: malformed)
+        do { _ = try await reading.value; XCTFail("Malformed retired frame ignored") } catch { XCTAssertEqual(error as? CompanionError, .routingModeUnavailable) }
+    }
+
+    func testUnavailableListReplyDoesNotDisableMutationControl() async throws {
+        let peer = ModePeer(context: context); defer { peer.close() }; try await peer.listReady()
+        for code in ["PROJECT_LIST_CHANGED", "PROJECT_LIST_UNAVAILABLE"] {
+            let reading = Task { try await peer.channel.readProjectList(projectIDs: [], expectedSnapshot: nil, deadline: Date().addingTimeInterval(1)) }
+            let read = try await peer.command()
+            var bytes = try AssignmentFixtures.data(["schemaVersion":1, "type":"project_list_unavailable", "sessionId":peer.session.uuidString, "requestId":read["requestId"]!, "code":code]); bytes.append(0x0a)
+            try await peer.write(bytes)
+            do { _ = try await reading.value; XCTFail("Unavailable page accepted") } catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        }
+        let setting = Task { try await peer.channel.setMode(.on) }
+        let set = try await peer.command(); try await peer.reply(to: set, mode: "on"); let appliedMode = try await setting.value; XCTAssertEqual(appliedMode, .on)
+    }
+
     func testAssignmentRequiresCapabilityAndExactChild() async throws {
         let peer = ModePeer(context: context); defer { peer.close() }
         try await peer.readyAndWait()
@@ -270,7 +389,10 @@ import Darwin
         let changes: [[String: Any]] = [
             ["schemaVersion": 2], ["schemaVersion": true], ["sessionId": UUID().uuidString],
             ["mode": "on"], ["mode": "unknown"], ["extra": "private"],
-            ["capabilities": []], ["capabilities": ["future"]], ["capabilities": ["project_assignments_v1", "project_assignments_v1"]],
+            ["capabilities": []], ["capabilities": ["future"]],
+            ["capabilities": ["project_list_v1"]], ["capabilities": ["project_list_v1", "project_assignments_v1"]],
+            ["capabilities": ["project_assignments_v1", "project_list_v1", "project_list_v1"]],
+            ["capabilities": ["project_assignments_v1", "project_list_v1", "future"]], ["capabilities": ["project_assignments_v1", "project_assignments_v1"]],
             ["context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": "wrong", "listenPort": context.listenPort]],
             ["context": ["configPath": context.configPath, "codexHome": context.codexHome, "providerId": context.providerId, "listenPort": context.listenPort, "extra": true]]
         ]
@@ -401,6 +523,16 @@ import Darwin
         _ = fcntl(routerInput.fileDescriptor, F_SETFL, O_NONBLOCK)
         _ = fcntl(routerOutput.fileDescriptor, F_SETNOSIGPIPE, 1)
         channel = RouterModeChannel(input: input.fileHandleForWriting, output: output.fileHandleForReading, sessionID: session, context: context)
+    }
+    func listReady() async throws {
+        let waiting = Task { try await channel.waitUntilReady() }
+        try await ready(changes: ["capabilities": ["project_assignments_v1", "project_list_v1"]]); _ = try await waiting.value
+    }
+    func listReply(to command: [String: Any], state: [String: Any], changes: [String: Any] = [:]) async throws {
+        var frame: [String: Any] = ["schemaVersion":1, "type":"project_list_state", "sessionId":session.uuidString, "requestId":command["requestId"]!, "state":state]
+        frame.merge(changes) { _, new in new }
+        var bytes = try AssignmentFixtures.data(frame); bytes.append(0x0a)
+        XCTAssertLessThanOrEqual(bytes.count, 16_384); try await write(bytes)
     }
     func assignmentReady() async throws {
         let waiting = Task { try await channel.waitUntilReady() }

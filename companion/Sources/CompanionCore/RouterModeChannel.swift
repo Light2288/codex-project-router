@@ -7,6 +7,8 @@ internal final class RouterModeChannel: @unchecked Sendable {
     private enum Operation: Sendable {
         case ready, read, set(ProjectRoutingMode)
         case readAssignment(String?, String?), setAssignment(AssignmentChange)
+        case readProjectList([String], ProjectListSnapshotToken?)
+        var isProjectList: Bool { if case .readProjectList = self { return true }; return false }
         var isAssignment: Bool {
             switch self { case .readAssignment, .setAssignment: return true; default: return false }
         }
@@ -14,7 +16,7 @@ internal final class RouterModeChannel: @unchecked Sendable {
             switch self { case .set, .setAssignment: return true; default: return false }
         }
     }
-    private enum Value { case mode(ProjectRoutingMode), state(AssignmentState), commit(AssignmentCommit) }
+    private enum Value { case mode(ProjectRoutingMode), state(AssignmentState), commit(AssignmentCommit), list(RunningProjectListPage) }
     private struct Pending {
         let id: UUID
         let operation: Operation
@@ -40,6 +42,7 @@ internal final class RouterModeChannel: @unchecked Sendable {
     private var written = 0
     private var pending: Pending?
     private var assignmentCapable = false
+    private var projectListCapable = false
     private var uncertainAssignment: AssignmentChange?
     private var lastAssignmentID: String?
     private var ready = false
@@ -85,6 +88,10 @@ internal final class RouterModeChannel: @unchecked Sendable {
         guard case .commit(let value) = try await perform(.setAssignment(change)) else { throw CompanionError.assignmentUncertain }
         return value
     }
+    func readProjectList(projectIDs: [String], expectedSnapshot: ProjectListSnapshotToken?, deadline: Date) async throws -> RunningProjectListPage {
+        guard case .list(let page) = try await perform(.readProjectList(projectIDs, expectedSnapshot), deadline: deadline) else { throw CompanionError.assignmentUnavailable }
+        return page
+    }
     func close() {
         queue.async { [self] in
             guard !closed else { return }
@@ -93,10 +100,10 @@ internal final class RouterModeChannel: @unchecked Sendable {
             else { try? output.close() }
         }
     }
-    private func perform(_ operation: Operation) async throws -> Value {
+    private func perform(_ operation: Operation, deadline suppliedDeadline: Date? = nil) async throws -> Value {
         let id = UUID()
         let cancellation = Cancellation()
-        let deadline = DispatchTime.now() + .seconds(5)
+        let deadline = DispatchTime.now() + min(5, max(0, suppliedDeadline?.timeIntervalSinceNow ?? 5))
         return try await withTaskCancellationHandler {
             if Task.isCancelled { cancellation.cancel() }
             return try await withCheckedThrowingContinuation { continuation in
@@ -110,10 +117,15 @@ internal final class RouterModeChannel: @unchecked Sendable {
         }
     }
     private func begin(id: UUID, operation: Operation, continuation: CheckedContinuation<Value, Error>, deadline: DispatchTime, cancelled: Bool) {
-        let unavailable = operation.isAssignment ? CompanionError.assignmentUnavailable : CompanionError.routingModeUnavailable
+        let unavailable = operation.isAssignment || operation.isProjectList ? CompanionError.assignmentUnavailable : CompanionError.routingModeUnavailable
         guard available, !closed, pending == nil else { continuation.resume(throwing: unavailable); return }
         if operation.isAssignment, !assignmentCapable { continuation.resume(throwing: unavailable); return }
+        if operation.isProjectList, !projectListCapable { continuation.resume(throwing: unavailable); return }
         switch operation {
+        case .readProjectList(let ids, let snapshot):
+            guard ProjectListWire.selection(ids), snapshot.map(ProjectListWire.token) ?? true else {
+                continuation.resume(throwing: unavailable); return
+            }
         case .setAssignment(let change):
             guard uncertainAssignment == nil else { continuation.resume(throwing: CompanionError.assignmentUncertain); return }
             guard AssignmentWire.change(change, live: true), change.expectedContext == context,
@@ -148,6 +160,13 @@ internal final class RouterModeChannel: @unchecked Sendable {
             do { frame["expectedContext"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context)) }
             catch { disable(); return }
             frame["projectId"] = projectID as Any? ?? NSNull(); frame["operationId"] = operationID as Any? ?? NSNull()
+        }
+        if case .readProjectList(let ids, let snapshot) = operation {
+            frame["action"] = "get_project_list"; frame["projectIds"] = ids
+            do {
+                frame["expectedContext"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
+                frame["expectedSnapshot"] = try snapshot.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()
+            } catch { disable(); return }
         }
         if case .setAssignment(let change) = operation {
             guard let fields = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(change)) as? [String: Any] else { disable(); return }
@@ -217,6 +236,9 @@ internal final class RouterModeChannel: @unchecked Sendable {
             if type == "assignment_state" || type == "assignment_result" {
                 consumeAssignment(value, type: type); continue
             }
+            if type == "project_list_state" || type == "project_list_unavailable" {
+                consumeProjectList(value, type: type); continue
+            }
             guard let rawMode = value["mode"] as? String, let mode = ProjectRoutingMode(rawValue: rawMode) else { disable(); return }
             if type == "ready" {
                 let original: Set<String> = ["schemaVersion", "type", "sessionId", "context", "mode"]
@@ -224,8 +246,9 @@ internal final class RouterModeChannel: @unchecked Sendable {
                 guard !ready, keys == original || keys == original.union(["capabilities"]), mode == .off,
                       validContext(value["context"]) else { disable(); return }
                 if keys.contains("capabilities") {
-                    guard value["capabilities"] as? [String] == ["project_assignments_v1"] else { disable(); return }
-                    assignmentCapable = true
+                    guard let capabilities = value["capabilities"] as? [String],
+                          capabilities == ["project_assignments_v1"] || capabilities == ["project_assignments_v1", "project_list_v1"] else { disable(); return }
+                    assignmentCapable = true; projectListCapable = capabilities.count == 2
                 }
                 ready = true
                 if let pending, case .ready = pending.operation {
@@ -239,7 +262,7 @@ internal final class RouterModeChannel: @unchecked Sendable {
                 guard let pending, requestID == wireRequestID(pending) else { continue }
                 guard DispatchTime.now() < pending.deadline else { retire(id: pending.id); continue }
                 if case .ready = pending.operation { disable(); return }
-                guard !pending.operation.isAssignment else { disable(); return }
+                guard !pending.operation.isAssignment, !pending.operation.isProjectList else { disable(); return }
                 if case .set(let expected) = pending.operation, expected != mode { disable(); return }
                 guard outgoing.isEmpty else { disable(); return }
                 if case .read = pending.operation { needsReconciliation = false }
@@ -310,6 +333,27 @@ internal final class RouterModeChannel: @unchecked Sendable {
         default: disable()
         }
     }
+    private func consumeProjectList(_ value: [String: Any], type: String) {
+        let fields: Set<String> = ["schemaVersion", "type", "sessionId", "requestId"]
+        guard ready, projectListCapable,
+              Set(value.keys) == fields.union(type == "project_list_state" ? ["state"] : ["code"]),
+              let requestID = value["requestId"] as? String, AssignmentWire.uuid(requestID) else { disable(); return }
+        let page: RunningProjectListPage?
+        if type == "project_list_state" {
+            guard let decoded = ProjectListWire.page(value["state"]!, context: context, projectIDs: nil, expectedSnapshot: nil) else { disable(); return }
+            page = decoded
+        } else {
+            guard let code = value["code"] as? String, ["PROJECT_LIST_CHANGED", "PROJECT_LIST_UNAVAILABLE"].contains(code) else { disable(); return }
+            page = nil
+        }
+        // Validate retired frames fully, but grant evidence only to the exact pending read.
+        guard let pending, requestID == wireRequestID(pending) else { return }
+        guard case .readProjectList(let ids, let snapshot) = pending.operation, outgoing.isEmpty else { disable(); return }
+        guard DispatchTime.now() < pending.deadline else { retire(id: pending.id); return }
+        guard let page else { complete(.failure(CompanionError.assignmentUnavailable)); return }
+        guard page.entries.map(\.projectId) == ids, snapshot.map({ page.snapshot == $0 }) ?? true else { disable(); return }
+        complete(.success(.list(page)))
+    }
     private func wireRequestID(_ pending: Pending) -> String {
         if case .setAssignment(let change) = pending.operation { return change.operationId }
         return pending.id.uuidString
@@ -348,6 +392,7 @@ internal final class RouterModeChannel: @unchecked Sendable {
         if case .setAssignment(let change) = operation { uncertainAssignment = change }
     }
     private func failure(_ operation: Operation) -> CompanionError {
+        if operation.isProjectList { return .assignmentUnavailable }
         if operation.isAssignment { return operation.isMutation ? .assignmentUncertain : .assignmentUnavailable }
         return operation.isMutation ? .routingModeUncertain : .routingModeUnavailable
     }
