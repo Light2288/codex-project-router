@@ -59,6 +59,8 @@ if os.path.basename(sys.argv[1]) == 'managed-serve.js':
     frame = dict(schemaVersion=1, type='ready', sessionId=sys.argv[5],
                  context=dict(configPath=sys.argv[3], codexHome=cfg['home'], providerId='fixture', listenPort=cfg['port']), mode='off')
     if mode != 'modeOnlyReady': frame['capabilities'] = ['project_assignments_v1']
+    if mode.startswith('list'): frame['capabilities'] = ['project_assignments_v1', 'project_list_v1']
+    list_count = 0
     assignment_change = None
     if mode == 'unsupportedReady': frame['schemaVersion'] = 2
     if mode == 'wrongContextReady': frame['context']['providerId'] = 'wrong'
@@ -81,6 +83,23 @@ if os.path.basename(sys.argv[1]) == 'managed-serve.js':
                 line, input_bytes = input_bytes.split(b'\n', 1)
                 command = json.loads(line)
                 with open(os.path.join(root, 'commands'), 'a') as f: f.write(json.dumps(command) + '\n')
+                if command['action'] == 'get_project_list':
+                    list_count += 1
+                    if mode == 'listReadExit': sys.exit(0)
+                    if mode == 'listTimeout': continue
+                    if mode == 'listSlow': time.sleep(.065)
+                    default = dict(id='11111111-1111-4111-8111-111111111111', displayName='Running default')
+                    custom = dict(id='22222222-2222-4222-8222-222222222222', displayName='Running custom')
+                    if list_count > 1:
+                        if mode == 'listDefaultNameChanged': default['displayName'] = 'Changed default'
+                        if mode == 'listCustomNameChanged': custom['displayName'] = 'Changed custom'
+                    context = dict(frame['context'])
+                    if mode == 'listContextChanged' and list_count > 1: context['providerId'] = 'other'
+                    state = dict(context=context, runningRevision=('f' if mode == 'listChanged' and list_count > 1 else 'a')*64,
+                                 runningIdentity='b'*64, runningFingerprint='e'*64, mode=current_mode, defaultAccount=default,
+                                 entries=[dict(projectId=project, assignment=dict(kind='override', account=custom, routeAlias='custom')) for project in command['projectIds']])
+                    reply(dict(schemaVersion=1, type='project_list_state', sessionId=sys.argv[5], requestId=command['requestId'], state=state))
+                    continue
                 if command['action'] in ['get_assignment', 'set_assignment']:
                     context = frame['context']
                     if command['action'] == 'set_assignment':

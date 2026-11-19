@@ -91,6 +91,25 @@ public struct RunningProjectListObservation: Equatable, Sendable {
     }
 }
 
+/// Runtime display evidence with all comparison metadata removed.
+public struct ProjectListRunningAssignments: Equatable, Sendable {
+    public let mode: ProjectRoutingMode
+    public let defaultAccount: AccountSummary
+    public let assignments: [String: AssignmentSummary]
+    public init(mode: ProjectRoutingMode, defaultAccount: AccountSummary, assignments: [String: AssignmentSummary]) {
+        self.mode = mode; self.defaultAccount = defaultAccount; self.assignments = assignments
+    }
+}
+
+public enum ProjectListRuntimeState: Equatable, Sendable {
+    case unconfirmed, notRunning
+    case observed(ProjectListRunningAssignments)
+}
+
+@MainActor public protocol ProjectListBackend: AnyObject {
+    func readRunningProjectList(_ child: OwnedRouter, projectIDs: [String], deadline: Date) async throws -> RunningProjectListObservation
+}
+
 internal enum ProjectListWire {
     static func selection(_ ids: [String]) -> Bool {
         ids.count <= 8 && ids.allSatisfy(AssignmentWire.uuid) && Set(ids.map { $0.lowercased() }).count == ids.count

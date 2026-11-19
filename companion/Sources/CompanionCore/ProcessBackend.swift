@@ -98,7 +98,7 @@ private final class RunningCommand {
     func discard() { stdout.discard(); stderr.discard() }
 }
 
-@MainActor public final class ProcessBackend: CompanionBackend, AccountSetupBackend, ProjectAssignmentBackend {
+@MainActor public final class ProcessBackend: CompanionBackend, AccountSetupBackend, ProjectAssignmentBackend, ProjectListBackend {
     public var mutationRequiresReconciliation: Bool { mutationInFlight || needsReconciliation }
     public private(set) var uncertainSetupOperationID: String?
     public var setupHelperIsRunning: Bool { uncertainSetupOperationID != nil && mutationInFlight }
@@ -448,6 +448,45 @@ private final class RunningCommand {
         guard let tracked = owned[child.id], tracked.child === child, tracked.child.process === child.process,
               tracked.child.context == child.context, child.process.isRunning else { throw CompanionError.unownedChild }
         return tracked.channel
+    }
+    public func readRunningProjectList(_ child: OwnedRouter, projectIDs: [String], deadline: Date) async throws -> RunningProjectListObservation {
+        let channel = try modeChannel(for: child)
+        guard projectIDs.allSatisfy(AssignmentWire.uuid) else { throw CompanionError.assignmentUnavailable }
+        var seen = Set<String>()
+        let ids = projectIDs.filter { seen.insert($0.lowercased()).inserted }
+        // The budget belongs to the collection, including every continuation page.
+        let deadline = min(deadline, Date().addingTimeInterval(1))
+        var first: RunningProjectListPage?
+        var assignments: [String: AssignmentSummary] = [:]
+        var names: [String: String] = [:]
+        let offsets = ids.isEmpty ? [0] : Array(stride(from: 0, to: ids.count, by: 8))
+        for offset in offsets {
+            guard try modeChannel(for: child) === channel else { throw CompanionError.unownedChild }
+            guard !Task.isCancelled, Date() < deadline else { throw CompanionError.assignmentUnavailable }
+            let page: RunningProjectListPage
+            do {
+                page = try await channel.readProjectList(projectIDs: Array(ids.dropFirst(offset).prefix(8)), expectedSnapshot: first?.snapshot, deadline: deadline)
+            } catch {
+                _ = try modeChannel(for: child)
+                throw error
+            }
+            guard try modeChannel(for: child) === channel else { throw CompanionError.unownedChild }
+            guard !Task.isCancelled, Date() < deadline, page.context == child.context,
+                  first.map({ $0.snapshot == page.snapshot && $0.defaultAccount == page.defaultAccount }) ?? true else {
+                throw CompanionError.assignmentUnavailable
+            }
+            if first == nil { first = page }
+            for account in [page.defaultAccount] + page.entries.compactMap({ $0.assignment.account }) {
+                let id = account.id.lowercased()
+                guard names[id].map({ $0 == account.displayName }) ?? true else { throw CompanionError.assignmentUnavailable }
+                names[id] = account.displayName
+            }
+            for entry in page.entries {
+                guard assignments.updateValue(entry.assignment, forKey: entry.projectId) == nil else { throw CompanionError.assignmentUnavailable }
+            }
+        }
+        guard let first, Set(assignments.keys) == Set(ids) else { throw CompanionError.assignmentUnavailable }
+        return RunningProjectListObservation(context: first.context, snapshot: first.snapshot, defaultAccount: first.defaultAccount, assignments: assignments)
     }
     public func readAssignment(_ child: OwnedRouter, projectID: String?, operationID: String?) async throws -> AssignmentState {
         let channel = try modeChannel(for: child)
