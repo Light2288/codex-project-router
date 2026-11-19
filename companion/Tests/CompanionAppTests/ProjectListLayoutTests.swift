@@ -142,6 +142,35 @@ import ApplicationServices
         }
     }
 
+    // Unknown chat evidence must remain neutral under known saved policy; unknown policy needs visible attention.
+    func testUnknownActivityAndUnclassifiablePolicyRemainDistinct() async throws {
+        try await withProjectListFixture { controller, backend in
+            var known = Self.entry(1, "Synthetic known policy, unknown chats", kind: "override", account: backend.work)
+            known.chatActivity = .init(state: .unknown, reason: .missingRecord)
+            var unknown = Self.entry(2, "Synthetic unclassified policy")
+            unknown.assignmentKind = nil
+            unknown.chatActivity = .init(state: .unknown, reason: .unsupportedMetadata)
+            backend.snapshot.catalog.entries = [known, unknown]
+            await controller.refresh()
+            let host = NativeProjectHost(ScrollView {
+                ProjectListView(controller: controller, editingProjectID: nil, canOpenEditor: true) { _ in }.padding(20)
+            })
+            defer { host.close() }
+            await host.settle()
+            XCTAssertTrue(host.text.contains("Needs attention"))
+            XCTAssertTrue(host.text.contains("Custom account"))
+            XCTAssertFalse(host.text.contains("No active chats ("))
+            XCTAssertEqual(host.elements().filter { $0.accessibilityValue() as? String == "Chat status unknown" }.count, 2)
+            XCTAssertTrue(host.text.contains("Saved assignment policy is unavailable. Refresh to inspect it."))
+            XCTAssertEqual(host.matches("project-edit-\(Self.id(1))").count, 1)
+            XCTAssertEqual(host.matches("project-edit-\(Self.id(2))").count, 1)
+            try host.press("project-details-\(Self.id(1))"); await host.settle()
+            XCTAssertTrue(host.text.contains("A referenced chat record is missing. Its archive state cannot be confirmed."))
+            try host.snapshot("unknown-chat-and-policy-states")
+            XCTAssertTrue(backend.changes.isEmpty)
+        }
+    }
+
     static func id(_ index: Int) -> String { String(format: "11111111-1111-4111-8111-%012d", index) }
     static func entry(_ index: Int, _ name: String, kind: String = "inherited", inactive: Bool = false, account: AccountSummary? = nil) -> Inspection.Entry {
         .init(id: id(index), name: name, routeAlias: nil, routeState: "unmapped", account: account, assignmentKind: kind,
