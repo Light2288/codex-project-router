@@ -153,6 +153,20 @@ test("normalized duplicate identities and projectless contradictions are rejecte
   assert.deepEqual(classify(duplicateProjects).get(T1), unknown("conflicting_membership"));
 });
 
+for (const malformedFirst of [false, true]) {
+  test(`malformed duplicate assignment conflicts with valid membership (${malformedFirst ? "malformed first" : "valid first"})`, async t => {
+    const f = await projectActivityFixture(t);
+    const snapshot = f.activitySnapshot();
+    const valid = [T1, { projectKind: "local", projectId: P1 }];
+    const malformed = [T1.toUpperCase(), { projectKind: "local", projectId: "invalid" }];
+    snapshot.state["thread-project-assignments"] = Object.fromEntries(
+      malformedFirst ? [malformed, valid] : [valid, malformed],
+    );
+    snapshot.threads[0].archived = 0;
+    assert.deepEqual(classify(snapshot).get(P1), unknown("conflicting_membership"));
+  });
+}
+
 test("remote missing and conflicting host evidence cannot classify its membership", async t => {
   const f = await projectActivityFixture(t);
   for (const host of ["remote:synthetic", null, undefined]) {

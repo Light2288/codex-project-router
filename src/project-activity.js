@@ -120,11 +120,15 @@ export function classifyProjectActivitySnapshot({ state, codexHome, threads, spa
     }
   }
 
-  const memberships = new Map();
+  const memberships = new Map(), assignmentThreadKeys = new Set(), duplicateAssignments = new Set();
   const assignments = state["thread-project-assignments"];
   if (!object(assignments)) barrier("incomplete_metadata");
   else for (const [rawThread, value] of Object.entries(assignments)) {
     const thread = identity(rawThread), project = object(value) ? identity(value.projectId) : null;
+    if (thread) {
+      if (assignmentThreadKeys.has(thread)) duplicateAssignments.add(thread);
+      assignmentThreadKeys.add(thread);
+    }
     if (!thread || !project) {
       if (project) uncertain(project, "unsupported_metadata");
       else barrier("unsupported_metadata");
@@ -133,9 +137,10 @@ export function classifyProjectActivitySnapshot({ state, codexHome, threads, spa
     const claims = memberships.get(thread) ?? [];
     claims.push({ project, supported: value.projectKind === "local" });
     memberships.set(thread, claims);
-    if (claims.length > 1) for (const claim of claims) uncertain(claim.project, "conflicting_membership", true);
     if (value.projectKind !== "local") uncertain(project, "unsupported_metadata");
   }
+  for (const thread of duplicateAssignments)
+    for (const claim of memberships.get(thread) ?? []) uncertain(claim.project, "conflicting_membership", true);
   const affectThread = (thread, reason, conflict = false) => {
     const claims = memberships.get(thread);
     if (claims?.length) for (const claim of claims) uncertain(claim.project, reason, conflict);
