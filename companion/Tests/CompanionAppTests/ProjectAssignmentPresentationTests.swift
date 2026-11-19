@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import AppKit
 @testable import CompanionCore
 @testable import CodexProjectRouter
 
@@ -24,6 +26,93 @@ import XCTest
         let project = backend.snapshot.catalog.entries[0]
         _ = await controller.loadAssignment(projectID: project.id)
         try await body(controller, backend, project)
+    }
+    // Recreating the list or moving sheet ownership into a row would reset this draft or repeat its task.
+    func testSheetSurvivesRefreshSaveMovementAndDiscoveryFailure() async throws {
+        try await withEditor(live: false) { controller, backend, project in
+            backend.snapshot.catalog.entries[0].chatActivity = .init(state: .noActiveChats)
+            await controller.refresh()
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            defer { host.close() }
+            await host.settle()
+            try host.press("project-section-noActive")
+            await host.settle()
+            try host.press("project-edit-\(project.id)")
+            await host.settle()
+            let sheet = try XCTUnwrap(host.window.sheets.first)
+            let picker = try XCTUnwrap(host.elements(in: sheet).first { $0.accessibilityRole() == .popUpButton })
+            XCTAssertEqual(picker.accessibilityValue() as? String, "Use default")
+            backend.snapshot.catalog.entries[0].chatActivity = .init(state: .unarchived)
+            await controller.refresh()
+            await host.settle()
+            XCTAssertTrue(host.window.sheets.first === sheet)
+            XCTAssertTrue(host.text.contains("List position updates when editing closes."))
+            XCTAssertEqual(picker.accessibilityValue() as? String, "Use default")
+            _ = try XCTUnwrap(picker.accessibilityValue() as? String == "Use default" ? true : nil)
+            backend.holdSave = true
+            try host.press(title: "Save", in: sheet)
+            await backend.waitForSave()
+            XCTAssertEqual(backend.changes.count, 1)
+            backend.releaseSave()
+            await host.settle()
+            XCTAssertTrue(host.window.sheets.first === sheet)
+            XCTAssertEqual(backend.changes.count, 1)
+            // A later externally changed saved policy must not silently rebase the private sheet draft.
+            backend.savedSummary = .init(kind: "override", account: backend.work)
+            backend.snapshot.catalog.entries[0].assignmentKind = "override"
+            backend.snapshot.catalog.entries[0].account = backend.work
+            backend.snapshot.configurationRevision = String(repeating: "9", count: 64)
+            await controller.refresh(); await host.settle()
+            XCTAssertEqual(picker.accessibilityValue() as? String, "Use default")
+            XCTAssertEqual(controller.selectedAssignment?.savedAssignment?.account?.id, backend.work.id)
+            backend.snapshot.catalog.state = "unavailable"
+            await controller.refresh()
+            await host.settle()
+            XCTAssertTrue(host.window.sheets.first === sheet)
+            XCTAssertEqual(picker.accessibilityValue() as? String, "Use default")
+            let save = try XCTUnwrap(host.elements(in: sheet).first { $0.accessibilityTitle() == "Save" || $0.accessibilityLabel() == "Save" })
+            XCTAssertFalse(save.isAccessibilityEnabled())
+            XCTAssertFalse(controller.canEditAssignment(project))
+            XCTAssertEqual(backend.changes.count, 1)
+            try host.press(title: "Close", in: sheet)
+            await host.settle()
+            XCTAssertTrue(host.window.sheets.isEmpty)
+            backend.snapshot.catalog.state = "ready"
+            await controller.refresh(); await host.settle()
+            XCTAssertTrue(host.text.contains("Custom account"))
+            XCTAssertFalse(host.text.contains("No active chats ("))
+            XCTAssertFalse(host.text.contains("List position updates when editing closes."))
+        }
+    }
+    // A repaired editing preview must remain mounted even when its issue clears, without expanding unrelated rows.
+    func testRepairedEditingPreviewStaysVisibleUntilSheetDismissal() async throws {
+        try await withEditor(live: false) { controller, backend, project in
+            backend.snapshot.catalog.entries[0].chatActivity = .init(state: .noActiveChats)
+            backend.snapshot.catalog.entries[0].assignmentKind = "target_missing"
+            backend.snapshot.catalog.entries[0].account = nil
+            backend.snapshot.catalog.entries.append(ProjectListLayoutTests.entry(2, "Unrelated archived", inactive: true))
+            backend.savedSummary = .init(kind: "target_missing")
+            await controller.refresh()
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            defer { host.close() }
+            await host.settle()
+            try host.press("project-edit-\(project.id)"); await host.settle()
+            let sheet = try XCTUnwrap(host.window.sheets.first)
+            backend.snapshot.catalog.entries[0].assignmentKind = "inherited"
+            backend.savedSummary = .init(kind: "inherited", account: backend.personal)
+            await controller.refresh(); await host.settle()
+            XCTAssertNotNil(host.find("project-edit-\(project.id)"))
+            XCTAssertNil(host.find("project-edit-\(ProjectListLayoutTests.id(2))"))
+            XCTAssertFalse(host.text.contains("Missing account target. Choose an existing account or Use default."))
+            XCTAssertTrue(host.text.contains("List position updates when editing closes."))
+            let picker = try XCTUnwrap(host.elements(in: sheet).first { $0.accessibilityRole() == .popUpButton })
+            XCTAssertEqual(picker.accessibilityValue() as? String, "Missing account target — choose a repair")
+            try host.press(title: "Close", in: sheet); await host.settle()
+            XCTAssertNil(host.find("project-edit-\(project.id)"))
+            XCTAssertNil(host.find("project-edit-\(ProjectListLayoutTests.id(2))"))
+            XCTAssertTrue(host.text.contains("No active chats (2)"))
+            XCTAssertTrue(backend.changes.isEmpty)
+        }
     }
     func testFreshSetupRequiredEditorExplainsUnavailableWithoutConflict() async throws {
         try await withEditor(live: false, setupRequired: true) { controller, backend, project in
@@ -221,7 +310,6 @@ import XCTest
             XCTAssertFalse(display.canSave)
             XCTAssertTrue(display.warning?.contains("differ") == true)
             XCTAssertFalse(display.savedText.contains("private-alias")); XCTAssertFalse(display.runningText.contains("private-alias"))
-            XCTAssertEqual(ControlsPresentation(controller: controller).assignment(for: project), display.savedText + "\n" + display.runningText)
         }
     }
     func testConfiguredOnlyWarningAndMissingTargetRepair() async throws {
@@ -318,7 +406,7 @@ import XCTest
     }
 }
 
-@MainActor private final class AssignmentDisplayBackend: CompanionBackend, ProjectAssignmentBackend {
+@MainActor final class AssignmentDisplayBackend: CompanionBackend, ProjectAssignmentBackend {
     var onChildExit: ((UUID, Int32) -> Void)?
     var mutationRequiresReconciliation = false
     let context: ActivationContext
@@ -408,9 +496,9 @@ import XCTest
     func waitForSave() async { if !saving { await withCheckedContinuation { saveStarted = $0 } } }
     func releaseSave() { saveContinuation?.resume(); saveContinuation = nil; holdSave = false }
 }
-private final class AssignmentDisplayProcess: Process, @unchecked Sendable { override var isRunning: Bool { true } }
+final class AssignmentDisplayProcess: Process, @unchecked Sendable { override var isRunning: Bool { true } }
 
-@MainActor private final class AssignmentDisplayBarrier {
+@MainActor final class AssignmentDisplayBarrier {
     private var continuation: CheckedContinuation<Void, Never>?
     private var entered: CheckedContinuation<Void, Never>?
     private var isEntered = false

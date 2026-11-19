@@ -42,31 +42,6 @@ import CompanionCore
         default: return controller.selectedConfiguration == nil || controller.inspection?.configuration.state == "missing" ? "Create a private account configuration from the compatible direct provider, or select an existing configuration to import." : nil
         }
     }
-    func assignment(for project: Inspection.Entry) -> String {
-        if controller.inspection?.configuration.mode == "accounts" {
-            let assignment = AssignmentPresentation(controller: controller, project: project)
-            return assignment.savedText + "\n" + (pendingRoutingMode == nil ? assignment.runningText : "Running assignment unconfirmed")
-        }
-        if project.routeAlias != nil {
-            if controller.inspection?.configuration.mode == "legacy" { return "Global credential; saved label retained" }
-            if controller.inspection?.configuration.mode == "credential", pendingRoutingMode == nil {
-                switch controller.projectRoutingStatus {
-                case .known(.on): return "Override saved (running assignment unconfirmed)"
-                case .known(.off): return "Override saved; inactive while Off"
-                default: break
-                }
-            }
-            return "Override saved (routing unconfirmed)"
-        }
-        if pendingRoutingMode == nil {
-            switch controller.projectRoutingStatus {
-            case .known(.on): return "Global (inherited)"
-            case .known(.off): return "Global (routing Off)"
-            default: break
-            }
-        }
-        return "Global (inheritance policy; routing unconfirmed)"
-    }
     var assignmentGuidance: String? {
         if controller.pendingAssignmentOperationID != nil && controller.busy {
             return "Assignment save in progress. The app keeps tracking it if the editor closes."
@@ -132,16 +107,6 @@ import CompanionCore
         }
         return "After possible routed use, restore direct and confirm a direct response before Stop or Quit. Closing this window keeps the app and owned router running."
     }
-    var catalog: String {
-        controller.inspection?.catalog.state == "ready" ? "Current local project catalog" : "Catalog unavailable. Refresh to retry."
-    }
-    func projects(matching search: String) -> [Inspection.Entry] {
-        guard controller.inspection?.catalog.state == "ready" else { return [] }
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (controller.inspection?.catalog.entries ?? []).filter {
-            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || ($0.routeAlias?.localizedCaseInsensitiveContains(query) ?? false) || ($0.account?.displayName.localizedCaseInsensitiveContains(query) ?? false)
-        }
-    }
     static func refreshInterval(windowVisible: Bool) -> UInt64 { windowVisible ? 2 : 5 }
 }
 
@@ -162,7 +127,7 @@ struct ControlsDisclosureState {
     var accountSetup: AccountSetupController? = nil
     @State private var accountSheet: AccountSetupIntent?
     @State private var assignmentProject: Inspection.Entry?
-    @State private var search = ""
+    @State private var editingProjectID: String?
     @State private var showActivationNotice = false
     @State private var disclosures = ControlsDisclosureState()
     @State private var pendingRoutingMode: ProjectRoutingMode?
@@ -193,27 +158,10 @@ struct ControlsDisclosureState {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         routingSection
-                        Text("Projects").font(.headline)
-                        TextField("Search projects or accounts", text: $search).textFieldStyle(.roundedBorder)
-                        Text(display.catalog).font(.caption).foregroundStyle(.secondary)
-                        ForEach(display.projects(matching: search), id: \.id) { project in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
-                                    Text(project.name.isEmpty ? "Unresolved project" : project.name).fontWeight(.medium)
-                                    Spacer()
-                                    if controller.inspection?.configuration.mode == "accounts" {
-                                        Button("Edit assignment…") { assignmentProject = project }
-                                            .disabled(controller.busy || accountSheet != nil)
-                                    }
-                                }
-                                Text(display.assignment(for: project)).foregroundStyle(.secondary)
-                                if project.routeState == "target_missing" { Text("Route target missing").font(.caption).foregroundStyle(.orange) }
-                                if project.routeState == "catalog_missing" { Text("Saved project absent from current discovery").font(.caption).foregroundStyle(.orange) }
-                            }.padding(.vertical, 4)
-                            Divider()
-                        }
-                        if display.projects(matching: search).isEmpty && controller.inspection?.catalog.state == "ready" {
-                            Text(search.isEmpty ? "No local projects in this catalog." : "No matching projects.").foregroundStyle(.secondary)
+                        ProjectListView(controller: controller, editingProjectID: editingProjectID,
+                                        canOpenEditor: accountSheet == nil) { project in
+                            editingProjectID = project.id
+                            assignmentProject = project
                         }
                         Divider()
                         DisclosureGroup("Advanced", isExpanded: $disclosures.advancedExpanded) {
@@ -238,7 +186,8 @@ struct ControlsDisclosureState {
         .sheet(item: $accountSheet) { intent in
             if let accountSetup { AccountSetupView(router: controller, setup: accountSetup, intent: intent) }
         }
-        .sheet(isPresented: Binding(get: { assignmentProject != nil }, set: { if !$0 { assignmentProject = nil } })) {
+        .sheet(isPresented: Binding(get: { assignmentProject != nil }, set: { if !$0 { assignmentProject = nil } }),
+               onDismiss: { editingProjectID = nil }) {
             if let project = assignmentProject { ProjectAssignmentView(controller: controller, project: project) }
         }
         .alert("Activate routing for every chat using this provider?", isPresented: $showActivationNotice) {
@@ -329,15 +278,6 @@ struct ControlsDisclosureState {
     }
     private var advancedContents: some View {
         VStack(alignment: .leading, spacing: 14) {
-            DisclosureGroup("Project assignment details") {
-                ForEach(display.projects(matching: search), id: \.id) { project in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(project.name.isEmpty ? "Unresolved project" : project.name)
-                        Text("Project ID: \(project.id)")
-                        if let alias = project.routeAlias { Text("Saved route alias: \(alias)") }
-                    }.font(.caption.monospaced()).textSelection(.enabled)
-                }
-            }
             DisclosureGroup("Setup", isExpanded: $disclosures.setupExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(display.configuration).font(.headline)

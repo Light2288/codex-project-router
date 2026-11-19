@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 import CompanionCore
 @testable import CodexProjectRouter
 
@@ -73,44 +74,6 @@ import CompanionCore
             XCTAssertFalse(controller.canSetProjectRouting)
         }
     }
-    func testAssignmentPresentationKeepsSuspendedAndMissingOverrides() async throws {
-        // Off suspends saved overrides without erasing them; discovery never creates an assignment.
-        try await withPendingDirectController { controller, backend, store in
-            backend.snapshot.configuration.mode = "credential"
-            backend.routingError = nil
-            let savedOverride = Inspection.Entry(id: "saved", name: "Saved", routeAlias: "route-a", routeState: "mapped")
-            let missing = Inspection.Entry(id: "missing", name: "Missing", routeAlias: "route-gone", routeState: "target_missing")
-            let stale = Inspection.Entry(id: "stale", name: "Stale", routeAlias: "route-stale", routeState: "catalog_missing")
-            let discovered = Inspection.Entry(id: "new", name: "New project", routeAlias: nil, routeState: "unmapped")
-            backend.snapshot.catalog.entries = [savedOverride, missing, stale, discovered]
-            await controller.start()
-            let bytes = try Data(contentsOf: store.directory.appendingPathComponent("state.json"))
-            var display = ControlsPresentation(controller: controller)
-            XCTAssertEqual(display.assignment(for: savedOverride), "Override saved; inactive while Off")
-            XCTAssertEqual(display.assignment(for: discovered), "Global (routing Off)")
-            XCTAssertEqual(display.projects(matching: "").map(\.routeState), ["mapped", "target_missing", "catalog_missing", "unmapped"])
-            XCTAssertEqual(display.assignment(for: missing), "Override saved; inactive while Off")
-            await controller.setProjectRouting(.on)
-            display = ControlsPresentation(controller: controller)
-            XCTAssertEqual(display.assignment(for: savedOverride), "Override saved (running assignment unconfirmed)")
-            XCTAssertEqual(display.assignment(for: discovered), "Global (inherited)")
-            let controls = backend.controlCount, mutations = backend.modeSetCount
-            for _ in 0..<3 { _ = display.projects(matching: "new"); _ = display.assignment(for: discovered) }
-            XCTAssertNil(display.projects(matching: "new").first?.routeAlias)
-            XCTAssertEqual(backend.controlCount, controls)
-            XCTAssertEqual(backend.modeSetCount, mutations)
-            XCTAssertEqual(try Data(contentsOf: store.directory.appendingPathComponent("state.json")), bytes)
-            backend.routingError = CompanionError.routingModeUncertain
-            await controller.refresh()
-            display = ControlsPresentation(controller: controller)
-            XCTAssertEqual(display.assignment(for: savedOverride), "Override saved (routing unconfirmed)")
-            XCTAssertEqual(display.assignment(for: discovered), "Global (inheritance policy; routing unconfirmed)")
-            backend.snapshot.catalog.state = "unavailable"
-            await controller.refresh()
-            XCTAssertTrue(display.projects(matching: "").isEmpty)
-            XCTAssertEqual(display.catalog, "Catalog unavailable. Refresh to retry.")
-        }
-    }
     func testAccountPresentationPreservesQuitGuidance() async throws {
         // Account names and inherited labels must coexist with all existing recovery destinations.
         try await withPendingDirectController { controller, backend, _ in
@@ -119,15 +82,7 @@ import CompanionCore
             let before = QuitGuidance.current(for: controller)
             let display = ControlsPresentation(controller: controller)
             XCTAssertEqual(display.globalAccount, "Default account: Personal")
-            let inherited = Inspection.Entry(id: "a", name: "A", routeAlias: "old-label", routeState: "mapped", account: .init(id: "default", displayName: "Personal"), assignmentKind: "legacy_inherited")
-            let explicit = Inspection.Entry(id: "b", name: "B", routeAlias: "work", routeState: "mapped", account: .init(id: "work", displayName: "Work"), assignmentKind: "override")
-            XCTAssertTrue(display.assignment(for: inherited).contains("Inherited label retained"))
-            XCTAssertFalse(display.assignment(for: inherited).contains("old-label"))
-            XCTAssertFalse(display.assignment(for: inherited).contains("Override"))
-            XCTAssertTrue(display.assignment(for: explicit).contains("Work"))
-            XCTAssertTrue(display.assignment(for: explicit).contains("Saved"))
             XCTAssertEqual(QuitGuidance.current(for: controller), before)
-            XCTAssertEqual(display.projects(matching: "").count, 0)
             XCTAssertNil(controller.ownedRouter)
             XCTAssertEqual(backend.startCount, 0); XCTAssertEqual(backend.controlCount, 0)
         }
@@ -190,38 +145,6 @@ import CompanionCore
             XCTAssertEqual(backend.controlCount, 0)
             XCTAssertEqual(backend.modeSetCount, 0)
             XCTAssertEqual(backend.stopCount, 0)
-        }
-    }
-    func testRoutingOnDoesNotProveSavedAccountOverrideIsRunning() async throws {
-        // Mode-only evidence cannot attest to the saved account snapshot in the child.
-        try await withPendingDirectController { controller, backend, _ in
-            backend.routingError = nil
-            let account = AccountSummary(id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", displayName: "Saved account")
-            let project = Inspection.Entry(id: "11111111-1111-4111-8111-111111111111", name: "Project", routeAlias: "technical-alias", routeState: "mapped", account: account, assignmentKind: "override")
-            backend.snapshot.catalog.entries = [project]
-            await controller.start(); await controller.setProjectRouting(.on)
-            let text = ControlsPresentation(controller: controller).assignment(for: project)
-            XCTAssertTrue(text.contains("Saved: Override — Saved account"))
-            XCTAssertTrue(text.contains("Running assignment unconfirmed"))
-            XCTAssertFalse(text.contains("active")); XCTAssertFalse(text.contains("technical-alias"))
-        }
-    }
-    func testLegacyAliasesAreNotAccountNames() async throws {
-        // A legacy alias cannot be described as choosing an independent provider account.
-        try await withPendingDirectController { controller, backend, _ in
-            backend.routingError = nil
-            await controller.start()
-            backend.snapshot.configuration.mode = "legacy"
-            backend.snapshot.configuration.setupState = "migration_required"
-            await controller.refresh()
-            let project = Inspection.Entry(id: "legacy", name: "Legacy", routeAlias: "route-a", routeState: "mapped")
-            for mode in [ProjectRoutingMode.off, .on] {
-                await controller.setProjectRouting(mode)
-                let display = ControlsPresentation(controller: controller)
-                XCTAssertEqual(display.globalAccount, "Existing global provider account")
-                XCTAssertEqual(display.assignment(for: project), "Global credential; saved label retained")
-                XCTAssertEqual(display.confirmation, "Not confirmed")
-            }
         }
     }
     func testIdlePendingGuidanceDoesNotDemandConfirmationToQuit() async throws {
@@ -309,14 +232,10 @@ import CompanionCore
             XCTAssertEqual(display.confirmation, "Not confirmed")
             XCTAssertTrue(controller.canSelectConfiguration)
             XCTAssertFalse(controller.canStart)
-            XCTAssertEqual(display.projects(matching: "alpha").map(\.id), ["project-a"])
-            XCTAssertEqual(display.projects(matching: "route-a").map(\.id), ["project-a"])
-            XCTAssertTrue(display.projects(matching: "missing").isEmpty)
             backend.snapshot.configuration.state = "invalid"
             backend.snapshot.provider.proxyReady = true
             await controller.refresh()
             let invalid = ControlsPresentation(controller: controller)
-            XCTAssertEqual(invalid.projects(matching: "").count, 1)
             XCTAssertEqual(invalid.ownership, "External listener; never owned")
             XCTAssertEqual(invalid.readiness, "Matching listener ready")
             XCTAssertFalse(controller.canStop)
@@ -325,14 +244,29 @@ import CompanionCore
             XCTAssertFalse(controller.canConfirmDirectResponse)
         }
     }
-    func testUnavailableCatalogNeverPresentsOldRowsAsFresh() async throws {
-        try await withController { controller, backend in
+    // Parent integration must retain the list instance through discovery and preserve routing/recovery controls.
+    func testControlsRetainProjectSearchAcrossUnavailableDiscovery() async throws {
+        try await withProjectListFixture { controller, backend in
+            backend.snapshot.catalog.entries = [ProjectListLayoutTests.entry(1, "Synthetic retained project")]
             await controller.refresh()
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            defer { host.close() }
+            await host.settle()
+            XCTAssertTrue(host.text.contains("Project routing"))
+            XCTAssertTrue(host.text.contains("Advanced"))
+            try host.search("retained"); await host.settle()
             backend.snapshot.catalog.state = "unavailable"
-            await controller.refresh()
-            let display = ControlsPresentation(controller: controller)
-            XCTAssertTrue(display.projects(matching: "").isEmpty)
-            XCTAssertEqual(display.catalog, "Catalog unavailable. Refresh to retry.")
+            await controller.refresh(); await host.settle()
+            XCTAssertTrue(host.text.contains("Catalog unavailable. Refresh to retry."))
+            XCTAssertNil(host.find("project-edit-\(ProjectListLayoutTests.id(1))"))
+            XCTAssertEqual(host.find("project-search")?.accessibilityValue() as? String, "retained")
+            backend.snapshot.catalog.state = "ready"
+            await controller.refresh(); await host.settle()
+            XCTAssertNotNil(host.find("project-edit-\(ProjectListLayoutTests.id(1))"))
+            XCTAssertEqual(host.find("project-search")?.accessibilityValue() as? String, "retained")
+            XCTAssertTrue(backend.changes.isEmpty)
+            XCTAssertEqual(backend.starts, 0)
+            try host.snapshot("controls-minimum-window")
         }
     }
     func testControlsOpenCloseAndReopenPreserveBackgroundRouting() async throws {
