@@ -243,16 +243,16 @@ test("account inspection summarizes default and exact assignments without privat
   const result = await inspectCompanion({ configPath: f.configPath });
   assert.deepEqual(result.configuration, { state: "valid", path: f.configPath, mode: "accounts", setupState: "ready", defaultAccount: { id: A1, displayName: "Default account" }, accounts: [{ id: A1, displayName: "Default account" }, { id: A2, displayName: "Project account" }] });
   assert.deepEqual(result.catalog.entries, [
-    { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped", assignmentKind: "override", account: { id: A2, displayName: "Project account" } },
-    { id: P2, name: "Beta", routeAlias: "route-b", routeState: "mapped", assignmentKind: "legacy_inherited", account: { id: A1, displayName: "Default account" } },
+    { id: P1, name: "Alpha", routeAlias: "route-a", routeState: "mapped", assignmentKind: "override", account: { id: A2, displayName: "Project account" }, chatActivity: {state:"unknown",reason:"metadata_unavailable"} },
+    { id: P2, name: "Beta", routeAlias: "route-b", routeState: "mapped", assignmentKind: "legacy_inherited", account: { id: A1, displayName: "Default account" }, chatActivity: {state:"unknown",reason:"metadata_unavailable"} },
   ]);
   assert.doesNotMatch(JSON.stringify(result), /keychain|synthetic-incoming|default\.example|project\.example/);
   delete f.config.accountRouting.routeAccounts["route-b"];
   f.state["local-projects"][P3] = { id: P3, name: "Gamma" };
   await f.saveConfig(); await f.saveState();
   const entries = (await inspectCompanion({ configPath: f.configPath })).catalog.entries;
-  assert.deepEqual(entries[1], { id: P2, name: "Beta", routeAlias: "route-b", routeState: "target_missing", assignmentKind: "target_missing" });
-  assert.deepEqual(entries[2], { id: P3, name: "Gamma", routeAlias: null, routeState: "unmapped", assignmentKind: "inherited", account: { id: A1, displayName: "Default account" } });
+  assert.deepEqual(entries[1], { id: P2, name: "Beta", routeAlias: "route-b", routeState: "target_missing", assignmentKind: "target_missing", chatActivity: {state:"unknown",reason:"metadata_unavailable"} });
+  assert.deepEqual(entries[2], { id: P3, name: "Gamma", routeAlias: null, routeState: "unmapped", assignmentKind: "inherited", account: { id: A1, displayName: "Default account" }, chatActivity: {state:"unknown",reason:"metadata_unavailable"} });
 });
 
 test("invalid account inspection preserves catalog context and recovery without fresh setup", async t => {

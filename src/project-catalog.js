@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { UUID } from "./config.js";
 import { RouterError } from "./errors.js";
+import { readProjectActivitySnapshot } from "./project-activity.js";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 function accountSummary(routing, id) {
@@ -68,8 +69,15 @@ export function inspectProjectCatalogValue(state, cfg) {
   }
 }
 
-export async function inspectProjectCatalog(codexHome, cfg) {
+export async function inspectProjectCatalog(codexHome, cfg, { includeActivity = false } = {}) {
   try {
+    if (includeActivity) {
+      const snapshot = await readProjectActivitySnapshot(codexHome);
+      const catalog = inspectProjectCatalogValue(snapshot.state, cfg);
+      for (const entry of catalog.entries) entry.chatActivity = snapshot.activityByProject.get(entry.id.toLowerCase()) ??
+        { state: "unknown", reason: "project_unresolved" };
+      return catalog;
+    }
     return inspectProjectCatalogValue(JSON.parse(await readFile(join(codexHome, ".codex-global-state.json"), "utf8")), cfg);
   } catch {
     return { state: "unavailable", entries: [] };

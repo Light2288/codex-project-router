@@ -563,7 +563,7 @@ private final class RunningCommand {
               ["none", "prepared", "active", "restored", "unavailable"].contains(inspection.provider.recordPhase),
               ["ready", "unavailable"].contains(inspection.catalog.state),
               inspection.catalog.entries.allSatisfy({ ["mapped", "unmapped", "target_missing", "catalog_missing"].contains($0.routeState) &&
-                  ($0.assignmentKind == nil || ["override", "inherited", "legacy_inherited", "target_missing"].contains($0.assignmentKind!)) && validSummary($0.account) }),
+                  ($0.assignmentKind == nil || ["override", "inherited", "legacy_inherited", "target_missing"].contains($0.assignmentKind!)) && validSummary($0.account) && ($0.chatActivity?.isValid ?? true) }),
               inspection.configuration.setupState == nil || ["ready", "required", "migration_required", "invalid"].contains(inspection.configuration.setupState!),
               validSummary(inspection.configuration.defaultAccount),
               inspection.configuration.accounts?.allSatisfy({ validSummary($0) }) ?? true,

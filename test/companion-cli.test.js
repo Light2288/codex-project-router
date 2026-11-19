@@ -185,3 +185,26 @@ test("stopped assignment bridge returns selected evidence and rejects caller liv
   assert.doesNotMatch(result.stdout,/keychainPath|upstreamBaseUrl|routeAccounts/);
   const fresh=await run({...read,operationId:input.operationId});assert.deepEqual(fresh.envelope.result.intent,result.envelope.result.intent);
 });
+
+test("CLI enriches schema-2 browsing but preserves legacy and missing-config payloads", async t => {
+  const {projectActivityFixture,activityRow} = await import("./helpers/project-activity.js");
+  const {accountRouting,T1,T2} = await import("./helpers/fixtures.js");
+  const f = await projectActivityFixture(t);
+  f.configPath=await realpath(f.configPath);
+  f.replaceThreads([activityRow(T1,{archived:0}),activityRow(T2)]);
+  const inspect = async configPath => (await run({schemaVersion:1,action:"inspect",configPath,browseHome:f.dir})).envelope.result;
+  assert.ok((await inspect(f.configPath)).catalog.entries.every(e => !Object.hasOwn(e,"chatActivity")));
+  assert.ok((await inspect(null)).catalog.entries.every(e => !Object.hasOwn(e,"chatActivity")));
+  f.config.schemaVersion=2;f.config.accountRouting=accountRouting();await f.saveConfig();
+  const before = await f.snapshot();
+  for (const setupState of ["ready","required","invalid"]) {
+    if(setupState === "required") f.config.accountRouting.defaultAccountId=null;
+    if(setupState === "invalid") f.config.accountRouting.defaultAccountId="invalid";
+    await f.saveConfig();
+    const result=await inspect(f.configPath);
+    assert.equal(result.configuration.setupState,setupState);
+    assert.deepEqual(result.catalog.entries.find(e=>e.id===P1).chatActivity,{state:"unarchived",reason:null});
+    assert.deepEqual(result.catalog.entries.find(e=>e.id===P2).chatActivity,{state:"no_active_chats",reason:null});
+  }
+  assert.deepEqual(await f.snapshot(),before);
+});

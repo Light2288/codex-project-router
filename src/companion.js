@@ -82,7 +82,7 @@ export async function inspectCompanion({ configPath, browseHome } = {}) {
         ? { defaultAccount: accountSummary(cfg.accountRouting, cfg.accountRouting.defaultAccountId) } : {}) },
     context: activationContext(configPath, cfg),
     provider: unavailable(true),
-    catalog: await inspectProjectCatalog(cfg.codexHome, cfg),
+    catalog: await inspectProjectCatalog(cfg.codexHome, cfg, { includeActivity: cfg.schemaVersion === 2 }),
   };
   try {
     const inspection = await inspectActivation(configPath);

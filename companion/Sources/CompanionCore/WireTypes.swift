@@ -30,9 +30,9 @@ public struct Inspection: Codable, Equatable {
     }
     public struct Entry: Codable, Equatable {
         public var id: String; public var name: String; public var routeAlias: String?; public var routeState: String
-        public var account: AccountSummary?; public var assignmentKind: String?
-        public init(id: String, name: String, routeAlias: String?, routeState: String, account: AccountSummary? = nil, assignmentKind: String? = nil) {
-            self.id = id; self.name = name; self.routeAlias = routeAlias; self.routeState = routeState; self.account = account; self.assignmentKind = assignmentKind
+        public var account: AccountSummary?; public var assignmentKind: String?; public var chatActivity: ChatActivity?
+        public init(id: String, name: String, routeAlias: String?, routeState: String, account: AccountSummary? = nil, assignmentKind: String? = nil, chatActivity: ChatActivity? = nil) {
+            self.id = id; self.name = name; self.routeAlias = routeAlias; self.routeState = routeState; self.account = account; self.assignmentKind = assignmentKind; self.chatActivity = chatActivity
         }
     }
     public struct Catalog: Codable, Equatable {

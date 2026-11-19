@@ -16,7 +16,7 @@ const builtApp = join(root, 'dist/Codex Project Router.app');
 const brandingNames = ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff'];
 const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
 const projectlessProbe = join(root,'test/helpers/projectless-package-probe.mjs');
-const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
+const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-activity.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
   t.after(() => rm(path, {recursive:true,force:true}));
@@ -324,7 +324,7 @@ try {
   process.exitCode = value === expected ? 0 : 1;
 } catch { process.stdout.write('package-reader-fail\\n'); process.exitCode=1; }
 `);
-  const sources = ['WireTypes.swift','AccountTypes.swift','KeychainStore.swift','SetupTransactionStore.swift'];
+  const sources = ['WireTypes.swift','ProjectListTypes.swift','AccountTypes.swift','KeychainStore.swift','SetupTransactionStore.swift'];
   const compiled = await run('/usr/bin/xcrun',['swiftc','-parse-as-library','-target','arm64-apple-macos14.0',
     ...sources.map(name=>join(root,'companion/Sources/CompanionCore',name)),
     join(root,'test/helpers/keychain-package-probe.swift'),'-o',executable],{maxBuffer:256*1024,timeout:60_000});
