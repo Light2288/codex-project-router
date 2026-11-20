@@ -49,6 +49,11 @@ protocol KeychainSecurity {
     func create(reference: CredentialReference, secret: UnsafeRawBufferPointer, trustedApplicationPaths: [String]) throws
 }
 
+public struct KeychainMetadataListing: Equatable {
+    public let references: [CredentialReference]
+    public let omittedItemCount: Int
+}
+
 public final class KeychainStore {
     private let security: KeychainSecurity
     private let companionPath: String
@@ -64,7 +69,10 @@ public final class KeychainStore {
         }
     }
     public func listMetadata(service: String? = nil, account: String? = nil, keychainPath: String? = nil) async throws -> [CredentialReference] {
-        try await execute { try self.metadata(service: service, account: account, keychainPath: keychainPath) }
+        try await execute { try self.metadata(service: service, account: account, keychainPath: keychainPath, allowsItemOmissions: false).references }
+    }
+    public func browseMetadata(service: String? = nil, account: String? = nil, keychainPath: String? = nil) async throws -> KeychainMetadataListing {
+        try await execute { try self.metadata(service: service, account: account, keychainPath: keychainPath, allowsItemOmissions: true) }
     }
     public func lookup(reference: CredentialReference) async throws -> CredentialReference? {
         guard reference.isValid else { throw KeychainError.invalidReference }
@@ -86,7 +94,7 @@ public final class KeychainStore {
             try secret.withBytes { try self.security.create(reference: reference, secret: $0, trustedApplicationPaths: [self.companionPath, "/usr/bin/security"]) }
         }
     }
-    private func metadata(service: String?, account: String?, keychainPath: String?) throws -> [CredentialReference] {
+    private func metadata(service: String?, account: String?, keychainPath: String?, allowsItemOmissions: Bool) throws -> KeychainMetadataListing {
         let selected: [String]
         if let keychainPath { selected = [keychainPath] }
         else {
@@ -97,16 +105,31 @@ public final class KeychainStore {
         if let service { guard !service.isEmpty, !service.contains("\0") else { throw KeychainError.invalidReference }; query[kSecAttrService as String] = service }
         if let account { guard !account.isEmpty, !account.contains("\0") else { throw KeychainError.invalidReference }; query[kSecAttrAccount as String] = account }
         var results: [CredentialReference] = []
+        var omittedItemCount = 0
         for path in selected {
-            guard path.hasPrefix("/"), !path.contains("\0") else { throw KeychainError.unsupported }
+            guard path.hasPrefix("/"), path.utf16.count <= 1024,
+                  !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw KeychainError.unsupported }
             for row in try security.metadata(keychainPath: path, query: query) {
-                guard row[kSecValueData as String] == nil, let s = row[kSecAttrService as String] as? String, let a = row[kSecAttrAccount as String] as? String else { throw KeychainError.unsupported }
+                // Contradictory or secret-bearing evidence invalidates the query, even on an unselectable item.
+                guard row[kSecValueData as String] == nil else { throw KeychainError.unsupported }
+                let s = row[kSecAttrService as String] as? String, a = row[kSecAttrAccount as String] as? String
+                if let s, let service, s != service { throw KeychainError.unsupported }
+                if let a, let account, a != account { throw KeychainError.unsupported }
+                guard let s, let a else {
+                    guard allowsItemOmissions else { throw KeychainError.unsupported }
+                    omittedItemCount += 1
+                    continue
+                }
                 let reference = CredentialReference(keychainPath: path, service: s, account: a)
-                guard reference.isValid, service == nil || service == s, account == nil || account == a else { throw KeychainError.unsupported }
+                guard reference.isValid else {
+                    guard allowsItemOmissions else { throw KeychainError.unsupported }
+                    omittedItemCount += 1
+                    continue
+                }
                 results.append(reference)
             }
         }
-        return results
+        return KeychainMetadataListing(references: results, omittedItemCount: omittedItemCount)
     }
     private func execute<T>(_ operation: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
