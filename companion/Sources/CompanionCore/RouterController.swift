@@ -19,6 +19,13 @@ import Darwin
     public private(set) var mutationRequiresReconciliation = false
     public private(set) var projectRoutingStatus: ProjectRoutingStatus = .notRunning
     public private(set) var routingModeError: String?
+    public private(set) var projectListRuntimeState: ProjectListRuntimeState = .unconfirmed
+    private struct ProjectListBinding {
+        let child: OwnedRouter
+        let baseline: Inspection
+        let observation: RunningProjectListObservation
+    }
+    private var projectListBinding: ProjectListBinding?
     public private(set) var uncertainSetupOperationID: String?
     public private(set) var configurationLockRequiresResolution = false
     public enum AssignmentStatus: Equatable { case unavailable, ready, uncertain, diverged }
@@ -186,14 +193,14 @@ import Darwin
         refreshRunning = true
         repeat {
             refreshAgain = false
-            await inspectNow()
+            await inspectNow(collectProjectList: true)
         } while refreshAgain && !busy
         refreshRunning = false
     }
 
     public func refreshAndWait() async {
         guard usable else { return }
-        await inspectNow()
+        await inspectNow(collectProjectList: true)
     }
 
     public var canBeginAccountSetup: Bool {
@@ -725,6 +732,52 @@ import Darwin
             routingModeFailed(error)
         }
     }
+    private func discardProjectList() {
+        projectListBinding = nil; projectListRuntimeState = .unconfirmed
+    }
+    private func listSnapshotMatches(_ observation: RunningProjectListObservation, state: AssignmentState?) -> Bool {
+        guard let state else { return true }
+        return state.context == observation.context && state.runningRevision == observation.snapshot.runningRevision &&
+            state.runningIdentity == observation.snapshot.runningIdentity && state.runningFingerprint == observation.snapshot.runningFingerprint &&
+            state.mode == observation.snapshot.mode
+    }
+    private func projectListIsCurrent(_ child: OwnedRouter, context: ActivationContext, generation: UInt64, sequence: UInt64) -> Bool {
+        self.generation == generation && inspectionSequence == sequence && ownedRouter === child && child.process.isRunning &&
+            child.context == context && inspection?.context == context && selectedConfiguration?.path == context.configPath
+    }
+    private func projectListBaselineMatches(_ binding: ProjectListBinding, value: Inspection) -> Bool {
+        let previous = binding.baseline
+        return ownedRouter === binding.child && binding.child.process.isRunning && previous.context == value.context &&
+            previous.configurationRevision == value.configurationRevision && previous.configurationIdentity == value.configurationIdentity &&
+            previous.routingFingerprint == value.routingFingerprint && previous.catalog.revision == value.catalog.revision
+    }
+    private func reconcileProjectList(_ value: Inspection, evidence: AssignmentEvidence?, generation: UInt64, sequence: UInt64, collect: Bool) async {
+        guard let child = ownedRouter else {
+            // Only the existing stopped assignment/port proof establishes absence of a listener.
+            projectListBinding = nil
+            projectListRuntimeState = evidence?.child == nil && evidence?.portEmpty == true && value.provider.proxyReady == false ? .notRunning : .unconfirmed
+            return
+        }
+        guard let context = value.context, projectListIsCurrent(child, context: context, generation: generation, sequence: sequence) else {
+            discardProjectList(); return
+        }
+        guard collect else { return }
+        guard let lists = backend as? any ProjectListBackend else { discardProjectList(); return }
+        let ids = value.catalog.entries.map(\.id)
+        do {
+            let observation = try await lists.readRunningProjectList(child, projectIDs: ids, deadline: Date().addingTimeInterval(1))
+            guard self.generation == generation, inspectionSequence == sequence else { return }
+            guard projectListIsCurrent(child, context: context, generation: generation, sequence: sequence),
+                  observation.context == context, Set(observation.assignments.keys) == Set(ids),
+                  listSnapshotMatches(observation, state: evidence?.state) else { discardProjectList(); return }
+            projectListBinding = ProjectListBinding(child: child, baseline: value, observation: observation)
+            projectListRuntimeState = .observed(.init(mode: observation.snapshot.mode, defaultAccount: observation.defaultAccount, assignments: observation.assignments))
+        } catch {
+            guard self.generation == generation, inspectionSequence == sequence else { return }
+            // List errors affect display only; assignment/recovery reconciliation stays authoritative.
+            discardProjectList()
+        }
+    }
     private func cleanDirect(_ context: ActivationContext) -> Bool {
         matchingContext == context && inspection?.provider.state == "direct" && inspection?.provider.recoveryRequired == false &&
             ["none", "restored"].contains(inspection?.provider.recordPhase ?? "unavailable") && revision != nil
@@ -736,6 +789,7 @@ import Darwin
     private func begin() -> Bool {
         guard usable, !busy, uncertainSetupOperationID == nil, !configurationLockRequiresResolution else { if !busy { reject() }; return false }
         busy = true; error = nil; generation &+= 1; quitRequested = false
+        discardProjectList()
         idleQuitAuthorized = false; idleQuitJournalUnavailable = false
         return true
     }
@@ -762,14 +816,14 @@ import Darwin
         if inspectionWaiters.isEmpty { inspectionInFlight = false }
         else { inspectionWaiters.removeFirst().resume() }
     }
-    @discardableResult private func inspectNow(queryRoutingMode: Bool = false) async -> Bool {
+    @discardableResult private func inspectNow(queryRoutingMode: Bool = false, collectProjectList: Bool = false) async -> Bool {
         // Actions must inspect after prior work ends; a pre-action snapshot cannot authorize them.
         // Awaited guidance refreshes share the action/poll queue instead of returning through refresh coalescing.
         await acquireInspectionSlot()
         defer { releaseInspectionSlot() }
-        return await inspectInSlot(queryRoutingMode: queryRoutingMode)
+        return await inspectInSlot(queryRoutingMode: queryRoutingMode, collectProjectList: collectProjectList && !busy)
     }
-    private func inspectInSlot(queryRoutingMode: Bool) async -> Bool {
+    private func inspectInSlot(queryRoutingMode: Bool, collectProjectList: Bool = false) async -> Bool {
         // Only a started inspection can produce newer evidence. A queued timer cannot supersede an action.
         inspectionSequence &+= 1
         let requestSequence = inspectionSequence
@@ -778,6 +832,7 @@ import Darwin
         do {
             let value = try await backend.inspect(configPath: selectedConfiguration, browseHome: browseHome)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
+            if let binding = projectListBinding, !projectListBaselineMatches(binding, value: value) { discardProjectList() }
             let evidence = await readAssignmentEvidence(value)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
             let state = evidence?.state
@@ -798,11 +853,16 @@ import Darwin
             }
             reconcile(value, preservingAssignmentConfirmation: verified && desktopConfirmation == priorConfirmation)
             installAssignmentEvidence(evidence, value: value)
+            if let binding = projectListBinding, evidence == nil || !listSnapshotMatches(binding.observation, state: evidence?.state) {
+                discardProjectList()
+            }
             if let pending = pendingAssignment, assignmentRequiresReconciliation {
                 assignmentStatus = pendingAssignmentDiverged(pending, state: state, value: value) ? .diverged : .uncertain
             }
             // Mode reads share the disk slot, but recovery actions retain their own evidence authority.
             await reconcileRoutingMode(generation: requestGeneration, sequence: requestSequence, query: !busy || queryRoutingMode)
+            guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
+            await reconcileProjectList(value, evidence: evidence, generation: requestGeneration, sequence: requestSequence, collect: collectProjectList)
             guard requestGeneration == generation, requestSequence == inspectionSequence else { return false }
             return true
         } catch {
@@ -812,6 +872,7 @@ import Darwin
         }
     }
     private func inspectionFailed(_ failure: Error) {
+        discardProjectList()
         idleQuitAuthorized = false
         revision = nil
         assignmentInspection = nil; assignmentBaseline = nil; assignmentPortEmpty = false; assignmentStatus = assignmentRequiresReconciliation ? .uncertain : .unavailable
@@ -869,6 +930,7 @@ import Darwin
         guard let child = ownedRouter, child.id == id else { return }
         idleQuitAuthorized = false
         generation &+= 1; ownedRouter = nil; directOnlyChild = nil
+        discardProjectList()
         assignmentBaseline = nil; assignmentChild = nil; assignmentPortEmpty = false
         projectRoutingStatus = .notRunning; routingModeError = nil
         if stoppingID == id { return }

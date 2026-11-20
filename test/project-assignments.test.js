@@ -601,3 +601,25 @@ test("final synchronous source read failure rejects before replacement",async t=
   await assert.rejects(assignments.commitProjectAssignment(input,{syncFS:synchronous}),{code:"ASSIGNMENT_UNAVAILABLE"});
   assert.equal(observed,true);assert.deepEqual(await readFile(f.configPath),before);
 });
+
+test("activity failure preserves catalog and editing revision", async t => {
+  const {projectActivityFixture,activityRow} = await import("./helpers/project-activity.js");
+  const {T1,T2} = await import("./helpers/fixtures.js");
+  const {unlink} = await import("node:fs/promises");
+  const f = await projectActivityFixture(t);
+  f.config.schemaVersion=2;f.config.accountRouting=accountRouting();await f.saveConfig();
+  f.replaceThreads([activityRow(T1,{archived:0}),activityRow(T2)]);
+  const bytes = await readFile(f.configPath,"utf8"), config=(await inspectRouterConfiguration(f.configPath)).config;
+  const before=await inspectProjectCatalog(f.dir,config);
+  const enriched=await inspectProjectCatalog(f.dir,config,{includeActivity:true});
+  assert.deepEqual(enriched.entries.find(e=>e.id===P1).chatActivity,{state:"unarchived",reason:null});
+  await unlink(f.dbPath);
+  const failed=await inspectProjectCatalog(f.dir,config,{includeActivity:true});
+  assert.equal(failed.revision,before.revision);assert.equal(enriched.revision,before.revision);
+  assert.deepEqual(failed.entries.find(e=>e.id===P1).chatActivity,{state:"unknown",reason:"metadata_unavailable"});
+  const after=await inspectProjectCatalog(f.dir,config);
+  assert.deepEqual(after,before,"authority reads must not depend on activity databases");
+  const source={value:JSON.parse(bytes),config,source:bytes,configurationRevision:digest(bytes)};
+  assert.deepEqual(prepareProjectAssignment({...source,catalog:before},change(A1)),prepareProjectAssignment({...source,catalog:after},change(A1)));
+  assert.equal(await readFile(f.configPath,"utf8"),bytes);
+});

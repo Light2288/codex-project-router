@@ -226,6 +226,100 @@ configured account labels do not establish credential access, gateway acceptance
 billing attribution or
 general cross-account continuation.
 
+## Project list organization
+
+In account mode, the list uses **Needs attention**, **Custom account**, **Default
+account**, then **No active chats (N)**, omitting empty sections. Custom account
+means **Accounts selected for individual projects.** Selecting today's default
+by name remains an explicit custom assignment even after the default changes.
+Inherited and legacy-inherited projects say **Uses default**; the saved default is
+identified once for the section. Missing bindings never silently become inherited.
+An unclassifiable saved policy takes precedence over inactive placement. Off
+suspends overrides for requests while preserving saved assignments and groups.
+Legacy/no-configuration browsing retains its flat list.
+
+Here “active” means **unarchived**, including a chat with no user-event flag; it
+says nothing about recency, a running request or a response in progress. **No active
+chats (N)** means **Projects with no chats or only archived chats.** The section
+starts collapsed. Every project remains reachable through expansion or search.
+Missing chat records, incompatible metadata and conflicting identities instead
+show neutral **Chat status unknown** in the known account group, with the reason
+in Details. Permanently deleting a chat can leave its global membership behind:
+that project remains visible with unknown status until supported complete evidence
+permits reclassification. Do not edit Codex metadata to make it collapse.
+
+Rows show a wrapping project name, saved account or Uses default, **Edit** and
+**Details**. Details holds IDs, route aliases, provenance, matching saved/running
+information and chat-state reasons. Missing targets, discovery problems, meaningful
+saved/running differences and assignment-operation uncertainty remain visible.
+Collapsed inactive projects with actionable problems retain named previews and
+Edit/Details; expansion replaces previews with full rows. Previews never increase
+counts. Unknown chat state alone is informational. Shared Off/stopped/unconfirmed
+or differing-default notices remain available even with no search matches.
+Account names and running confirmation do not prove credential access, gateway
+acceptance, billing attribution or a successful routed response.
+
+Search trims whitespace and ignores case across project names, stable IDs, route
+aliases and applicable saved account names (including the default for inherited
+projects). It searches collapsed entries, temporarily reveals matching inactive
+rows, omits empty sections and reports **matches of total**. The temporarily open
+inactive toggle is disabled during search; **Clear search** restores the previous
+collapse choice. A summary warns when actionable projects are filtered out.
+Empty discovery, unavailable discovery and no matches are separate states. Query
+and Details choices survive refresh; Details is keyed by stable project identity.
+
+Opening Edit pins that row's current placement until the sheet closes, with
+**List position updates when editing closes.** when its destination changes.
+Fresh policy, activity and warnings still update. Background refresh and saving
+do not rebase the draft or dismiss the editor; current authority and stale-save
+checks still apply. A repaired collapsed preview remains visible while editing,
+then follows its latest placement after dismissal. Browsing grants no write or
+routing authority. Refresh remains immediate/manual plus every two seconds while
+controls are visible and five seconds while hidden.
+
+Negative chat classification supports the initial local legacy-membership profile:
+UUID-keyed `local-projects` and matching record IDs; direct
+`thread-project-assignments` values `{projectKind:"local",projectId:<UUID>}`;
+local membership hosts, projectless UUIDs and a one-to-one legacy/canonical bridge.
+The signed-out `electron-owner-value:app-server-projects-migration-by-host:signed-out`
+checkpoint under `local:<codexHome>` must have `version:1`,
+`projectsMigrated:true`, `threadAssignmentsMigrated:false`, a valid unique
+`pendingThreadAssignmentIds` UUID array and no `threadAssignmentsReadMigrated`.
+Other owner checkpoints for this home must use that supported profile and agree
+on the normalized pending-ID set. SQLite must provide `threads.id`, `archived`
+(exactly 0/1), `source`, `thread_source`, `project_id`,
+`attached_thread_parent_id`, spawn edges and `backfill_state.status = "complete"`.
+Index health alone never proves completeness. Ordinary eligible roots have
+`source = "vscode"`, `thread_source = "user"` or `"agent_created_thread"`, no
+attached parent and no incoming spawn edge. Internal guardians require parsed
+`source.subagent.other = "guardian"`, `thread_source = "guardian_review"` and no
+parent evidence. Spawned internals require parsed
+`source.subagent.thread_spawn.parent_thread_id`, `thread_source = "subagent"`
+and a matching saved incoming edge (including completed edges); an attached parent,
+if present, must agree. They are not counted independently through ancestor
+membership. Non-null canonical `project_id`, newer/migrated profiles, unsupported
+sources and contradictions yield unknown for the affected scope; unlocalizable
+problems suppress negative classification for the refresh. Names, paths,
+timestamps and `has_user_event` never supply membership authority.
+
+The observer uses read-only WAL-aware SQLite and compares relevant projections
+around JSON reads, retrying once within a 250 ms retry budget. It reads no
+transcripts and repairs/migrates nothing. Settled archive/unarchive/move changes
+converge on a successful refresh; JSON and SQLite are not one atomic transaction.
+Global JSON, main database, committed WAL, router configuration and provider
+settings remain unchanged by observation. SQLite may create or update its SHM
+coordination sidecar, so an unchanged directory is not promised. Activity changes
+do not change catalog identity/name revisions. Running-list observation reads all
+catalog IDs in pages of at most eight, under one aggregate one-second deadline,
+from the exact owned supported child; failure remains unconfirmed. Existing
+five-second operation limits, 16 KiB frames and 32 KiB buffers remain in place.
+
+The [project-list validation record](validation/project-list-organization.md)
+separates synthetic automation, hosted native images/interactions, packaged
+source-denial checks and the earlier user-operated discovery experiment. New live
+production acceptance remains unobserved. Manual hiding, another membership
+backend and later UI/startup/distribution work remain deferred.
+
 ## Schema-1 project credential routing compatibility
 
 Omit `credentialRouting` to retain legacy behavior and its readiness fingerprint with zero Keychain calls. Its presence enables routing under the existing `schemaVersion: 1`; `false`, `null`, incomplete objects and unknown fields are invalid. Use the separate [synthetic enabled example](../examples/router.credentials.example.json); the [legacy example](../examples/router.example.json) remains available.

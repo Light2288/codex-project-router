@@ -2046,7 +2046,7 @@ import XCTest
 
 }
 
-@MainActor private final class Barrier<Value> {
+@MainActor final class Barrier<Value> {
     private var continuation: CheckedContinuation<Value, Never>?
     private(set) var waiting = false
     func wait() async -> Value {
@@ -2054,11 +2054,11 @@ import XCTest
     }
     func release(_ value: Value) { continuation?.resume(returning: value); continuation = nil }
 }
-private final class SyntheticProcess: Process, @unchecked Sendable {
+final class SyntheticProcess: Process, @unchecked Sendable {
     var live = true
     override var isRunning: Bool { live }
 }
-@MainActor private final class ControlledBackend: CompanionBackend, ProjectAssignmentBackend {
+@MainActor final class ControlledBackend: CompanionBackend, ProjectAssignmentBackend, ProjectListBackend {
     var onChildExit: ((UUID, Int32) -> Void)?
     var snapshot: Inspection
     var inspectBarrier: Barrier<Inspection>?
@@ -2093,6 +2093,18 @@ private final class SyntheticProcess: Process, @unchecked Sendable {
     init(context: ActivationContext) {
         snapshot = Inspection(configuration: .init(state: "valid", path: context.configPath, mode: "accounts", setupState: "ready"), context: context, revision: "direct-1",
             provider: .init(state: "direct", recoveryRequired: false, proxyReady: false, recordPhase: "none"), catalog: .init(state: "ready", entries: []))
+    }
+
+    var listReads: [(OwnedRouter, [String], Date)] = []
+    var listObservation: RunningProjectListObservation?
+    var listError: CompanionError?
+    var listBarrier: Barrier<Void>?
+    func readRunningProjectList(_ child: OwnedRouter, projectIDs: [String], deadline: Date) async throws -> RunningProjectListObservation {
+        listReads.append((child, projectIDs, deadline))
+        if let barrier = listBarrier { listBarrier = nil; await barrier.wait() }
+        if let listError { throw listError }
+        guard let listObservation else { throw CompanionError.assignmentUnavailable }
+        return listObservation
     }
 
     var assignmentNoOp = false

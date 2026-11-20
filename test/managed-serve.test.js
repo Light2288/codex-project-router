@@ -385,6 +385,7 @@ test(`managed startup performs no credential or upstream lookup (schema ${schema
     f.config.schemaVersion = 2;
     delete f.config.credentialRouting;
     f.config.accountRouting = accountRouting();
+    for (const account of Object.values(f.config.accountRouting.accounts)) account.upstreamBaseUrl = f.config.upstreamBaseUrl;
     f.state["local-projects"][P1].name = "Alpha";
     f.state["local-projects"][P2].name = "Beta";
     await f.saveState();
@@ -409,7 +410,15 @@ syncBuiltinESMExports();`);
   assert.equal(ready.sessionId, sessionId);
   assert.equal(ready.mode, "off");
   if (schemaVersion === 2) {
-    assert.deepEqual(ready.capabilities, ["project_assignments_v1"]);
+    assert.deepEqual(ready.capabilities, ["project_assignments_v1", "project_list_v1"]);
+    const configBeforeList = await readFile(f.configPath);
+    proc.stdin.write(listFrame({ context: ready.context }, [P1, P2]));
+    const list = await replies.next();
+    assert.equal(list.type, "project_list_state");
+    assert.equal(list.state.entries.length, 2);
+    assert.deepEqual(await readFile(f.configPath), configBeforeList);
+    await assert.rejects(access(marker), { code: "ENOENT" });
+    assert.equal(upstreamCalls, 0);
     proc.stdin.write(assignmentFrame("get_assignment", { expectedContext: ready.context, projectId: P1, operationId: null }));
     const state = (await replies.next()).state;
     assert.equal(typeof state.catalogRevision, "string", "assignment fixture requires a healthy named catalog");
@@ -572,7 +581,7 @@ async function assignmentRouter(t, options = {}) {
     await options.configure?.(f);
   } });
   const ready = await router.replies?.next();
-  if (ready) assert.deepEqual(ready.capabilities, ["project_assignments_v1"]);
+  if (ready) assert.deepEqual(ready.capabilities, ["project_assignments_v1", "project_list_v1"]);
   return { ...router, context: ready?.context };
 }
 async function assignmentState(router, { projectId = P1, operationId = null, requestId = requestIds[0] } = {}) {
@@ -856,7 +865,7 @@ test("blocked assignment output bounds queued commands and preserves publication
   const router = await assignmentRouter(t, { output });
   router.replies = replies;
   const ready = await replies.next();
-  assert.deepEqual(ready.capabilities, ["project_assignments_v1"]);
+  assert.deepEqual(ready.capabilities, ["project_assignments_v1", "project_list_v1"]);
   router.context = ready.context;
   const before = await assignmentState(router);
   router.input.write(frame("set_mode", requestIds[0], "on")); await replies.next(); await tick();
@@ -981,4 +990,124 @@ test("mode command waits for pending assignment read", async t => {
   assert.equal((await read).mode, "off");
   assert.equal((await router.replies.next()).mode, "on");
   assert.equal((await assignmentState(router)).mode, "on");
+});
+
+
+const listFrame = (router, projectIds, expectedSnapshot = null, fields = {}) => assignmentFrame("get_project_list", {
+  expectedContext: router.context, projectIds, expectedSnapshot, ...fields,
+});
+const listToken = state => Object.fromEntries(["runningRevision", "runningIdentity", "runningFingerprint", "mode"].map(key => [key, state[key]]));
+
+// Reading disk/editor state, selecting the default implicitly, or leaking routing secrets breaks observation.
+test("runtime list reads retained accounts without editor selection", async t => {
+  let commits = 0, reads = 0;
+  const router = await assignmentRouter(t, {
+    commitAssignment() { commits++; throw new Error("observation wrote"); },
+    readAssignmentState() { reads++; throw new Error("observation read editor state"); },
+    configure(f) {
+      f.config.accountRouting.accounts[A1].displayName = "😀".repeat(80);
+      f.config.accountRouting.routeAccounts["a".repeat(64)] = A1;
+      f.config.projectRoutes[P1] = "a".repeat(64);
+      f.config.projectRoutes[P2] = "missing";
+    },
+  });
+  const before = await readFile(router.configPath);
+  router.config.accountRouting.accounts[A1].displayName = "Saved later";
+  await router.saveConfig();
+  const saved = await readFile(router.configPath);
+  const ids = [P1, P2, ...Array.from({ length: 6 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, "0")}`)];
+  router.input.write(listFrame(router, ids));
+  const reply = await router.replies.next();
+  assert.equal(reply.type, "project_list_state");
+  assert.equal(reply.state.mode, "off");
+  assert.deepEqual(reply.state.defaultAccount, { id: A1, displayName: "😀".repeat(80) });
+  assert.deepEqual(reply.state.entries.map(entry => entry.projectId), ids);
+  assert.deepEqual(reply.state.entries[0].assignment, { kind: "override", account: reply.state.defaultAccount, routeAlias: "a".repeat(64) });
+  assert.deepEqual(reply.state.entries[1].assignment, { kind: "target_missing", routeAlias: "missing" });
+  assert.deepEqual(reply.state.entries[2].assignment, { kind: "inherited", account: reply.state.defaultAccount });
+  assert.ok(Buffer.byteLength(JSON.stringify(reply) + "\n") <= 16384);
+  assert.ok(Buffer.byteLength(listFrame(router, ids, listToken(reply.state))) <= 16384);
+  assert.doesNotMatch(JSON.stringify(reply), /upstreamBaseUrl|keychainPath|synthetic-incoming|routeAccounts|savedRevision|lastAttempt/);
+  router.input.write(listFrame(router, [], listToken(reply.state)));
+  const empty = await router.replies.next();
+  assert.equal(empty.type, "project_list_state"); assert.deepEqual(empty.state.entries, []);
+  assert.deepEqual(await readFile(router.configPath), saved); assert.notDeepEqual(saved, before);
+  assert.equal(commits, 0); assert.equal(reads, 0); assert.equal(router.diagnosticText(), "");
+});
+
+// A stale page must not create a mutation attempt or reconcile an uncertain assignment.
+test("observation cannot mutate or settle pending assignment", async t => {
+  const router = await assignmentRouter(t);
+  const before = await assignmentState(router);
+  router.input.write(listFrame(router, [P1]));
+  const initial = await router.replies.next();
+  assert.equal(initial.type, "project_list_state");
+  for (const fields of [
+    { expectedSnapshot: { ...listToken(initial.state), runningRevision: "0".repeat(64) } },
+    { expectedSnapshot: { ...listToken(initial.state), runningIdentity: "0".repeat(64) } },
+    { expectedSnapshot: { ...listToken(initial.state), runningFingerprint: "0".repeat(64) } },
+    { expectedSnapshot: { ...listToken(initial.state), mode: "on" } },
+    { expectedContext: { ...router.context, providerId: "wrong" } },
+  ]) {
+    router.input.write(listFrame(router, [P1], null, fields));
+    assert.deepEqual(await router.replies.next(), { schemaVersion: 1, sessionId, requestId: requestIds[0],
+      type: "project_list_unavailable", code: fields.expectedContext ? "PROJECT_LIST_UNAVAILABLE" : "PROJECT_LIST_CHANGED" });
+  }
+  const after = await assignmentState(router);
+  assert.deepEqual(after, before);
+  router.input.write(assignmentChange(router, before));
+  const applied = await router.replies.next(); assert.equal(applied.outcome, "applied");
+  router.input.write(listFrame(router, [P1], listToken(initial.state)));
+  assert.equal((await router.replies.next()).code, "PROJECT_LIST_CHANGED");
+  const state = await assignmentState(router, { operationId: requestIds[1] });
+  assert.deepEqual(state.lastAttempt, applied.state.lastAttempt);
+});
+
+// Invalid selections/envelopes must close control, never fall through to an assignment write.
+test("list frames reject duplicate unknown and oversized selections", async t => {
+  for (const fields of [
+    { projectIds: [P1, P1.toUpperCase()] }, { projectIds: ["unknown"] },
+    { projectIds: Array.from({ length: 9 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, "0")}`) },
+    { projectIds: null }, { projectIds: [], extra: true },
+    { expectedSnapshot: {} }, { expectedSnapshot: { runningRevision: "a".repeat(64), runningIdentity: "b".repeat(64), runningFingerprint: "c".repeat(64), mode: "invalid" } },
+    { sessionId: "99999999-9999-4999-8999-999999999999" },
+  ]) await t.test(JSON.stringify(fields), async t => {
+    let commits = 0;
+    const router = await assignmentRouter(t, { commitAssignment() { commits++; } });
+    router.input.write(listFrame(router, [], null, fields)); await tick(); await tick();
+    router.input.write(frame("get_mode")); await tick();
+    assert.equal(router.replies.values.length, 0); assert.equal(commits, 0);
+    await health(router);
+  });
+});
+
+// The new ready capability preserves existing absolute mode and assignment operations.
+test("old capabilities retain existing operations", async t => {
+  const router = await assignmentRouter(t);
+  router.input.write(frame("set_mode", requestIds[0], "on"));
+  assert.equal((await router.replies.next()).mode, "on");
+  const state = await assignmentState(router); assert.equal(state.mode, "on");
+  router.input.write(listFrame(router, [P2]));
+  const reply = await router.replies.next(); assert.equal(reply.type, "project_list_state");
+  assert.equal(reply.state.entries[0].assignment.kind, "legacy_inherited");
+});
+
+
+// Repeating maximum-size labels and aliases must fit a complete eight-project response.
+test("eight maximum-size runtime summaries remain within frame bounds", async t => {
+  const ids = Array.from({ length: 8 }, (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, "0")}`);
+  const router = await assignmentRouter(t, { configure(f) {
+    f.config.accountRouting.accounts[A1].displayName = "😀".repeat(80);
+    f.config.accountRouting.routeAccounts["a".repeat(64)] = A1;
+    for (const id of ids) f.config.projectRoutes[id] = "a".repeat(64);
+  } });
+  router.input.write(listFrame(router, ids));
+  const reply = await router.replies.next();
+  assert.equal(reply.type, "project_list_state");
+  assert.equal(reply.state.entries.length, 8);
+  assert.ok(reply.state.entries.every(entry => entry.assignment.routeAlias.length === 64 && [...entry.assignment.account.displayName].length === 80));
+  const responseBytes = Buffer.byteLength(JSON.stringify(reply) + "\n");
+  const requestBytes = Buffer.byteLength(listFrame(router, ids, listToken(reply.state)));
+  assert.ok(responseBytes <= 16384); assert.ok(requestBytes <= 16384);
+  t.diagnostic(`maximum-label eight-entry response ${responseBytes} bytes; continuation request ${requestBytes} bytes`);
 });

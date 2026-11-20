@@ -16,7 +16,15 @@ const builtApp = join(root, 'dist/Codex Project Router.app');
 const brandingNames = ['AppIcon.icns','Assets.car','CompanionIcon.png','MenuBarIconTemplate.tiff'];
 const brandingProbe = join(root,'test/helpers/branding-package-probe.swift');
 const projectlessProbe = join(root,'test/helpers/projectless-package-probe.mjs');
-const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
+const projectListProbe = join(root,'test/helpers/project-list-package-probe.mjs');
+// Observe the real credential process boundary, including swallowed lookup failures.
+const credentialReadGuard = 'data:text/javascript,' + encodeURIComponent(`
+  import childProcess from 'node:child_process';
+  import {syncBuiltinESMExports} from 'node:module';
+  childProcess.spawn = () => { process.stderr.write('FORBIDDEN_CREDENTIAL_READ\\n'); throw new Error('read forbidden'); };
+  syncBuiltinESMExports();
+`);
+const sourceNames = ['account-setup.js','activation.js','admission.js','cli.js','companion-cli.js','companion.js','config.js','configuration-lock.js','credentials.js','diagnostics.js','errors.js','identity.js','managed-serve.js','project-activity.js','project-assignments.js','project-catalog.js','proxy.js','request-metadata.js','title-policy.js','title-state.js'];
 async function temporary(t) {
   const path = await mkdtemp(join(tmpdir(), 'companion package '));
   t.after(() => rm(path, {recursive:true,force:true}));
@@ -149,6 +157,52 @@ async function bundledProjectlessProbe(t, lifecycle, {node,router,fixtureRoot,di
   assert.equal(new Set(ports).size,4);
   t.diagnostic('Bundled request probe passed: original response/compact, catalog and eligible title in On/Off (8 calls); mapped override On/default Off (2 calls); unknown/conflicting identity and invalid auth denied (8 requests). Its process was absent and all four synthetic ports were reusable. Credential-reader seam only; native Keychain evidence remains separate.');
 }
+async function bundledProjectListProbe(t, lifecycle, {node,router,dir,env,profile}) {
+  const fixtureRoot = join(dir,'private project list probe');
+  await mkdir(fixtureRoot,{mode:0o700});
+  const probe = join(fixtureRoot,'project-list-package-probe.mjs');
+  await cp(projectListProbe,probe);
+  const args = [probe,'--router-root',router,'--fixture-root',fixtureRoot];
+  const tracked = profile
+    ? lifecycle.start('/usr/bin/sandbox-exec',['-f',profile,node,...args],{cwd:dir,env})
+    : lifecycle.start(node,args,{cwd:dir,env});
+  tracked.child.stdin.end();
+  assert.deepEqual(await lifecycle.wait(tracked,10_000),[0,null],tracked.stderr);
+  assert.equal(tracked.stdout,'project-list-package-pass\n');
+  assert.equal(tracked.stderr,'');
+  t.diagnostic('Bundled inspection: empty/archived/mixed/deleted-reference/unsupported fixtures passed; source/config/provider/database bytes unchanged; zero credential reads and upstream requests. Probe PID absent.');
+}
+async function managedProjectList(tracked, context, sessionId, unchanged, mode) {
+  // Nine literal identities force two pages, including inherited projects outside the editor.
+  const saved = JSON.parse(await readFile(context.configPath));
+  const selectedID = Object.keys(saved.projectRoutes)[0], alias = saved.projectRoutes[selectedID];
+  const selectedAccountID = saved.accountRouting.routeAccounts[alias];
+  const account = id => ({id,displayName:saved.accountRouting.accounts[id].displayName});
+  const ids = [selectedID,...Array.from({length:8}, (_,i) => `99999999-9999-4999-8999-${String(i).padStart(12,'0')}`)];
+  let expectedSnapshot = null, defaultAccount;
+  for (const projectIds of [ids.slice(0,8),ids.slice(8),[]]) {
+    const requestId = randomUUID();
+    tracked.child.stdin.write(JSON.stringify({schemaVersion:1,sessionId,requestId,action:'get_project_list',
+      expectedContext:context,projectIds,expectedSnapshot})+'\n');
+    const reply = await nextFrame(tracked);
+    assert.equal(reply.type,'project_list_state');
+    assert.equal(reply.schemaVersion,1); assert.equal(reply.sessionId,sessionId); assert.equal(reply.requestId,requestId);
+    assert.deepEqual(reply.state.context,context);
+    const snapshot = Object.fromEntries(['runningRevision','runningIdentity','runningFingerprint','mode'].map(key=>[key,reply.state[key]]));
+    if (expectedSnapshot) assert.deepEqual(snapshot,expectedSnapshot);
+    else { expectedSnapshot = snapshot; defaultAccount = reply.state.defaultAccount; }
+    assert.equal(reply.state.mode,mode);
+    assert.deepEqual(reply.state.defaultAccount,account(saved.accountRouting.defaultAccountId));
+    assert.deepEqual(reply.state.defaultAccount,defaultAccount);
+    assert.deepEqual(reply.state.entries,projectIds.map(projectId=>({projectId,assignment:projectId === selectedID
+      ? {kind:'override',account:account(selectedAccountID),routeAlias:alias}
+      : {kind:'inherited',account:defaultAccount}})));
+    assert.ok(Buffer.byteLength(JSON.stringify(reply)+'\n') <= 16384);
+    assert.doesNotMatch(JSON.stringify(reply),/keychainPath|credential|upstreamBaseUrl/);
+    assert.doesNotMatch(tracked.stderr,/FORBIDDEN_CREDENTIAL_READ/);
+    await unchanged();
+  }
+}
 async function nextFrame(tracked) {
   for (let i=0;i<200;i++) {
     const newline = tracked.stdout.indexOf('\n',tracked.offset);
@@ -164,7 +218,7 @@ async function nextFrame(tracked) {
 }
 async function managedModes(tracked, context, sessionId, unchanged, {ready=true,assignments=false} = {}) {
   if (ready) assert.deepEqual(await nextFrame(tracked), {schemaVersion:1,type:'ready',sessionId,context,mode:'off',
-    ...(assignments ? {capabilities:['project_assignments_v1']} : {})});
+    ...(assignments ? {capabilities:['project_assignments_v1','project_list_v1']} : {})});
   const pid = tracked.child.pid;
   async function listener() {
     const response = await fetch(`http://127.0.0.1:${context.listenPort}/healthz`);
@@ -182,6 +236,7 @@ async function managedModes(tracked, context, sessionId, unchanged, {ready=true,
     assert.deepEqual(await nextFrame(tracked),{schemaVersion:1,type:'mode',sessionId,requestId,mode});
     assert.deepEqual(await listener(),initialHealth,'mode changes must preserve listener fingerprint');
     await unchanged();
+    if (assignments) await managedProjectList(tracked,context,sessionId,unchanged,mode);
   }
 }
 
@@ -324,7 +379,7 @@ try {
   process.exitCode = value === expected ? 0 : 1;
 } catch { process.stdout.write('package-reader-fail\\n'); process.exitCode=1; }
 `);
-  const sources = ['WireTypes.swift','AccountTypes.swift','KeychainStore.swift','SetupTransactionStore.swift'];
+  const sources = ['WireTypes.swift','ProjectListTypes.swift','AssignmentTypes.swift','AccountTypes.swift','KeychainStore.swift','SetupTransactionStore.swift'];
   const compiled = await run('/usr/bin/xcrun',['swiftc','-parse-as-library','-target','arm64-apple-macos14.0',
     ...sources.map(name=>join(root,'companion/Sources/CompanionCore',name)),
     join(root,'test/helpers/keychain-package-probe.swift'),'-o',executable],{maxBuffer:256*1024,timeout:60_000});
@@ -513,6 +568,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
   const env={HOME:home,CFFIXED_USER_HOME:home,PATH:'/usr/bin:/bin',TMPDIR:tmpdir(),LANG:'en_US.UTF-8'};
   const requestFixture = await prepareProjectlessProbe(dir);
   await bundledProjectlessProbe(t,lifecycle,{node,router,fixtureRoot:requestFixture,dir,env});
+  await bundledProjectListProbe(t,lifecycle,{node,router,dir,env});
   const cli=join(router,'src/companion-cli.js');
   async function bridge(request) {
     const tracked=lifecycle.start(node,['--use-system-ca',cli],{cwd:dir,env});
@@ -562,7 +618,7 @@ test('relocated signed app runs bundled inspection and synthetic lifecycle witho
     assert.equal(upstream.connections(),0);
   });
   const configBytes=await readFile(configPath), sessionId=randomUUID();
-  const child=lifecycle.start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId],{cwd:dir,env});
+  const child=lifecycle.start(node,['--use-system-ca','--import',credentialReadGuard,join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId],{cwd:dir,env});
   await managedModes(child,before.context,sessionId,async()=>{
     assert.deepEqual(await readFile(configPath),configBytes);
     assert.equal(await readFile(providerPath,'utf8'),original);
@@ -706,6 +762,7 @@ print("native-window-deadline"); exit(1)`;
 
   const router = join(app,'Contents/Resources/router');
   await bundledProjectlessProbe(t,lifecycle,{node,router,fixtureRoot:requestFixture,dir,env,profile});
+  await bundledProjectListProbe(t,lifecycle,{node,router,dir,env,profile});
   async function bridge(request) {
     const execution = confined(node,['--use-system-ca',join(router,'src/companion-cli.js')]);
     execution.child.stdin.end(JSON.stringify({schemaVersion:1,...request}));
@@ -733,7 +790,7 @@ print("native-window-deadline"); exit(1)`;
   assert.equal(await readFile(providerPath,'utf8'),original);
   // Use the preallocated fixture port after verifying first creation's preserved defaults.
   saved.listenPort=port; await writeFile(configPath,JSON.stringify(saved),{mode:0o600});
-  const incomplete = start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',randomUUID()]);
+  const incomplete = start(node,['--use-system-ca','--import',credentialReadGuard,join(router,'src/managed-serve.js'),'--config',configPath,'--session',randomUUID()]);
   incomplete.child.stdin.end(); assert.equal((await incomplete.closed)[0],1);
   assert.equal(incomplete.stdout,''); await reusablePort(port);
   const completion = await bridge({action:'setup_preview',configPath});
@@ -757,7 +814,7 @@ print("native-window-deadline"); exit(1)`;
   });
   let configBytes = await readFile(configPath);
   const sessionId = randomUUID();
-  const server = start(node,['--use-system-ca',join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId]);
+  const server = start(node,['--use-system-ca','--import',credentialReadGuard,join(router,'src/managed-serve.js'),'--config',configPath,'--session',sessionId]);
   await managedModes(server,before.context,sessionId,async()=>{
     assert.deepEqual(await readFile(configPath),configBytes);
     assert.equal(await readFile(providerPath,'utf8'),original);

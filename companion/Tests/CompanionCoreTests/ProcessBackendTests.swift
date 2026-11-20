@@ -759,6 +759,93 @@ import Darwin
         XCTAssertFalse(backend.assignmentRequiresReconciliation)
     }
 
+    private func listProjectIDs(_ count: Int) -> [String] {
+        (1...count).map { String(format: "00000000-0000-4000-8000-%012d", $0) }
+    }
+    private func listCommands() throws -> [[String: Any]] {
+        guard let contents = try? String(contentsOf: resources.appendingPathComponent("src/commands")) else { return [] }
+        return try contents.split(separator: "\n").map { try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]) }
+            .filter { $0["action"] as? String == "get_project_list" }
+    }
+    func testTwoHundredProjectsUseTwentyFiveBoundedPagesOnOneOwnedChannel() async throws {
+        try setMode("listValid")
+        let child = try await startFixture(), ids = listProjectIDs(200)
+        let before = try String(contentsOf: resources.appendingPathComponent("src/invocations"))
+        let result = try await backend.readRunningProjectList(child, projectIDs: ids + [ids[0]], deadline: Date().addingTimeInterval(5))
+        XCTAssertEqual(result.assignments.count, 200)
+        XCTAssertEqual(result.defaultAccount.displayName, "Running default")
+        XCTAssertEqual(result.assignments[ids[199]]?.account?.displayName, "Running custom")
+        XCTAssertEqual(try String(contentsOf: resources.appendingPathComponent("src/invocations")), before, "List reads must reuse the retained child, without helper processes")
+        let commands = try listCommands()
+        XCTAssertEqual(commands.count, 25)
+        XCTAssertEqual(commands.flatMap { $0["projectIds"] as? [String] ?? [] }, ids)
+        XCTAssertTrue(commands.allSatisfy { ($0["projectIds"] as? [String])?.count == 8 })
+        XCTAssertTrue(commands.first?["expectedSnapshot"] is NSNull)
+        for command in commands.dropFirst() {
+            let token = try XCTUnwrap(command["expectedSnapshot"] as? [String: String])
+            XCTAssertEqual(token, ["runningRevision": String(repeating: "a", count: 64), "runningIdentity": String(repeating: "b", count: 64), "runningFingerprint": String(repeating: "e", count: 64), "mode": "off"])
+        }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+    }
+    func testProjectListHasOneAggregateOneSecondDeadlineRatherThanPerPageDeadlines() async throws {
+        try setMode("listSlow")
+        let child = try await startFixture(), began = Date()
+        do { _ = try await backend.readRunningProjectList(child, projectIDs: listProjectIDs(200), deadline: Date().addingTimeInterval(5)); XCTFail("Partial slow observation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertLessThan(Date().timeIntervalSince(began), 1.6)
+        XCTAssertLessThan(try listCommands().count, 25)
+        XCTAssertTrue(child.process.isRunning)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation); XCTAssertFalse(backend.mutationRequiresReconciliation)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let mode = try await backend.readRoutingMode(child)
+        XCTAssertEqual(mode, .off, "An observation timeout must preserve ordinary control")
+    }
+    func testProjectListHonorsAnEarlierCallerDeadline() async throws {
+        try setMode("listTimeout")
+        let child = try await startFixture(), began = Date()
+        do { _ = try await backend.readRunningProjectList(child, projectIDs: listProjectIDs(1), deadline: began.addingTimeInterval(0.15)); XCTFail("Timed out observation accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        XCTAssertLessThan(Date().timeIntervalSince(began), 0.8)
+        XCTAssertEqual(try listCommands().count, 1)
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+    func testProjectListRejectsMixedPageTokensContextDefaultAndNondefaultNames() async throws {
+        for mode in ["listChanged", "listContextChanged", "listDefaultNameChanged", "listCustomNameChanged"] {
+            try setMode(mode)
+            let child = try await startFixture()
+            do { _ = try await backend.readRunningProjectList(child, projectIDs: listProjectIDs(9), deadline: Date().addingTimeInterval(1)); XCTFail("Mixed observation accepted: \(mode)") }
+            catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable, mode) }
+            XCTAssertTrue(child.process.isRunning)
+            XCTAssertFalse(backend.assignmentRequiresReconciliation)
+            _ = try await backend.stop(child)
+        }
+    }
+    func testProjectListRejectsForgedAndExitedChildAndUnsupportedCapability() async throws {
+        try setMode("listValid")
+        let child = try await startFixture()
+        let forgery = OwnedRouter(process: child.process, context: child.context, id: child.id)
+        do { _ = try await backend.readRunningProjectList(forgery, projectIDs: [], deadline: Date().addingTimeInterval(1)); XCTFail("Forged child accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        let empty = try await backend.readRunningProjectList(child, projectIDs: [], deadline: Date().addingTimeInterval(1))
+        XCTAssertTrue(empty.assignments.isEmpty); XCTAssertEqual(try listCommands().count, 1)
+        _ = try await backend.stop(child)
+        do { _ = try await backend.readRunningProjectList(child, projectIDs: [], deadline: Date().addingTimeInterval(1)); XCTFail("Exited child accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .unownedChild) }
+        try setMode("valid")
+        let old = try await startFixture()
+        do { _ = try await backend.readRunningProjectList(old, projectIDs: [], deadline: Date().addingTimeInterval(1)); XCTFail("Unsupported capability accepted") }
+        catch { XCTAssertEqual(error as? CompanionError, .assignmentUnavailable) }
+        let state = try await backend.readAssignment(old, projectID: nil, operationID: nil)
+        XCTAssertNotNil(state.runningRevision)
+    }
+    func testProjectListExitDuringReadCannotReturnEvidence() async throws {
+        try setMode("listReadExit")
+        let child = try await startFixture()
+        do { _ = try await backend.readRunningProjectList(child, projectIDs: listProjectIDs(9), deadline: Date().addingTimeInterval(1)); XCTFail("Exited page accepted") }
+        catch { XCTAssertTrue([CompanionError.unownedChild, .assignmentUnavailable].contains(error as? CompanionError)) }
+        XCTAssertFalse(backend.assignmentRequiresReconciliation)
+    }
+
     private func startFixture() async throws -> OwnedRouter {
         let child = try await backend.start(configPath: config)
         startedChildren.append(child)
