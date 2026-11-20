@@ -4,10 +4,10 @@
 **Type:** bug  
 **Status:** APPROVED  
 **Created:** 2026-11-20  
-**Updated:** 2026-11-20  
+**Updated:** 2026-11-21\
 **Provenance:** The user's request to clean the merged checkout and move to the Keychain lookup fix; the preceding metadata-only diagnosis; repository inspection at `6612e45`; the scope/design proposal and the user's subsequent “i confirm scope/design”. Preservation requirements come from `docs/superpowers/specs/2026-11-13-companion-account-default-setup.md` and its implementation evidence in `docs/validation/companion-account-default-setup.md`.
 
-**Current stage:** Stage 4 — specification and separate implementation plan approved; Native implementation authorized. The user replied “approved” after the saved Stage 2 DRAFT and its path were presented. That message authorized planning only. The saved plan was later presented, Native execution selected, and the user separately replied “approved” after the plan-approval reminder; that later approval authorizes implementation.
+**Current stage:** Stage 4 complete — Native implementation, rebuilt-app acceptance, sequential specification/quality review and local verification are complete, with the default-parallel GUI-check limitation recorded in `docs/validation/keychain-lookup-fix.md`. Requirements and prior approvals remain unchanged. The user replied “approved” after the saved Stage 2 DRAFT and its path were presented. That message authorized planning only. The saved plan was later presented, Native execution selected, and the user separately replied “approved” after the plan-approval reminder; that later approval authorizes implementation.
 
 ## Problem and current behavior
 
