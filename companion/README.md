@@ -109,7 +109,10 @@ existing scope. Counts describe only the completed query, and applying an item
 still requires explicit selection and **Use this reference**. Native failures,
 unsupported/unsafe Keychains, filter contradictions and unexpected secret data
 fail the whole query; no successful partial listing from other Keychains is
-published. Incoming suggestions and recovery use the separate strict lookup
+published. The native search list can include a system-owned Keychain that the reader
+rejects. In that case, enter the exact path of a supported user-owned Keychain
+to browse its items; the companion does not skip an unsupported Keychain silently.
+Incoming suggestions and recovery use the separate strict lookup
 behavior. Neither listing nor selection establishes secret access, provider
 acceptance or billing attribution.
 

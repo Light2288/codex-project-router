@@ -59,7 +59,10 @@ and an exact file-backed Keychain path narrow the scope. Choose an item and use
 **Use this reference** explicitly; listing alone changes no account choice.
 Native errors, unsafe or unsupported Keychains, contradictory filtered results
 and unexpected secret data still fail the whole lookup. Successful results from
-another Keychain are not shown as a partial success. Exact incoming suggestions
+another Keychain are not shown as a partial success. The native search list can include a system-owned Keychain that the reader
+rejects. In that case, enter the exact path of a supported user-owned Keychain
+to browse its items; the companion does not skip an unsupported Keychain silently.
+Exact incoming suggestions
 and recovery checks remain strict. Metadata selection does not test password
 access or provider acceptance.
 
