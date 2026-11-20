@@ -102,7 +102,7 @@ import CompanionCore
         let initial = lookup.message
         lookup.state = .inProgress
         let waiting = lookup.message
-        lookup.state = .completed(0)
+        lookup.state = .completed(matches: 0, omittedItems: 0)
         let empty = lookup.message
         lookup.state = .failed
         let failed = lookup.message
@@ -113,16 +113,34 @@ import CompanionCore
         XCTAssertTrue(failed.contains("failed"))
     }
     func testMetadataLookupReportsCompletedCountAndCapturedScope() {
-        var lookup = AccountMetadataLookupPresentation(state: .completed(1), exactKeychain: true, serviceFiltered: true, accountFiltered: false)
+        var lookup = AccountMetadataLookupPresentation(state: .completed(matches: 1, omittedItems: 0), exactKeychain: true, serviceFiltered: true, accountFiltered: false)
         XCTAssertTrue(lookup.message.contains("1 match"))
         XCTAssertTrue(lookup.message.contains("exact Keychain"))
         XCTAssertTrue(lookup.message.contains("service filter supplied"))
         XCTAssertTrue(lookup.message.contains("any account"))
-        lookup = .init(state: .completed(2), exactKeychain: false, serviceFiltered: false, accountFiltered: true)
+        lookup = .init(state: .completed(matches: 2, omittedItems: 0), exactKeychain: false, serviceFiltered: false, accountFiltered: true)
         XCTAssertTrue(lookup.message.contains("2 matches"))
         XCTAssertTrue(lookup.message.contains("user search list"))
         XCTAssertTrue(lookup.message.contains("any service"))
         XCTAssertTrue(lookup.message.contains("account filter supplied"))
+    }
+    func testMetadataLookupReportsOmissionsIncludingZeroMatches() {
+        for matches in [0, 1, 3] {
+            for omitted in [1, 2] {
+                let lookup = AccountMetadataLookupPresentation(state: .completed(matches: matches, omittedItems: omitted))
+                XCTAssertTrue(lookup.message.contains("\(matches) \(matches == 1 ? "match" : "matches")"))
+                XCTAssertTrue(lookup.message.contains("\(omitted) unsupported \(omitted == 1 ? "item" : "items") omitted"))
+                XCTAssertTrue(lookup.message.contains("service/account metadata"))
+                XCTAssertFalse(lookup.message.contains("failed"))
+            }
+        }
+    }
+    func testMetadataLookupDoesNotCarryOmissionsIntoPendingOrFailure() {
+        var lookup = AccountMetadataLookupPresentation(state: .completed(matches: 1, omittedItems: 2))
+        for state in [AccountMetadataLookupPresentation.State.inProgress, .failed, .completed(matches: 0, omittedItems: 0), .notStarted] {
+            lookup.state = state
+            XCTAssertFalse(lookup.message.contains("omitted"))
+        }
     }
     func testCreatedButUnlinkedStateDoesNotOfferBlindRetry() {
         for state in [AccountSetupController.State.uncertain, .recoveryRequired] {

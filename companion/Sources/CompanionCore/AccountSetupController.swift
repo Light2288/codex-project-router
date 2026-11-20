@@ -34,8 +34,8 @@ import Observation
     public init(router: RouterController, backend: any AccountSetupBackend, keychain: KeychainStore, browseHome: URL) {
         self.router = router; self.backend = backend; self.keychain = keychain; self.browseHome = browseHome
     }
-    public func listCredentials(service: String? = nil, account: String? = nil, keychainPath: String? = nil) async throws -> [CredentialReference] {
-        try await keychain.listMetadata(service: service, account: account, keychainPath: keychainPath)
+    public func listCredentials(service: String? = nil, account: String? = nil, keychainPath: String? = nil) async throws -> KeychainMetadataListing {
+        try await keychain.browseMetadata(service: service, account: account, keychainPath: keychainPath)
     }
     public func defaultKeychainPath() async throws -> String { try await keychain.defaultKeychainPath() }
     public func suggestedIncomingCredential() async throws -> CredentialReference? {

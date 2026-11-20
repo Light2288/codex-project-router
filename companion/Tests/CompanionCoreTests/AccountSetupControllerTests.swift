@@ -22,6 +22,44 @@ import Security
     override func tearDown() async throws { setup = nil; router = nil; backend = nil; keychain = nil; native = nil; try FileManager.default.removeItem(at: root) }
     var change: SetupChange { .addAccount(account: account) }
 
+    func testCredentialBrowsingReturnsOmissionsWithoutMutation() async throws {
+        let before = try XCTUnwrap(setup.preview)
+        native.rows.append([:])
+        let listing = try await setup.listCredentials()
+        XCTAssertEqual(listing.references, [account.credential])
+        XCTAssertEqual(listing.omittedItemCount, 1)
+        XCTAssertEqual(setup.preview, before); XCTAssertEqual(setup.state, .ready)
+        XCTAssertEqual(backend.commits, 0); XCTAssertEqual(backend.starts, 0); XCTAssertTrue(native.added.isEmpty)
+        XCTAssertNil(try SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath)).load())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".activation.lock").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: context.configPath))
+    }
+    func testIncomingSuggestionRejectsMalformedExactEvidence() async throws {
+        backend.preview.incomingHint = .init(service: account.credential.service, account: account.credential.account)
+        await setup.refresh()
+        native.rows = [[:]]
+        do { _ = try await setup.suggestedIncomingCredential(); XCTFail("Suggestions cannot omit unsupported exact evidence") }
+        catch { XCTAssertEqual(error as? KeychainError, .unsupported) }
+        XCTAssertEqual(backend.commits, 0); XCTAssertTrue(native.added.isEmpty)
+    }
+    func testRecoveryMalformedMetadataRetainsReceiptAndBlocksRetry() async throws {
+        let record = AccountRecord(id: account.id, displayName: account.displayName, upstreamBaseUrl: "https://example.invalid/api", credential: account.credential)
+        let receipt = SetupReceipt(operationId: UUID().uuidString, account: record, context: context)
+        let transaction = SetupTransactionStore(configPath: URL(fileURLWithPath: context.configPath))
+        try transaction.begin(context: context, operationID: receipt.operationId, receipt: receipt)
+        let lock = root.appendingPathComponent(".activation.lock")
+        let lockBytes = try Data(contentsOf: lock)
+        native.rows = [[:]]
+        await setup.refresh()
+        XCTAssertEqual(setup.state, .recoveryRequired)
+        XCTAssertNil(setup.observedCreatedItem); XCTAssertNotNil(setup.error)
+        XCTAssertEqual(try transaction.load(), receipt)
+        XCTAssertEqual(try Data(contentsOf: lock), lockBytes)
+        await setup.save(change, creatingCredentialFor: account.id, secret: try KeychainSecret("SYNTHETIC_NOT_CREATED"))
+        XCTAssertEqual(backend.commits, 0); XCTAssertTrue(native.added.isEmpty)
+        XCTAssertEqual(try transaction.load(), receipt)
+    }
+
     func testInitialInspectionAndLeaseChecksAreFreshAndSerialized() async throws {
         let inspectionGate = SetupGate<Inspection>(); backend.inspectionGate = inspectionGate
         let secret = try KeychainSecret("SYNTHETIC")

@@ -101,6 +101,18 @@ operation is used. Unsupported Data Protection/iCloud-only items fail visibly.
 The native file-backed/ACL APIs emit intentional SDK deprecation diagnostics; no
 global warning suppression hides this compatibility tradeoff.
 
+**List matching item metadata** tolerates individual items whose service/account
+metadata cannot form a valid reference, returning usable references with a visible
+omitted-item count. An omitted-only result reports zero matches and the omissions;
+a genuinely empty query has zero omissions. Filters and an exact path retain their
+existing scope. Counts describe only the completed query, and applying an item
+still requires explicit selection and **Use this reference**. Native failures,
+unsupported/unsafe Keychains, filter contradictions and unexpected secret data
+fail the whole query; no successful partial listing from other Keychains is
+published. Incoming suggestions and recovery use the separate strict lookup
+behavior. Neither listing nor selection establishes secret access, provider
+acceptance or billing attribution.
+
 Incoming credential confirmation in Advanced identifies the item matching what
 the desktop already sends. It is independent of the outgoing item and **Default
 account** picker. Choose the default explicitly even for the first account, or
