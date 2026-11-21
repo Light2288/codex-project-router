@@ -50,6 +50,22 @@ compatibility cost of the fixed `/usr/bin/security` reader; they are not suppres
 Data Protection/iCloud-only items are unsupported. Supply a canonical HTTPS
 endpoint, using ASCII/punycode hostnames and the complete API prefix.
 
+In Advanced, **List matching item metadata** lists compatible references and
+reports how many items were omitted because their service/account metadata cannot
+form a usable reference. Zero matches with omitted items differs from an empty
+successful query. Omission counts cover only rows returned by the selected query;
+they do not count all items in every Keychain. Optional service/account filters
+and an exact file-backed Keychain path narrow the scope. Choose an item and use
+**Use this reference** explicitly; listing alone changes no account choice.
+Native errors, unsafe or unsupported Keychains, contradictory filtered results
+and unexpected secret data still fail the whole lookup. Successful results from
+another Keychain are not shown as a partial success. The native search list can include a system-owned Keychain that the reader
+rejects. In that case, enter the exact path of a supported user-owned Keychain
+to browse its items; the companion does not skip an unsupported Keychain silently.
+Exact incoming suggestions
+and recovery checks remain strict. Metadata selection does not test password
+access or provider acceptance.
+
 Choose the **Default account** explicitly, even for the first account. Incoming
 credential confirmation in Advanced is a separate choice: it must identify the
 item matching the token the desktop already sends, while the outgoing default can

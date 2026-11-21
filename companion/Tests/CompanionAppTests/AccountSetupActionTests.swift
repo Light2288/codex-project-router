@@ -1,6 +1,8 @@
 import XCTest
 import AppKit
-import CompanionCore
+import SwiftUI
+import Security
+@testable import CompanionCore
 @testable import CodexProjectRouter
 
 @MainActor final class AccountSetupActionTests: XCTestCase {
@@ -19,6 +21,126 @@ import CompanionCore
         await router.refresh(); await setup.refresh()
         try await body(router, setup, backend)
     }
+    private func withMetadataBrowser(_ body: (NativeProjectHost, AccountMetadataSecurity, AppAccountBackend) async throws -> Void) async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("metadata-app-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer {
+            do { try FileManager.default.removeItem(at: root) }
+            catch { XCTFail("Synthetic metadata fixture cleanup failed: \(error)") }
+        }
+        let backend = AppAccountBackend(root: root), store = PrivateStore(directory: root.appendingPathComponent("companion"))
+        try store.save(.init(selectedConfigurationPath: backend.preview.context.configPath))
+        let router = RouterController(backend: backend, store: store, browseHome: root)
+        let native = AccountMetadataSecurity()
+        let keychain = KeychainStore(security: native, companionPath: "/Synthetic.app/Contents/MacOS/Companion")
+        let setup = AccountSetupController(router: router, backend: backend, keychain: keychain, browseHome: root)
+        await router.refresh(); await setup.refresh()
+        let host = NativeProjectHost(AccountSetupView(router: router, setup: setup, intent: .add))
+        defer { native.gate?.signal(); host.close() }
+        await host.settle()
+        try host.press(title: "Choose existing item…", in: host.window)
+        await host.settle()
+        try await body(host, native, backend)
+        XCTAssertEqual(native.creates, 0); XCTAssertEqual(backend.commits, 0); XCTAssertEqual(backend.starts, 0)
+        XCTAssertEqual(backend.activations, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backend.preview.context.configPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("account-setup.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".activation.lock").path))
+    }
+    private func waitForMetadata(_ text: String, host: NativeProjectHost) async {
+        for _ in 0..<30 {
+            await host.settle()
+            if host.text.contains(text) { return }
+        }
+        XCTFail("Missing metadata status \(text). Tree: \(host.text)")
+    }
+    private func editMetadataField(_ element: NativeAXElement?, value: String, host: NativeProjectHost) throws {
+        let element = try XCTUnwrap(element)
+        let field = try XCTUnwrap((element.object as? NSCell)?.controlView as? NSTextField ?? element.object as? NSTextField)
+        XCTAssertTrue(host.window.makeFirstResponder(field))
+        let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+        editor.selectAll(nil); editor.insertText(value, replacementRange: editor.selectedRange())
+    }
+    private func snapshotMetadata(_ name: String, host: NativeProjectHost) async throws {
+        host.window.setContentSize(NSSize(width: 650, height: 690))
+        await host.settle()
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let content = try XCTUnwrap(host.window.contentView)
+        let scroll = try XCTUnwrap(descendants(content).compactMap { $0 as? NSScrollView }.first)
+        let document = try XCTUnwrap(scroll.documentView)
+        let status = try XCTUnwrap(host.find("keychain-lookup-status"))
+        let first = try XCTUnwrap(host.find("keychain-service-filter"))
+        let use = try XCTUnwrap(host.find("keychain-use-reference"))
+        let target = first.accessibilityFrame().union(status.accessibilityFrame()).union(use.accessibilityFrame())
+        let local = document.convert(host.window.convertFromScreen(target), from: nil)
+        document.scrollToVisible(local.insetBy(dx: 0, dy: -20))
+        await host.settle()
+        let visible = host.window.convertToScreen(scroll.contentView.convert(scroll.contentView.bounds, to: nil))
+        XCTAssertTrue(visible.contains(status.accessibilityFrame()), "Lookup explanation must be reachable through scrolling")
+        XCTAssertTrue(visible.contains(use.accessibilityFrame()), "Use action must remain reachable")
+        try host.snapshot(name, width: 650, height: 690)
+    }
+    func testMetadataBrowserClearsStaleEvidenceWithoutApplyingReferences() async throws {
+        try await withMetadataBrowser { host, native, backend in
+            let before = backend.preview
+            let nameField = host.elements().first {
+                let field = ($0.object as? NSCell)?.controlView as? NSTextField ?? $0.object as? NSTextField
+                return field?.placeholderString == "Account display name"
+            }
+            try self.editMetadataField(nameField, value: "Draft preserved", host: host)
+            native.rows = [[kSecAttrService as String: "Synthetic service", kSecAttrAccount as String: "Synthetic account"], [:]]
+            try host.press("keychain-lookup")
+            await self.waitForMetadata("1 unsupported item omitted", host: host)
+            XCTAssertTrue(host.text.contains("1 match."))
+            XCTAssertFalse(try XCTUnwrap(host.find("keychain-use-reference")).isAccessibilityEnabled())
+            XCTAssertTrue(host.text.contains("No outgoing credential selected"))
+            try await self.snapshotMetadata("keychain-mixed-results", host: host)
+            native.rows = [[:], [:]]
+            try host.press("keychain-lookup")
+            await self.waitForMetadata("2 unsupported items omitted", host: host)
+            XCTAssertTrue(host.text.contains("0 matches."))
+            try await self.snapshotMetadata("keychain-omitted-only", host: host)
+            native.rows = []
+            try host.press("keychain-lookup")
+            await self.waitForMetadata("completed: 0 matches", host: host)
+            XCTAssertFalse(host.text.contains("unsupported items omitted"))
+            native.rows = [[kSecAttrService as String: "Synthetic service", kSecAttrAccount as String: "Synthetic account"], [:]]
+            try host.press("keychain-lookup")
+            await self.waitForMetadata("1 unsupported item omitted", host: host)
+            native.failure = .nativeStatus(errSecInteractionNotAllowed)
+            try host.press("keychain-lookup")
+            await self.waitForMetadata("Metadata lookup failed", host: host)
+            XCTAssertTrue(host.text.contains("Entries supplied to Matching item: 0"))
+            XCTAssertFalse(host.text.contains("unsupported item omitted"))
+            XCTAssertFalse(try XCTUnwrap(host.find("keychain-use-reference")).isAccessibilityEnabled())
+            XCTAssertTrue(host.text.contains("Draft preserved"))
+            XCTAssertEqual(backend.preview, before)
+            try await self.snapshotMetadata("keychain-failed", host: host)
+        }
+    }
+    func testMetadataBrowserCapturesScopeWhileFiltersChange() async throws {
+        try await withMetadataBrowser { host, native, backend in
+            let entered = self.expectation(description: "Held metadata query")
+            let gate = DispatchSemaphore(value: 0)
+            native.gate = gate; native.entered = { entered.fulfill() }
+            native.rows = [[:]]
+            try host.press("keychain-lookup")
+            await self.fulfillment(of: [entered], timeout: 3)
+            await host.settle()
+            XCTAssertTrue(host.text.contains("waiting for the result"))
+            XCTAssertFalse(try XCTUnwrap(host.find("keychain-use-reference")).isAccessibilityEnabled())
+            XCTAssertTrue(host.text.contains("Entries supplied to Matching item: 0"))
+            try self.editMetadataField(host.find("keychain-service-filter"), value: "edited-during-query", host: host)
+            try await self.snapshotMetadata("keychain-pending", host: host)
+            gate.signal()
+            await self.waitForMetadata("1 unsupported item omitted", host: host)
+            XCTAssertTrue(host.text.contains("any service"))
+            XCTAssertFalse(host.text.contains("service filter supplied"))
+            XCTAssertNil(native.lastQuery?[kSecAttrService as String])
+            XCTAssertEqual(backend.commits, 0)
+        }
+    }
+
     func testAddingThroughFormPreservesDefaultAndBindingsWithoutActivation() async throws {
         try await withSetup { router, setup, backend in
             var form = AccountSetupForm(preview: try XCTUnwrap(setup.preview), intent: .add)
@@ -141,4 +263,24 @@ import CompanionCore
 }
 private final class AppAccountProcess: Process, @unchecked Sendable {
     override var isRunning: Bool { true }
+}
+
+// Only the native metadata boundary is faked; production store/controller/view behavior runs unchanged.
+private final class AccountMetadataSecurity: KeychainSecurity {
+    var rows: [[String: Any]] = [], failure: KeychainError?, gate: DispatchSemaphore?, entered: (() -> Void)?
+    var lastQuery: [String: Any]?, creates = 0
+    func searchListPaths() throws -> [String] { ["/synthetic/items.keychain-db"] }
+    func defaultKeychainPath() throws -> String { "/synthetic/items.keychain-db" }
+    func metadata(keychainPath: String, query: [String: Any]) throws -> [[String: Any]] {
+        lastQuery = query
+        let result = rows, error = failure, held = gate
+        entered?()
+        if let held, held.wait(timeout: .now() + 10) != .success { throw KeychainError.nativeStatus(errSecUserCanceled) }
+        if let error { throw error }
+        return result
+    }
+    func create(reference: CredentialReference, secret: UnsafeRawBufferPointer, trustedApplicationPaths: [String]) throws {
+        creates += 1
+        throw KeychainError.unsupported
+    }
 }

@@ -9,7 +9,15 @@ import { execFile, spawn } from 'node:child_process';
 import net from 'node:net';
 import https from 'node:https';
 import { randomUUID, createHash } from 'node:crypto';
-import { once } from 'node:events';
+import { once, EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+let launchObservedNative, windowPredicateSource;
+const windowObserverURL = new URL('./helpers/native-window-observer.mjs',import.meta.url);
+try {
+  ({launchObservedNative,windowPredicateSource} = await import(windowObserverURL.href));
+} catch (error) {
+  if (error.code !== 'ERR_MODULE_NOT_FOUND' || error.url !== windowObserverURL.href) throw error;
+}
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const builtApp = join(root, 'dist/Codex Project Router.app');
@@ -449,6 +457,203 @@ async function requireBuiltApp(t) {
   }
 }
 
+// Replace only the external process boundary: the real coordinator owns ordering,
+// protocol parsing, deadlines and cleanup. No window timing relies on a sleep.
+function controlledWindowObservation(t, options = {}) {
+  assert.equal(typeof launchObservedNative,'function','native window observer is not implemented');
+  t.mock.timers.enable({apis:['Date','setTimeout'],now:1_000_000});
+  function tracked(pid,group=false) {
+    const child = new EventEmitter();
+    Object.assign(child,{pid,exitCode:null,signalCode:null,stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough()});
+    const result = {child,closed:once(child,'close'),stdout:'',stderr:'',offset:0,group};
+    child.stdout.on('data',data=>result.stdout+=data);
+    child.stderr.on('data',data=>result.stderr+=data);
+    return result;
+  }
+  function close(target,code=0,signal=null) {
+    if (target.child.exitCode !== null || target.child.signalCode !== null) return;
+    target.child.exitCode=code; target.child.signalCode=signal;
+    target.child.emit('exit',code,signal);
+    target.child.stdout.end(); target.child.stderr.end();
+    target.child.emit('close',code,signal);
+  }
+  const observer = tracked(91001,true), native = tracked(91002);
+  const lifecycleErrorListener = native.child.rawListeners('error')[0];
+  // The actual lifecycle registers closed promises at spawn time too.
+  observer.closed.catch(()=>{}); native.closed.catch(()=>{});
+  let launches=0, stops=0, input='', resolveLaunched;
+  const launched = new Promise(resolve=>resolveLaunched=resolve);
+  const fixture = {observer,native,close,launched,
+    get launches(){return launches;},get stops(){return stops;},get input(){return input;},
+    ready(){observer.child.stdout.write('native-window-ready\n');},
+    succeed(){observer.child.stdout.write('native-window-observed:91002\n');close(observer);},
+  };
+  observer.child.stdin.on('data',data=>{
+    input+=data;
+    if (input.endsWith('\n')) options.onPID?.(fixture);
+  });
+  const lifecycle = {
+    start(executable,args,startOptions) {
+      assert.equal(executable,'/usr/bin/swift');
+      assert.equal(args[0],'-e');
+      assert.equal(args.at(-1),'1020000');
+      assert.equal(startOptions.detached,true);
+      if (options.startError) throw options.startError;
+      if (options.bufferReady) fixture.ready();
+      return observer;
+    },
+    async stop(target) {
+      assert.equal(target,observer); stops++;
+      close(observer,null,'SIGTERM');
+      if (options.stopError) throw options.stopError;
+    },
+  };
+  fixture.result = launchObservedNative({lifecycle,launch(){
+    launches++; resolveLaunched();
+    if (options.launchError) throw options.launchError;
+    if (options.exitDuringLaunch) close(native,1);
+    return native;
+  },cwd:'/synthetic',env:{},deadline:Date.now()+20_000});
+  fixture.outcome = fixture.result.then(value=>({value}),error=>({error}));
+  fixture.assertDetached = () => {
+    assert.equal(native.child.listenerCount('exit'),0);
+    assert.ok(native.child.rawListeners('error').every(listener=>listener===lifecycleErrorListener),'only lifecycle close tracking remains');
+    assert.equal(observer.child.stdout.listenerCount('data'),1,'only lifecycle capture remains');
+    for (const stream of [observer.child.stdin,observer.child.stdout,observer.child.stderr]) assert.equal(stream.listenerCount('error'),0);
+    assert.equal(stops,1);
+  };
+  return fixture;
+}
+
+test('native window observer retains a transient result during immediate PID handoff', async t => {
+  const f = controlledWindowObservation(t,{onPID:fixture=>fixture.succeed()});
+  assert.equal(f.launches,0);
+  f.observer.child.stdout.write('native-window-');
+  await Promise.resolve(); assert.equal(f.launches,0);
+  f.observer.child.stdout.write('ready\n');
+  assert.equal((await f.outcome).value,f.native);
+  assert.equal(f.input,'91002\n');
+  f.assertDetached();
+  t.mock.timers.tick(20_000);
+  assert.equal(f.native.child.exitCode,null,'the observer must not stop the app');
+  assert.equal(f.stops,1);
+});
+
+test('native window observer consumes readiness already captured by the lifecycle', async t => {
+  const f = controlledWindowObservation(t,{bufferReady:true,onPID:fixture=>fixture.succeed()});
+  assert.equal((await f.outcome).value,f.native);
+  f.assertDetached();
+});
+
+test('native window observer startup failures do not launch the app', async t => {
+  for (const kind of ['spawn','exit','error','timeout']) await t.test(kind,async t=>{
+    const f = controlledWindowObservation(t,{startError:kind==='spawn'?new Error('synthetic spawn failure'):null});
+    if (kind==='exit') f.close(f.observer,1);
+    if (kind==='error') f.observer.child.emit('error',new Error('synthetic observer error'));
+    if (kind==='timeout') t.mock.timers.tick(20_000);
+    assert.ok((await f.outcome).error);
+    assert.equal(f.launches,0);
+    if (kind!=='spawn') f.assertDetached();
+  });
+});
+
+test('native window observer does not renew the startup budget after readiness', async t => {
+  const f = controlledWindowObservation(t);
+  t.mock.timers.tick(19_500); f.ready(); await f.launched;
+  assert.equal(f.input,'91002\n');
+  t.mock.timers.tick(499);
+  let settled=false; f.outcome.then(()=>settled=true);
+  await Promise.resolve(); assert.equal(settled,false);
+  t.mock.timers.tick(1);
+  assert.match((await f.outcome).error.message,/deadline/i);
+  f.assertDetached();
+});
+
+test('native window observer rejects invalid protocol and unsuccessful exits', async t => {
+  for (const kind of ['malformed','oversized','duplicate-ready','wrong-pid','no-marker','nonzero','signaled']) await t.test(kind,async t=>{
+    const f = controlledWindowObservation(t);
+    if (kind==='malformed') f.observer.child.stdout.write('unexpected\n');
+    else if (kind==='oversized') f.observer.child.stdout.write('x'.repeat(8193));
+    else {
+      f.ready(); await f.launched;
+      if (kind==='duplicate-ready') f.ready();
+      if (kind==='wrong-pid') f.observer.child.stdout.write('native-window-observed:91003\n');
+      if (kind==='no-marker') f.close(f.observer);
+      if (kind==='nonzero') {f.observer.child.stdout.write('native-window-observed:91002\n');f.close(f.observer,1);}
+      if (kind==='signaled') f.close(f.observer,null,'SIGTERM');
+    }
+    assert.ok((await f.outcome).error,kind);
+    f.assertDetached();
+  });
+});
+
+test('native window observer detects native exit across launch and success boundaries', async t => {
+  for (const kind of ['during-launch','pending','after-marker','launch-error']) await t.test(kind,async t=>{
+    const f = controlledWindowObservation(t,{exitDuringLaunch:kind==='during-launch',launchError:kind==='launch-error'?new Error('synthetic launch failure'):null});
+    f.ready(); await f.launched;
+    if (kind==='pending') f.close(f.native,1);
+    if (kind==='after-marker') {
+      f.observer.child.stdout.write('native-window-observed:91002\n');
+      f.close(f.native,1); f.close(f.observer);
+    }
+    assert.ok((await f.outcome).error,kind);
+    f.assertDetached();
+  });
+});
+
+test('native window observer handles process and stream errors', async t => {
+  for (const source of ['stdin','stdout','stderr','native']) await t.test(source,async t=>{
+    const f = controlledWindowObservation(t);
+    f.ready(); await f.launched;
+    const emitter = source==='native'?f.native.child:f.observer.child[source];
+    emitter.emit('error',new Error('synthetic boundary failure'));
+    assert.ok((await f.outcome).error);
+    f.assertDetached();
+  });
+});
+
+test('native window observer preserves primary and cleanup failures with bounded diagnostics', async t => {
+  const f = controlledWindowObservation(t,{stopError:new Error('synthetic cleanup failure')});
+  f.observer.child.stderr.write('x'+'😀'.repeat(8192)+'z');
+  f.observer.child.stdout.write('unexpected\n');
+  const {error} = await f.outcome;
+  assert.ok(error instanceof AggregateError);
+  assert.ok(error.errors.some(error=>/protocol/i.test(error.message)));
+  assert.ok(error.errors.some(error=>/synthetic cleanup failure/.test(error.message)));
+  assert.ok(error.errors.every(error=>error.message.length<10_000));
+  const primary = error.errors.find(error=>/protocol/i.test(error.message));
+  const details = JSON.parse(primary.message.slice(primary.message.indexOf('{"observer":')));
+  assert.ok(Buffer.byteLength(details.observer.stderr)<=4096,'diagnostic cap applies to UTF-8 bytes');
+  assert.doesNotMatch(details.observer.stderr,/\uFFFD/,'a truncated scalar must not inflate the byte cap');
+  f.assertDetached();
+});
+
+test('native window observer uses the real Swift predicate for identity and visibility rejection', async () => {
+  assert.equal(typeof windowPredicateSource,'string','native Swift predicate is not implemented');
+  const assertions = `
+let target = 42
+let own: [String:Any] = [kCGWindowOwnerPID as String: 42, kCGWindowLayer as String: 0]
+func matches(_ windows: [[String:Any]], regular: Bool = true) -> Bool {
+  hasRegularOnScreenWindow(pid: target, regular: regular) { option in
+    assert(option == .optionOnScreenOnly)
+    return windows
+  }
+}
+assert(matches([own]))
+assert(!matches([own], regular: false))
+assert(!matches([]))
+assert(!matches([[kCGWindowOwnerPID as String: 43, kCGWindowLayer as String: 0]]))
+assert(!matches([[kCGWindowOwnerPID as String: 42, kCGWindowLayer as String: 1]]))
+assert(!matches([[kCGWindowLayer as String: 0]]))
+assert(!matches([[kCGWindowOwnerPID as String: 42]]))
+assert(!hasRegularOnScreenWindow(pid: target, regular: true) { option in
+  option == .optionAll ? [own] : []
+})
+print("native-window-predicate-pass")`;
+  const result = await run('/usr/bin/swift',['-e',windowPredicateSource+assertions],{timeout:20_000});
+  assert.equal(result.stdout,'native-window-predicate-pass\n');
+});
+
 test('assembly copies the explicit production allowlist and rejects dependency drift', async t => {
   const lifecycle = processes(t);
   const stalled = lifecycle.start(process.execPath,['-e',`
@@ -713,8 +918,13 @@ test('native relocated app and bundled controls work with checkout reads denied 
   await writeFile(providerPath,original,{mode:0o600});
   await writeFile(join(store,'state.json'),JSON.stringify({schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node}),{mode:0o600});
   const start = (executable,args) => lifecycle.start('/usr/bin/sandbox-exec',['-f',profile,executable,...args],{cwd:dir,env});
-  const native = start(join(app,'Contents/MacOS/CodexProjectRouter'),[]);
-  native.child.stdin.end();
+  // A prepared observer can catch the window before a Space transition removes
+  // it from the on-screen list. Keep lock proof independent of that observation.
+  const native = await launchObservedNative({lifecycle,cwd:dir,env,deadline:Date.now()+20_000,launch(){
+    const tracked = start(join(app,'Contents/MacOS/CodexProjectRouter'),[]);
+    tracked.child.stdin.end();
+    return tracked;
+  }});
   let lockObserved = false;
   for (let i=0;i<50;i++) {
     assert.equal(native.child.exitCode,null,native.stderr);
@@ -724,37 +934,6 @@ test('native relocated app and bundled controls work with checkout reads denied 
     await new Promise(r=>setTimeout(r,100));
   }
   assert.equal(lockObserved,true,'native process must hold the synthetic store lock; HOME overrides alone are insufficient');
-  // The store lock precedes window publication; WindowServer may also briefly
-  // omit an existing window during presentation. Observe the same predicate
-  // within one absolute budget, including Swift startup.
-  const windowProbe = `import AppKit
-import CoreGraphics
-let pid = Int(CommandLine.arguments[1])!
-let deadline = Date(timeIntervalSince1970: Double(CommandLine.arguments[2])! / 1000)
-var previous = ""
-while Date() < deadline {
-  let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String:Any]] ?? []
-  let found = windows.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
-  let app = NSRunningApplication(processIdentifier: pid_t(pid))
-  let regular = app?.activationPolicy == .regular
-  let state = "regular=\\(regular) onScreen=\\(found) registered=\\(app != nil) terminated=\\(app?.isTerminated ?? false)"
-  if state != previous { print(state); fflush(stdout); previous = state }
-  if found && regular { exit(0) }
-  if app?.isTerminated == true { exit(1) }
-  RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.025)))
-}
-print("native-window-deadline"); exit(1)`;
-  const windowAbort = new AbortController();
-  const nativeExited = () => windowAbort.abort();
-  native.child.once('exit',nativeExited);
-  try {
-    assert.equal(native.child.exitCode,null,'native child exited before window observation: '+native.stderr);
-    assert.equal(native.child.signalCode,null,'native child signaled before window observation: '+native.stderr);
-    await run('/usr/bin/swift',['-e',windowProbe,String(native.child.pid),String(Date.now()+20_000)],{cwd:dir,env,timeout:20_000,signal:windowAbort.signal});
-  } catch (error) {
-    assert.fail('Native window observation failed: '+JSON.stringify({exitCode:native.child.exitCode,signalCode:native.child.signalCode,
-      stdout:native.stdout,stderr:native.stderr,probeCode:error.code,probeSignal:error.signal,probeStdout:error.stdout,probeStderr:error.stderr}));
-  } finally { native.child.removeListener('exit',nativeExited); }
   assert.deepEqual(JSON.parse(await readFile(join(store,'state.json'),'utf8')),{schemaVersion:1,selectedConfigurationPath:configPath,nodeExecutablePath:node});
   await assert.rejects(stat(configPath),{code:'ENOENT'});
   assert.equal(await readFile(providerPath,'utf8'),original);

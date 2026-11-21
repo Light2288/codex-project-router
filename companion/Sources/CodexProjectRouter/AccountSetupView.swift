@@ -148,17 +148,21 @@ struct AccountSetupPresentation {
 }
 
 struct AccountMetadataLookupPresentation {
-    enum State { case notStarted, inProgress, completed(Int), failed }
+    enum State { case notStarted, inProgress, completed(matches: Int, omittedItems: Int), failed }
     var state: State = .notStarted
     var exactKeychain = false
     var serviceFiltered = false
     var accountFiltered = false
     var message: String {
-        let outcome: String
+        var outcome: String
         switch state {
         case .notStarted: return "No metadata lookup yet."
         case .inProgress: outcome = "Metadata lookup started; waiting for the result."
-        case .completed(let count): outcome = "Metadata lookup completed: \(count) \(count == 1 ? "match" : "matches")."
+        case .completed(let count, let omitted):
+            outcome = "Metadata lookup completed: \(count) \(count == 1 ? "match" : "matches")."
+            if omitted > 0 {
+                outcome += "\n\(omitted) unsupported \(omitted == 1 ? "item" : "items") omitted because service/account metadata cannot form a usable reference."
+            }
         case .failed: outcome = "Metadata lookup failed. Review the error below."
         }
         let keychain = exactKeychain ? "exact Keychain" : "user search list"
@@ -342,11 +346,16 @@ struct AccountMetadataLookupPresentation {
                     ForEach(current.selectableCredentialAccounts, id: \.id) { account in Text(account.displayName.isEmpty ? "Outgoing account" : account.displayName).tag(account.id) }
                 }
                 TextField("Service filter (optional)", text: $serviceFilter)
+                    .accessibilityIdentifier("keychain-service-filter")
                 TextField("Account filter (optional)", text: $accountFilter)
+                    .accessibilityIdentifier("keychain-account-filter")
                 TextField("Exact file-backed Keychain path (optional)", text: $keychainFilter)
+                    .accessibilityIdentifier("keychain-path-filter")
                 Button("List matching item metadata") { listMetadata() }.disabled(metadataBusy)
+                    .accessibilityIdentifier("keychain-lookup")
                 Text(metadataLookup.message).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("keychain-lookup-status")
                 Text("Entries supplied to Matching item: \(metadata.count)").font(.caption).foregroundStyle(.secondary)
                 if metadataBusy { ProgressView().controlSize(.small) }
                 Picker("Matching item", selection: $selectedMetadata) {
@@ -355,7 +364,9 @@ struct AccountMetadataLookupPresentation {
                         Text("\(item.service) / \(item.account) — \(item.keychainPath)").tag(Optional(item))
                     }
                 }
+                .accessibilityIdentifier("keychain-matching-item")
                 Button("Use this reference") { useMetadata(current) }.disabled(selectedMetadata == nil || metadataBusy)
+                    .accessibilityIdentifier("keychain-use-reference")
                 Text("Only generic-password metadata is listed. Selection does not test password access, provider acceptance or billing.").font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -401,8 +412,8 @@ struct AccountMetadataLookupPresentation {
             defer { metadataBusy = false }
             do {
                 let found = try await setup.listCredentials(service: service, account: account, keychainPath: path)
-                metadata = found
-                metadataLookup.state = .completed(found.count)
+                metadata = found.references
+                metadataLookup.state = .completed(matches: found.references.count, omittedItems: found.omittedItemCount)
             } catch {
                 metadataLookup.state = .failed
                 localError = safe(error)
