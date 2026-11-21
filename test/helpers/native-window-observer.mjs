@@ -105,10 +105,17 @@ export async function launchObservedNative({lifecycle, launch, cwd, env, deadlin
   }
   primary ??= failure;
   if (primary) {
+    function excerpt(text) {
+      const bytes=Buffer.from(text);
+      let start=Math.max(0,bytes.length-4096);
+      // Start at a whole UTF-8 scalar so replacement characters cannot expand it.
+      while (start<bytes.length && (bytes[start]&0xc0)===0x80) start++;
+      return bytes.subarray(start).toString('utf8');
+    }
     const details={};
     for (const [name,tracked] of [['native',native],['observer',observer]]) if (tracked) {
       details[name]={exitCode:tracked.child.exitCode,signalCode:tracked.child.signalCode,
-        stdout:tracked.stdout.slice(-4096),stderr:tracked.stderr.slice(-4096)};
+        stdout:excerpt(tracked.stdout),stderr:excerpt(tracked.stderr)};
     }
     primary=new Error('Native window observation failed: '+primary.message.slice(0,4096)+' '+JSON.stringify(details),{cause:primary});
   }

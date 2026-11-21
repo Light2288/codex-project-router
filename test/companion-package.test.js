@@ -614,13 +614,17 @@ test('native window observer handles process and stream errors', async t => {
 
 test('native window observer preserves primary and cleanup failures with bounded diagnostics', async t => {
   const f = controlledWindowObservation(t,{stopError:new Error('synthetic cleanup failure')});
-  f.observer.child.stderr.write('x'.repeat(32_768));
+  f.observer.child.stderr.write('x'+'😀'.repeat(8192)+'z');
   f.observer.child.stdout.write('unexpected\n');
   const {error} = await f.outcome;
   assert.ok(error instanceof AggregateError);
   assert.ok(error.errors.some(error=>/protocol/i.test(error.message)));
   assert.ok(error.errors.some(error=>/synthetic cleanup failure/.test(error.message)));
   assert.ok(error.errors.every(error=>error.message.length<10_000));
+  const primary = error.errors.find(error=>/protocol/i.test(error.message));
+  const details = JSON.parse(primary.message.slice(primary.message.indexOf('{"observer":')));
+  assert.ok(Buffer.byteLength(details.observer.stderr)<=4096,'diagnostic cap applies to UTF-8 bytes');
+  assert.doesNotMatch(details.observer.stderr,/\uFFFD/,'a truncated scalar must not inflate the byte cap');
   f.assertDetached();
 });
 
