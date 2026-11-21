@@ -1,10 +1,15 @@
 # Package window observer readiness — specification
 
-**Slug:** `package-window-observer-readiness`  
-**Type:** bug  
-**Status:** APPROVED  
-**Created:** 2026-11-21  
-**Updated:** 2026-11-21  
+**Slug:** `package-window-observer-readiness`
+
+**Type:** bug
+
+**Status:** APPROVED
+
+**Created:** 2026-11-21
+
+**Updated:** 2026-11-21
+
 **Provenance:** Read-only investigation following the completed Keychain lookup fix; the test-only scope/design proposal and the user's subsequent “confirmed”. This draft was first presented in chat in Plan mode and subsequently saved in Default mode without changing its requirements.
 
 ## Problem and current behavior
@@ -56,10 +61,12 @@ Historical failures and prior passing checks remain recorded separately from ver
 
 ## Approval handoff
 
-**Current stage: Stage 4 — implementation authorized.**
+**Current stage: Stage 4 complete — implemented, verified and reviewed.**
 
 Artifact resolution found no existing specification or plan for this slug, including the exact legacy paths. The DRAFT was presented in chat, then saved and presented with its path for Stage 2 approval. The user's subsequent “approved” explicitly approved this specification and authorized planning only. The separate plan was then presented in full in Plan mode, Native execution selected, and the following “Please implement the plan” approved that plan. The approved plan is now saved at `docs/superpowers/plans/2026-11-21-package-window-observer-readiness.md` before implementation.
 
 The separate specification and plan approvals authorize implementation through the repository's existing-checkout Git workflow. No worktree, push or merge is authorized.
+
+**Completion evidence:** `docs/validation/package-window-observer-readiness.md` records focused 28/28, isolated package 31/31, final standard parallel 1,123/1,123, the sequential specification/quality PASS results and remaining limits. Only the approved test helper, package tests and documentation changed. Local commits remain on `test/package-window-observer-readiness`, stacked on the preserved Keychain tip; broader work is not started.
 
 **Execution endpoint:** Deliver only this test-observer fix with regression coverage, integration verification, documentation, required review and authorized local commits; report observed results and remaining limitations, then stop. No push, merge or worktree creation is authorized.

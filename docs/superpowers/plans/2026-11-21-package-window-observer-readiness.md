@@ -8,14 +8,22 @@
 
 **Tech Stack:** Existing Node 24 test runner, child-process lifecycle utilities, Swift/AppKit/CoreGraphics and macOS sandbox tooling. No dependencies or public API changes.
 
-**Spec:** `docs/superpowers/specs/2026-11-21-package-window-observer-readiness.md`  
-**Slug:** `package-window-observer-readiness`  
-**Status:** APPROVED  
-**Created:** 2026-11-21  
-**Updated:** 2026-11-21  
-**Execution tier:** full  
-**Implementation model role:** full  
-**Execution method:** Native, selected through the clarification control for this increment.  
+**Spec:** `docs/superpowers/specs/2026-11-21-package-window-observer-readiness.md`
+
+**Slug:** `package-window-observer-readiness`
+
+**Status:** APPROVED
+
+**Created:** 2026-11-21
+
+**Updated:** 2026-11-21
+
+**Execution tier:** full
+
+**Implementation model role:** full
+
+**Execution method:** Native, selected through the clarification control for this increment.
+
 **Provenance:** Approved specification and repository inspection at `d905867c7dcfac99b0a0188962fd274f2c689fe4`. This plan was presented separately in Plan mode, after explicit specification approval. The user's subsequent “Please implement the plan” approves this presented implementation plan. It is now saved in Default mode before implementation.
 
 ## Global Constraints
@@ -57,8 +65,8 @@ Each condition receives regression coverage in Task 1:
 - Export `launchObservedNative({lifecycle, launch, cwd, env, deadline})`, returning the tracked native child after successful observation and observer cleanup. `launch()` synchronously starts and returns that child.
 - Export the Swift predicate source used by the real observer so regression checks compile and execute that exact function: `hasRegularOnScreenWindow(pid: Int, regular: Bool, windows: (CGWindowListOption) -> [[String: Any]]) -> Bool`.
 
-- [ ] **Step 1 — Establish the approved execution state.** Save the approved plan, record the specification and plan approvals, perform the Git preflight above, and commit only the two approved artifacts with `docs: approve package window observer readiness`.
-- [ ] **Step 2 — Write failing regression cases.** Add cases prefixed `native window observer` using controlled child events, streams and mocked time. Assert:
+- [x] **Step 1 — Establish the approved execution state.** Save the approved plan, record the specification and plan approvals, perform the Git preflight above, and commit only the two approved artifacts with `docs: approve package window observer readiness`.
+- [x] **Step 2 — Write failing regression cases.** Add cases prefixed `native window observer` using controlled child events, streams and mocked time. Assert:
   - No launch occurs before readiness; startup error, premature exit or readiness expiry leaves the launch count at zero.
   - Fragmented readiness is recognized; malformed, duplicate or oversized protocol output fails.
   - The exact launched PID is sent immediately. A transient observation delivered during handoff is retained before lock verification begins.
@@ -66,11 +74,11 @@ Each condition receives regression coverage in Task 1:
   - Native exit, observer failure, success without an observation marker and an observation marker naming another PID all fail.
   - Cleanup runs on success and failure, listeners/timers detach, and primary plus cleanup errors remain recognizable.
   - The actual Swift predicate rejects wrong/missing PID or layer, nonregular activation and off-screen-only evidence. The injected window source verifies that the predicate requests `.optionOnScreenOnly`.
-- [ ] **Step 3 — Verify RED.** Run `node --test --test-name-pattern='^native window observer' test/companion-package.test.js`. Expected: failure because the helper/interface is absent. Record the actual failure.
-- [ ] **Step 4 — Implement the helper.** Start the observer through the existing lifecycle, with an owned process group, and arm the single deadline before startup. Initialize the Swift window/application query APIs before emitting `native-window-ready`. After readiness, launch the native child and immediately send its decimal PID followed by a newline. Retain the existing 25-millisecond polling cadence. Emit `native-window-observed:<pid>` only when the unchanged predicate succeeds, then exit zero. Require both the matching marker and successful observer completion before returning. Check deadline and child-exit state at coordination boundaries. Keep stdout protocol parsing bounded to 8 KiB and error excerpts bounded to 4 KiB per captured stream. Handle stream, spawn and exit failures. Always reap the observer through `lifecycle.stop`; preserve both errors if observation and cleanup fail.
-- [ ] **Step 5 — Integrate the real package case.** Replace its late inline observer with `launchObservedNative`, passing `Date.now() + 20_000` immediately before the call. Keep the existing sandboxed native-launch callback. Perform the existing exact-PID instance-lock check after window observation, followed by the unchanged downstream assertions. Remove the superseded observer/abort code.
-- [ ] **Step 6 — Verify GREEN.** Repeat the regression command, then run `node --test --test-name-pattern='^native relocated app and bundled controls' test/companion-package.test.js`. Expected: regression cases pass; the real native case observes the window, proves lock ownership and completes its downstream checks. Inspect cleanup evidence and run `git diff --check`.
-- [ ] **Step 7 — Commit the correction.** Commit only the helper and package-test changes with `test: ready native window observer before app launch`.
+- [x] **Step 3 — Verify RED.** Run `node --test --test-name-pattern='^native window observer' test/companion-package.test.js`. Expected: failure because the helper/interface is absent. Record the actual failure.
+- [x] **Step 4 — Implement the helper.** Start the observer through the existing lifecycle, with an owned process group, and arm the single deadline before startup. Initialize the Swift window/application query APIs before emitting `native-window-ready`. After readiness, launch the native child and immediately send its decimal PID followed by a newline. Retain the existing 25-millisecond polling cadence. Emit `native-window-observed:<pid>` only when the unchanged predicate succeeds, then exit zero. Require both the matching marker and successful observer completion before returning. Check deadline and child-exit state at coordination boundaries. Keep stdout protocol parsing bounded to 8 KiB and error excerpts bounded to 4 KiB per captured stream. Handle stream, spawn and exit failures. Always reap the observer through `lifecycle.stop`; preserve both errors if observation and cleanup fail.
+- [x] **Step 5 — Integrate the real package case.** Replace its late inline observer with `launchObservedNative`, passing `Date.now() + 20_000` immediately before the call. Keep the existing sandboxed native-launch callback. Perform the existing exact-PID instance-lock check after window observation, followed by the unchanged downstream assertions. Remove the superseded observer/abort code.
+- [x] **Step 6 — Verify GREEN.** Repeat the regression command, then run `node --test --test-name-pattern='^native relocated app and bundled controls' test/companion-package.test.js`. Expected: regression cases pass; the real native case observes the window, proves lock ownership and completes its downstream checks. Inspect cleanup evidence and run `git diff --check`.
+- [x] **Step 7 — Commit the correction.** Commit only the helper and package-test changes with `test: ready native window observer before app launch`.
 
 ## Task 2: Verify, document and review the increment [size: S | risk: none | mechanical: true | clear_pattern: true | objectively_verifiable: true | concerns: none]
 
@@ -83,16 +91,18 @@ Each condition receives regression coverage in Task 1:
 
 **Interfaces:** Consume Task 1's integrated package test and regression cases. Produce a traceable validation report and final review record.
 
-- [ ] **Step 1 — Run isolated package verification.** Run `npm run companion:package-test`. Expect all existing package cases and new regressions to pass, with no failures, cancellations or skips. The native case must execute against the existing signed bundle.
-- [ ] **Step 2 — Run standard parallel verification.** Run `npm test` without reducing concurrency. Expect all tests to pass. Record actual totals and exits. Serial results cannot replace this check. Investigate failures within the approved boundary; do not weaken assertions or deadlines.
-- [ ] **Step 3 — Write the validation report.** Separate historical diagnosis from current verification. Record RED/GREEN results, commands, totals, desktop conditions actually observed, cleanup evidence and limitations. Map AC-01–AC-06 to Task 1's regressions and real native case, AC-07 to both integration commands, and AC-08 to documentation/review/commits. Preserve the earlier Keychain report as historical evidence.
-- [ ] **Step 4 — Complete the sole final review gate.** Use `personal-workflows:code-review` with the approved artifacts, complete increment diff from `d905867`, changed-file list and current evidence. Run specification review first; quality review follows only after PASS on the unchanged review package. Address findings under the execution workflow's bounded follow-up policy and rerun affected checks.
-- [ ] **Step 5 — Commit and report completion.** After passing review, preserve review identities/verdicts, update lifecycle evidence, run `git diff --check`, and commit documentation with `docs: record window observer readiness validation`. Report commits, observed results, limitations and final working-tree status.
+- [x] **Step 1 — Run isolated package verification.** Run `npm run companion:package-test`. Expect all existing package cases and new regressions to pass, with no failures, cancellations or skips. The native case must execute against the existing signed bundle.
+- [x] **Step 2 — Run standard parallel verification.** Run `npm test` without reducing concurrency. Expect all tests to pass. Record actual totals and exits. Serial results cannot replace this check. Investigate failures within the approved boundary; do not weaken assertions or deadlines.
+- [x] **Step 3 — Write the validation report.** Separate historical diagnosis from current verification. Record RED/GREEN results, commands, totals, desktop conditions actually observed, cleanup evidence and limitations. Map AC-01–AC-06 to Task 1's regressions and real native case, AC-07 to both integration commands, and AC-08 to documentation/review/commits. Preserve the earlier Keychain report as historical evidence.
+- [x] **Step 4 — Complete the sole final review gate.** Use `personal-workflows:code-review` with the approved artifacts, complete increment diff from `d905867`, changed-file list and current evidence. Run specification review first; quality review follows only after PASS on the unchanged review package. Address findings under the execution workflow's bounded follow-up policy and rerun affected checks.
+- [x] **Step 5 — Commit and report completion.** After passing review, preserve review identities/verdicts, update lifecycle evidence, run `git diff --check`, and commit documentation with `docs: record window observer readiness validation`. Report commits, observed results, limitations and final working-tree status.
 
 ## Approval Handoff
 
-**Current stage: Stage 4 — implementation authorized.** The saved specification was explicitly approved with “approved”. This separate plan was subsequently presented in full, Native execution selected, and the user's following “Please implement the plan” approves it. Both artifacts are saved before test implementation.
+**Current stage: Stage 4 complete — implementation, verification and final review passed.** The saved specification was explicitly approved with “approved”. This separate plan was subsequently presented in full, Native execution selected, and the user's following “Please implement the plan” approves it. Both artifacts are saved before test implementation.
 
 All eight acceptance criteria have task/test coverage; no material decision remains unresolved. Task 1 produces the helper/integrated case consumed by Task 2; no interface conflict was found in the pre-flight review.
 
 **Execution endpoint:** Deliver only the test-observer correction, regression coverage, integration verification, documentation, required sequential review and authorized local commits; report the working result and limitations, then stop.
+
+**Completion evidence:** `docs/validation/package-window-observer-readiness.md` records the focused 28/28, isolated package 31/31, final standard parallel 1,123/1,123 and sole specification/quality PASS gate with no findings. No scope/plan rulings or deferred minors were required. The diagnostic-byte bound received its own RED/GREEN correction before review. Only lifecycle/result documentation changed after review; tested code remains `79ba868`. Local commits and plan-owned scratch closeout complete this increment; no push, merge or later increment follows.
