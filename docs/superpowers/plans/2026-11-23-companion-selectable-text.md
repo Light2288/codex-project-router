@@ -92,9 +92,9 @@ The helpers must select rendered text and dispatch ⌘C through normal applicati
 
 **Interfaces:** Consume the completed UI changes and interaction evidence. Produce a rebuilt companion and a validation report at `docs/validation/companion-selectable-text.md`.
 
-- [ ] **Run final verification sequentially.** Run `npm run companion:test`, `npm run companion:build`, `npm run companion:package-test`, and `git diff --check`. Expect passing tests, a rebuilt signed bundle, passing package checks, and no whitespace errors. Do not run GUI suites concurrently.
-- [ ] **Complete native acceptance.** Inspect actual selection, clipboard results, wrapping, and nearby controls across the covered surfaces using synthetic state. Record any unverified packaged-app behavior explicitly.
-- [ ] **Document results.** Record commands, outcomes, clipboard/security checks, native visual observations, and limitations. Add a short usage note explaining selection and ⌘C without broad documentation changes.
+- [x] **Run final verification sequentially.** Run `npm run companion:test`, `npm run companion:build`, `npm run companion:package-test`, and `git diff --check`. Expect passing tests, a rebuilt signed bundle, passing package checks, and no whitespace errors. Do not run GUI suites concurrently.
+- [x] **Complete native acceptance.** Inspect actual selection, clipboard results, wrapping, and nearby controls across the covered surfaces using synthetic state. Record any unverified packaged-app behavior explicitly.
+- [x] **Document results.** Record commands, outcomes, clipboard/security checks, native visual observations, and limitations. Add a short usage note explaining selection and ⌘C without broad documentation changes.
 - [ ] **Complete the final review gate.** Use `personal-workflows:code-review`: specification review first, then quality review after PASS. Review the whole increment against the approved artifacts, address findings, and rerun affected checks.
 - [ ] **Commit and report.** Commit validation/documentation and report the working result, evidence, limitations, commits, and final repository status.
 
