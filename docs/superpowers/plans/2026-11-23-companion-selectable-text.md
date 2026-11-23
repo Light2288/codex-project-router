@@ -95,8 +95,8 @@ The helpers must select rendered text and dispatch ⌘C through normal applicati
 - [x] **Run final verification sequentially.** Run `npm run companion:test`, `npm run companion:build`, `npm run companion:package-test`, and `git diff --check`. Expect passing tests, a rebuilt signed bundle, passing package checks, and no whitespace errors. Do not run GUI suites concurrently.
 - [x] **Complete native acceptance.** Inspect actual selection, clipboard results, wrapping, and nearby controls across the covered surfaces using synthetic state. Record any unverified packaged-app behavior explicitly.
 - [x] **Document results.** Record commands, outcomes, clipboard/security checks, native visual observations, and limitations. Add a short usage note explaining selection and ⌘C without broad documentation changes.
-- [ ] **Complete the final review gate.** Use `personal-workflows:code-review`: specification review first, then quality review after PASS. Review the whole increment against the approved artifacts, address findings, and rerun affected checks.
-- [ ] **Commit and report.** Commit validation/documentation and report the working result, evidence, limitations, commits, and final repository status.
+- [x] **Complete the final review gate.** Use `personal-workflows:code-review`: specification review first, then quality review after PASS. Review the whole increment against the approved artifacts, address findings, and rerun affected checks.
+- [x] **Commit and report.** Commit validation/documentation and report the working result, evidence, limitations, commits, and final repository status.
 
 | Criteria | Primary evidence |
 |---|---|
@@ -108,4 +108,4 @@ The helpers must select rendered text and dispatch ⌘C through normal applicati
 
 **Execution endpoint:** Complete this increment, its verification, review, commits, and result report; then stop before further UI or walkthrough work.
 
-**Current stage:** Stage 4 — the saved specification and this separately presented plan have separate explicit approvals. Native implementation is authorized. Both artifacts are saved before product changes.
+**Current stage:** Stage 4 complete — the approved increment is implemented, verified, and committed locally on `feat/companion-selectable-text`. The sequential specification/quality gate passed with no remaining findings. Evidence, the resolved native-Save review gap, and remaining validation limits are recorded in `docs/validation/companion-selectable-text.md`. The specification and plan retain their separate explicit approvals and were saved before product changes. No push, merge, redesign, or next increment.

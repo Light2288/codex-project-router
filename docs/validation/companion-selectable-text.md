@@ -103,4 +103,22 @@ product code did not change. The new check first exposed filename/path handling 
 the fixture, then passed with a unique synthetic filename.
 
 Initial specification review: **MISSING** at `cf37951`, solely for AC-04 native
-confirmation evidence. Targeted specification follow-up and quality review: pending.
+confirmation evidence. Targeted specification follow-up: **PASS**, AC-01–AC-09 supported. Subsequent
+quality review: **PASS**, findings **NONE**. Both reviewers verified the same
+unchanged package and reviewed state:
+
+- Gate run: `f3526221-9a6c-4ab4-b675-cfda90cf30f7`
+- Reviewed state: `918763db0feb2e814478f9d2ace31d85f13ae8be`
+- Package SHA-256: `53d5305aee0de6d4e5d5098058f4c2419dc20d34c759cd044a99a37bd815c310`
+
+Remaining evidence ruling: external OS-event handling in the packaged app, real
+mouse dragging, and macOS 14 runtime behavior retain their documented unobserved
+status. Actual native selection/Copy and representative controls are verified on
+this Mac using APIs supported by the deployment target. Cost if wrong: differences
+in packaged focus handling or older macOS behavior could escape these checks.
+No minor findings were deferred. Subsequent changes only record review/lifecycle
+completion; reviewed product and test code remain unchanged.
+
+The approved increment is complete on the local committed branch. The rebuilt
+ad-hoc signed app is in `dist/Codex Project Router.app`. No push or merge was made;
+redesign and walkthrough-content work remain outside this delivery.
