@@ -35,6 +35,36 @@ import XCTest
 }
 
 @MainActor extension NativeProjectHost {
+    func dialog(containing text: String) async throws -> NSWindow {
+        for _ in 0..<30 {
+            if let dialog = NSApp.windows.first(where: { candidate in
+                candidate !== window && candidate.isVisible && elements(in: candidate).contains {
+                    $0.accessibilityValue() as? String == text || $0.accessibilityLabel() == text
+                }
+            }) { return dialog }
+            await settle()
+        }
+        return try XCTUnwrap(nil as NSWindow?, "Missing native dialog")
+    }
+
+    func pressKey(_ characters: String, keyCode: UInt16, in target: NSWindow) throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+        if !target.performKeyEquivalent(with: event) { target.sendEvent(event) }
+    }
+
+    func snapshot(_ name: String, in target: NSWindow) throws {
+        let view = try XCTUnwrap(target.contentView)
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent(".build/text-selection-qa")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("\(name).png"))
+    }
+
     func selectText(_ text: String, range: NSRange, in target: NSWindow? = nil) throws {
         let target = target ?? window
         target.makeKeyAndOrderFront(nil)
@@ -45,6 +75,7 @@ import XCTest
             XCTAssertTrue(field.isSelectable, "Displayed text must be selectable: \(text)")
             XCTAssertFalse(field.isEditable, "Informational text must stay read-only")
             XCTAssertTrue(target.makeFirstResponder(field))
+            field.selectText(nil)
             let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
             editor.setSelectedRange(range)
         } else {

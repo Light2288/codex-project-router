@@ -416,7 +416,12 @@ struct ControlsDisclosureState {
         panel.nameFieldStringValue = "config.json"
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
-        panel.message = "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration."
+        let instructions = NSTextField(wrappingLabelWithString: "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration.")
+        instructions.isSelectable = true
+        instructions.isEditable = false
+        instructions.preferredMaxLayoutWidth = 440
+        instructions.setFrameSize(NSSize(width: 440, height: instructions.fittingSize.height))
+        panel.accessoryView = instructions
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in

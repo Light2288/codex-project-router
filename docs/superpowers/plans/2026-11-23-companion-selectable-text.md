@@ -80,11 +80,11 @@ The helpers must select rendered text and dispatch ⌘C through normal applicati
 
 **Interfaces:** Preserve the SwiftUI activation alert, `QuitAlert.make(reason:ownsRouter:)`, and existing controller callbacks.
 
-- [ ] **Add native regression checks.** Select and copy alert headings/messages. Cover each blocked-Quit reason, activation confirmation, and the configuration destination instructions. Verify copying does not mutate state, activate routing, or request termination.
-- [ ] **Establish baseline behavior.** Run `npm run companion:test`. Record existing alert behavior separately from any copying failures; passing native behavior requires no replacement.
-- [ ] **Make file-dialog instructions locally selectable.** In destination-panel construction, place the unchanged instructional message in a wrapping, selectable, read-only `NSTextField` accessory. Remove the duplicate native message. Preserve the panel title, allowed file types, destination handling, directory creation, and completion callback. Use public APIs without remote-view inspection.
-- [ ] **Check keyboard behavior.** Exercise ⌘C, Return, Escape, and mouse actions after text selection. Preserve existing native Copy handling. If it is missing, supply standard AppKit responder-chain editing commands without global key interception or custom text export.
-- [ ] **Verify and commit.** Repeat `npm run companion:test`. Confirm file-dialog cancellation produces no configuration change or file creation, confirmation retains its existing callback, and long instructions remain reachable. Commit with `feat: support copying companion dialog guidance`.
+- [x] **Add native regression checks.** Select and copy alert headings/messages. Cover each blocked-Quit reason, activation confirmation, and the configuration destination instructions. Verify copying does not mutate state, activate routing, or request termination.
+- [x] **Establish baseline behavior.** Run `npm run companion:test`. Record existing alert behavior separately from any copying failures; passing native behavior requires no replacement.
+- [x] **Make file-dialog instructions locally selectable.** In destination-panel construction, place the unchanged instructional message in a wrapping, selectable, read-only `NSTextField` accessory. Remove the duplicate native message. Preserve the panel title, allowed file types, destination handling, directory creation, and completion callback. Use public APIs without remote-view inspection.
+- [x] **Check keyboard behavior.** Exercise ⌘C, Return, Escape, and mouse actions after text selection. Preserve existing native Copy handling. If it is missing, supply standard AppKit responder-chain editing commands without global key interception or custom text export.
+- [x] **Verify and commit.** Repeat `npm run companion:test`. Confirm file-dialog cancellation produces no configuration change or file creation, confirmation retains its existing callback, and long instructions remain reachable. Commit with `feat: support copying companion dialog guidance`.
 
 ## Task 3: Build, review, and document the delivered increment [size: S | risk: none | mechanical: true | clear_pattern: true | objectively_verifiable: true | concerns: none]
 

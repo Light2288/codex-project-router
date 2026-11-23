@@ -2,10 +2,63 @@ import XCTest
 import AppKit
 import SwiftUI
 import Security
+import UniformTypeIdentifiers
 @testable import CompanionCore
 @testable import CodexProjectRouter
 
 @MainActor final class AccountSetupActionTests: XCTestCase {
+    func testDestinationInstructionsCopyWithoutChangingFileDialogActions() async throws {
+        try await withSetup { router, setup, backend in
+            backend.snapshot.configuration = .init(state: "missing")
+            backend.snapshot.context = nil
+            await router.refresh()
+            let original = router.selectedConfiguration
+            let host = NativeProjectHost(ControlsView(controller: router, navigation: QuitGuidanceNavigation(), accountSetup: setup))
+            let clipboard = NativeClipboard()
+            defer {
+                for panel in NSApp.windows.compactMap({ $0 as? NSSavePanel }) where panel.isVisible { panel.cancel(nil) }
+                clipboard.restore(); host.close()
+            }
+            await host.settle()
+            let instructions = "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration."
+            try host.press(title: "Create private configuration…", in: host.window)
+            for _ in 0..<30 where !NSApp.windows.contains(where: { $0 is NSSavePanel && $0.isVisible }) { await host.settle() }
+            let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? NSSavePanel }.first { $0.isVisible })
+            let destination = URL(fileURLWithPath: backend.preview.context.configPath).deletingLastPathComponent().appendingPathComponent("selected-config.json")
+            await host.settle()
+            XCTAssertEqual(panel.allowedContentTypes, [.json])
+            XCTAssertTrue(panel.canCreateDirectories)
+            for _ in 0..<30 where panel.accessoryView?.window == nil { await host.settle() }
+            let accessory = try XCTUnwrap(panel.accessoryView as? NSTextField)
+            let accessoryWindow = try XCTUnwrap(accessory.window)
+            XCTAssertGreaterThanOrEqual(accessory.bounds.height, accessory.fittingSize.height)
+            // AppKit hosts our accessory in a local window alongside the remote file browser.
+            try host.selectText(instructions, range: NSRange(location: 0, length: instructions.utf16.count), in: accessoryWindow)
+            XCTAssertEqual(try host.copySelection(in: accessoryWindow), instructions)
+            XCTAssertEqual(router.selectedConfiguration, original)
+            XCTAssertEqual(backend.commits, 0)
+            try host.snapshot("destination-selected-instructions", in: accessoryWindow)
+            try host.pressKey("\u{1b}", keyCode: 53, in: panel)
+            for _ in 0..<30 where panel.isVisible { await host.settle() }
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertEqual(router.selectedConfiguration, original)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+            // The remote Save button is outside this in-process host. Exercise its unchanged
+            // controller operation with the same synthetic destination after cancellation.
+            backend.preview.context = .init(configPath: destination.path, codexHome: backend.preview.context.codexHome,
+                providerId: backend.preview.context.providerId, listenPort: backend.preview.context.listenPort)
+            backend.preview.sourceKind = "missing"
+            backend.preview.defaultAccountId = nil
+            backend.preview.incomingCredential = nil
+            await router.selectConfiguration(destination)
+            XCTAssertEqual(router.selectedConfiguration, destination)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+            XCTAssertEqual(backend.commits, 0)
+            XCTAssertEqual(backend.activations, 0)
+            XCTAssertEqual(backend.starts, 0)
+        }
+    }
+
     func testInformationalTextCopiesAndNativeKeyRemainsConcealed() async throws {
         try await withMetadataBrowser { host, native, backend in
             let clipboard = NativeClipboard()
