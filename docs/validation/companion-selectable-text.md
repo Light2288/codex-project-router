@@ -1,9 +1,13 @@
 # Companion selectable text validation
 
-**Created:** 2026-11-24  
-**Updated:** 2026-11-24  
-**Slug:** `companion-selectable-text`  
-**Spec:** [Approved specification](../superpowers/specs/2026-11-23-companion-selectable-text.md)  
+**Created:** 2026-11-24
+
+**Updated:** 2026-11-24
+
+**Slug:** `companion-selectable-text`
+
+**Spec:** [Approved specification](../superpowers/specs/2026-11-23-companion-selectable-text.md)
+
 **Plan:** [Approved implementation plan](../superpowers/plans/2026-11-23-companion-selectable-text.md)
 
 ## Delivered behavior
