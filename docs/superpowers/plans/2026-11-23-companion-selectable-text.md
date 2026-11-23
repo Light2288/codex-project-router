@@ -16,7 +16,7 @@
 
 **Created:** 2026-11-23
 
-**Updated:** 2026-11-23
+**Updated:** 2026-11-24
 
 **Execution tier:** full
 
@@ -64,11 +64,11 @@ Each condition receives native interaction coverage in the tasks below.
 
 The helpers must select rendered text and dispatch ⌘C through normal application handling. They must not substitute the expected string into the clipboard.
 
-- [ ] **Add failing interaction coverage.** Reuse existing synthetic backends to cover main-window guidance/status/error text, project rows/details, account guidance/metadata, and assignment warnings/errors. Assert exact substring and full-block copying, read-only behavior, Unicode/multiline preservation, and selection retention through an unchanged refresh.
-- [ ] **Verify the failure.** Run `npm run companion:test`. Record the expected failures for currently unselectable informational text.
-- [ ] **Enable selection on passive text.** Apply native selection modifiers directly to informational text, including passive headings and labels supplied through container label closures. Preserve existing view identity and styling. Keep interactive labels and secure entry under their existing behavior.
-- [ ] **Verify security and controls.** Use a synthetic key to check that attempted copying from secure entry does not produce the key and accessibility exposes no clear value. Exercise search/editing, pickers, disclosures, nearby buttons, and sheet dismissal. Copying alone must leave backend mutation counters unchanged.
-- [ ] **Verify and commit.** Repeat `npm run companion:test`; expect all existing and new cases to pass. Keep clipboard contents only in memory for restoration, without logging or persisting them. Commit with `feat: make companion informational text selectable`.
+- [x] **Add failing interaction coverage.** Reuse existing synthetic backends to cover main-window guidance/status/error text, project rows/details, account guidance/metadata, and assignment warnings/errors. Assert exact substring and full-block copying, read-only behavior, Unicode/multiline preservation, and selection retention through an unchanged refresh.
+- [x] **Verify the failure.** Run `npm run companion:test`. Record the expected failures for currently unselectable informational text.
+- [x] **Enable selection on passive text.** Apply native selection modifiers directly to informational text, including passive headings and labels supplied through container label closures. Preserve existing view identity and styling. Keep interactive labels and secure entry under their existing behavior.
+- [x] **Verify security and controls.** Use a synthetic key to check that attempted copying from secure entry does not produce the key and accessibility exposes no clear value. Exercise search/editing, pickers, disclosures, nearby buttons, and sheet dismissal. Copying alone must leave backend mutation counters unchanged.
+- [x] **Verify and commit.** Repeat `npm run companion:test`; expect all existing and new cases to pass. Keep clipboard contents only in memory for restoration, without logging or persisting them. Commit with `feat: make companion informational text selectable`.
 
 ## Task 2: Verify alerts and make file-dialog guidance copyable [size: M | risk: other | mechanical: false | clear_pattern: true | objectively_verifiable: true | concerns: none]
 

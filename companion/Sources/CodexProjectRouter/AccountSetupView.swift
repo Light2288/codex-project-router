@@ -194,12 +194,14 @@ struct AccountMetadataLookupPresentation {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(form?.title ?? "Account setup").font(.title2.bold())
+            Text(form?.title ?? "Account setup").textSelection(.enabled).font(.title2.bold())
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(display.guidance).foregroundStyle(display.canSave || setup.state == .saved ? Color.secondary : Color.orange)
+                    Text(display.guidance).textSelection(.enabled).foregroundStyle(display.canSave || setup.state == .saved ? Color.secondary : Color.orange)
                         .fixedSize(horizontal: false, vertical: true)
-                    if setup.state == .loading { ProgressView("Reading configuration preview…") }
+                    if setup.state == .loading {
+                        ProgressView { Text("Reading configuration preview…").textSelection(.enabled) }
+                    }
                     if let form, setup.state == .ready {
                         formContents(form)
                     }
@@ -233,14 +235,16 @@ struct AccountMetadataLookupPresentation {
     }
     @ViewBuilder private func formContents(_ current: AccountSetupForm) -> some View {
         if current.isImport {
-            Text("Import preserves project bindings, saved endpoints and paired references. Legacy aliases remain inherited labels. No project assignments are edited here.").font(.callout)
-            GroupBox("Preserved and unresolved bindings") {
+            Text("Import preserves project bindings, saved endpoints and paired references. Legacy aliases remain inherited labels. No project assignments are edited here.").textSelection(.enabled).font(.callout)
+            GroupBox {
                 VStack(alignment: .leading, spacing: 5) {
                     let rows = AccountSetupForm.bindingPreview(current.preview, entries: router.inspection?.catalog.entries ?? [])
-                    if rows.isEmpty { Text("No saved project bindings in the available catalog.") }
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in Text(row).font(.caption) }
-                    if router.inspection?.catalog.state != "ready" { Text("Catalog unavailable; the writer preserves saved bindings from the source.").foregroundStyle(.orange) }
+                    if rows.isEmpty { Text("No saved project bindings in the available catalog.").textSelection(.enabled) }
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in Text(row).textSelection(.enabled).font(.caption) }
+                    if router.inspection?.catalog.state != "ready" { Text("Catalog unavailable; the writer preserves saved bindings from the source.").textSelection(.enabled).foregroundStyle(.orange) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Text("Preserved and unresolved bindings").textSelection(.enabled)
             }
         }
         if current.intent != .setDefault || current.preview.sourceKind != "accounts" {
@@ -256,19 +260,19 @@ struct AccountMetadataLookupPresentation {
                     Text(account.displayName.isEmpty ? "Unnamed account" : account.displayName).tag(account.id)
                 }
             }
-            Text("Default selection is independent of the incoming credential. No default means routing remains unavailable.").font(.caption).foregroundStyle(.secondary)
+            Text("Default selection is independent of the incoming credential. No default means routing remains unavailable.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
         } else {
             let name = current.preview.accounts.first(where: { $0.id == current.preview.defaultAccountId })?.displayName
-            Text("Default preserved: \(name ?? "None designated")").font(.headline)
-            Text("Adding an account never changes the default. Use Choose default after saving, including for the first account.").font(.caption).foregroundStyle(.secondary)
+            Text("Default preserved: \(name ?? "None designated")").textSelection(.enabled).font(.headline)
+            Text("Adding an account never changes the default. Use Choose default after saving, including for the first account.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
         }
         DisclosureGroup("Advanced — credential selection and full details", isExpanded: $advancedExpanded) {
             VStack(alignment: .leading, spacing: 10) {
                 if current.needsIncomingChoice {
-                    Text("Incoming desktop credential").font(.headline)
-                    Text("Select the exact existing item used by this provider's desktop authentication. Outgoing account selection does not choose it. Metadata does not prove accessibility.").font(.caption)
+                    Text("Incoming desktop credential").textSelection(.enabled).font(.headline)
+                    Text("Select the exact existing item used by this provider's desktop authentication. Outgoing account selection does not choose it. Metadata does not prove accessibility.").textSelection(.enabled).font(.caption)
                     if let incoming = current.incomingSelection { referenceDetails(incoming) }
-                    else { Text("No incoming item selected — setup will remain incomplete.").foregroundStyle(.orange) }
+                    else { Text("No incoming item selected — setup will remain incomplete.").textSelection(.enabled).foregroundStyle(.orange) }
                     HStack {
                         Button("Choose incoming item…") { metadataTarget = "incoming"; localError = nil }
                         Button("Find provider suggestion") { suggestIncoming() }.disabled(metadataBusy)
@@ -276,57 +280,57 @@ struct AccountMetadataLookupPresentation {
                     }
                     Toggle("I confirm this incoming choice separately", isOn: formBinding(\.incomingConfirmed, fallback: false))
                 } else if let incoming = current.preview.incomingCredential {
-                    Text("Incoming desktop credential (preserved)").font(.headline)
-                    Text("The saved incoming verifier is retained. Desktop authentication is unchanged; credential access remains unverified.").font(.caption)
+                    Text("Incoming desktop credential (preserved)").textSelection(.enabled).font(.headline)
+                    Text("The saved incoming verifier is retained. Desktop authentication is unchanged; credential access remains unverified.").textSelection(.enabled).font(.caption)
                     referenceDetails(incoming)
                 }
                 if current.needsIncomingChoice || !current.selectableCredentialAccounts.isEmpty {
                     metadataSelector(current)
                 }
                 if let nativeID = current.nativeAccountID, let index = current.accounts.firstIndex(where: { $0.id == nativeID }) {
-                    Text("New item's destination Keychain").font(.headline)
+                    Text("New item's destination Keychain").textSelection(.enabled).font(.headline)
                     TextField("Destination file-backed Keychain path", text: Binding(
                         get: { form?.accounts[index].credential?.keychainPath ?? "" },
                         set: { form?.accounts[index].credential?.keychainPath = $0 }))
                         .textFieldStyle(.roundedBorder)
-                    Text("The default Keychain path is a suggestion. Enter an exact supported file-backed path to use a different Keychain; this form does not change the search list or default Keychain.").font(.caption).foregroundStyle(.secondary)
+                    Text("The default Keychain path is a suggestion. Enter an exact supported file-backed path to use a different Keychain; this form does not change the search list or default Keychain.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(current.accounts, id: \.id) { account in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(account.displayName.isEmpty ? "Unnamed account" : account.displayName).font(.headline)
+                        Text(account.displayName.isEmpty ? "Unnamed account" : account.displayName).textSelection(.enabled).font(.headline)
                         Text(account.upstreamBaseUrl).font(.caption.monospaced()).textSelection(.enabled)
                         if let credential = account.credential { referenceDetails(credential) }
-                        if let alias = account.sourceAlias { Text("Saved alias: \(alias)").font(.caption) }
+                        if let alias = account.sourceAlias { Text("Saved alias: \(alias)").textSelection(.enabled).font(.caption) }
                     }
                 }
                 Text("Configuration: \(current.preview.context.configPath)").font(.caption.monospaced()).textSelection(.enabled)
                 Text("Original direct connection: \(current.preview.originalDirect.upstreamBaseUrl)").font(.caption.monospaced()).textSelection(.enabled)
-                Text("Restore direct uses that preserved connection, which may differ from the default.").font(.caption)
+                Text("Restore direct uses that preserved connection, which may differ from the default.").textSelection(.enabled).font(.caption)
             }.padding(.top, 8)
         }
         if current.needsIncomingChoice && !current.incomingConfirmed {
-            Text("Confirm the incoming credential separately in Advanced before saving.").font(.caption).foregroundStyle(.orange)
+            Text("Confirm the incoming credential separately in Advanced before saving.").textSelection(.enabled).font(.caption).foregroundStyle(.orange)
         }
     }
     private func accountFields(index: Int, account: SetupPreview.Account, current: AccountSetupForm) -> some View {
-        GroupBox(current.isImport ? "Imported account" : "Account") {
+        GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Account display name", text: accountBinding(index, \.displayName)).textFieldStyle(.roundedBorder)
                 if current.isImport {
-                    Text("Saved endpoint preserved. Full prefix and item reference are in Advanced.").font(.caption)
+                    Text("Saved endpoint preserved. Full prefix and item reference are in Advanced.").textSelection(.enabled).font(.caption)
                 } else {
                     TextField("HTTPS endpoint, including API prefix", text: accountBinding(index, \.upstreamBaseUrl)).textFieldStyle(.roundedBorder)
                 }
                 if current.nativeAccountID == account.id {
                     SecureField("New account API key", text: $secret.value).textFieldStyle(.roundedBorder)
                         .accessibilityLabel("New account API key, concealed")
-                    Text("The key is passed directly to native Keychain creation. No reveal control is provided.").font(.caption).foregroundStyle(.secondary)
+                    Text("The key is passed directly to native Keychain creation. No reveal control is provided.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     Button("Use existing item instead") {
                         secret.clear(); form?.nativeAccountID = nil; form?.accounts[index].credential = nil
                         metadataTarget = account.id; advancedExpanded = true
                     }
                 } else {
-                    Text(account.credential == nil ? "No outgoing credential selected" : "Existing outgoing reference selected; access unverified.").font(.caption)
+                    Text(account.credential == nil ? "No outgoing credential selected" : "Existing outgoing reference selected; access unverified.").textSelection(.enabled).font(.caption)
                     if !current.isImport || account.credential == nil {
                         HStack {
                             Button("Choose existing item…") { metadataTarget = account.id; advancedExpanded = true }
@@ -335,10 +339,12 @@ struct AccountMetadataLookupPresentation {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text(current.isImport ? "Imported account" : "Account").textSelection(.enabled)
         }
     }
     private func metadataSelector(_ current: AccountSetupForm) -> some View {
-        GroupBox("Existing Keychain item — metadata only") {
+        GroupBox {
             VStack(alignment: .leading, spacing: 7) {
                 Picker("Use selected item for", selection: $metadataTarget) {
                     if current.needsIncomingChoice { Text("Incoming desktop credential").tag("incoming") }
@@ -353,10 +359,10 @@ struct AccountMetadataLookupPresentation {
                     .accessibilityIdentifier("keychain-path-filter")
                 Button("List matching item metadata") { listMetadata() }.disabled(metadataBusy)
                     .accessibilityIdentifier("keychain-lookup")
-                Text(metadataLookup.message).font(.caption).foregroundStyle(.secondary)
+                Text(metadataLookup.message).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("keychain-lookup-status")
-                Text("Entries supplied to Matching item: \(metadata.count)").font(.caption).foregroundStyle(.secondary)
+                Text("Entries supplied to Matching item: \(metadata.count)").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                 if metadataBusy { ProgressView().controlSize(.small) }
                 Picker("Matching item", selection: $selectedMetadata) {
                     Text("Select an exact item…").tag(Optional<CredentialReference>.none)
@@ -367,15 +373,17 @@ struct AccountMetadataLookupPresentation {
                 .accessibilityIdentifier("keychain-matching-item")
                 Button("Use this reference") { useMetadata(current) }.disabled(selectedMetadata == nil || metadataBusy)
                     .accessibilityIdentifier("keychain-use-reference")
-                Text("Only generic-password metadata is listed. Selection does not test password access, provider acceptance or billing.").font(.caption).foregroundStyle(.secondary)
+                Text("Only generic-password metadata is listed. Selection does not test password access, provider acceptance or billing.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
             }
+        } label: {
+            Text("Existing Keychain item — metadata only").textSelection(.enabled)
         }
     }
     private var recoveryEvidence: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let receipt = setup.pendingReceipt {
                 Text("Saved operation: \(receipt.operationId)").textSelection(.enabled)
-                Text("Account: \(receipt.account.displayName); receipt phase: \(receipt.phase.rawValue)")
+                Text("Account: \(receipt.account.displayName); receipt phase: \(receipt.phase.rawValue)").textSelection(.enabled)
                 DisclosureGroup("Advanced — saved reference and recovery paths") {
                     referenceDetails(receipt.reference)
                     Text(receipt.account.upstreamBaseUrl).textSelection(.enabled)
@@ -383,7 +391,7 @@ struct AccountMetadataLookupPresentation {
                     Text(URL(fileURLWithPath: receipt.context.configPath).deletingLastPathComponent().appendingPathComponent(".activation.lock").path).textSelection(.enabled)
                 }
             }
-            Text("Preserve the checkpoint and original direct recovery files. Verify the recorded helper has exited before resolving a lock manually. This form cannot delete an unlinked item, replay a save, or infer that native creation was rolled back.").font(.caption)
+            Text("Preserve the checkpoint and original direct recovery files. Verify the recorded helper has exited before resolving a lock manually. This form cannot delete an unlinked item, replay a save, or infer that native creation was rolled back.").textSelection(.enabled).font(.caption)
         }.font(.caption)
     }
     private func referenceDetails(_ reference: CredentialReference) -> some View {

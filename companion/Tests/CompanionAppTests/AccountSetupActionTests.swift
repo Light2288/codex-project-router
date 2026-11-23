@@ -6,6 +6,39 @@ import Security
 @testable import CodexProjectRouter
 
 @MainActor final class AccountSetupActionTests: XCTestCase {
+    func testInformationalTextCopiesAndNativeKeyRemainsConcealed() async throws {
+        try await withMetadataBrowser { host, native, backend in
+            let clipboard = NativeClipboard()
+            defer { clipboard.restore() }
+            let guidance = "Saving changes the private router configuration only. Credential access and upstream responses remain unverified. The next explicit Start uses these settings with project routing Off."
+            try host.selectText(guidance, range: NSRange(location: 0, length: guidance.utf16.count))
+            XCTAssertEqual(try host.copySelection(), guidance)
+            try host.selectText("No metadata lookup yet.", range: NSRange(location: 0, length: 23))
+            XCTAssertEqual(try host.copySelection(), "No metadata lookup yet.")
+            try host.press(title: "Enter new key…", in: host.window)
+            await host.settle()
+            let secure = try XCTUnwrap(host.elements().compactMap {
+                ($0.object as? NSCell)?.controlView as? NSSecureTextField ?? $0.object as? NSSecureTextField
+            }.first)
+            XCTAssertTrue(host.window.makeFirstResponder(secure))
+            let editor = try XCTUnwrap(secure.currentEditor() as? NSTextView)
+            editor.insertText("SYNTHETIC_SELECTION_KEY", replacementRange: editor.selectedRange())
+            editor.selectAll(nil)
+            XCTAssertFalse(try host.copySelection().contains("SYNTHETIC_SELECTION_KEY"))
+            XCTAssertFalse(host.text.contains("SYNTHETIC_SELECTION_KEY"))
+            let explanation = "The key is passed directly to native Keychain creation. No reveal control is provided."
+            try host.selectText(explanation, range: NSRange(location: 0, length: explanation.utf16.count))
+            XCTAssertEqual(try host.copySelection(), explanation)
+            try host.press(title: "Use existing item instead", in: host.window)
+            await host.settle()
+            XCTAssertFalse(host.text.contains("SYNTHETIC_SELECTION_KEY"))
+            XCTAssertEqual(native.creates, 0)
+            XCTAssertEqual(backend.commits, 0)
+            XCTAssertEqual(backend.activations, 0)
+            try host.snapshot("selectable-account", width: 650, height: 690)
+        }
+    }
+
     private func withSetup(_ body: (RouterController, AccountSetupController, AppAccountBackend) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("account-app-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])

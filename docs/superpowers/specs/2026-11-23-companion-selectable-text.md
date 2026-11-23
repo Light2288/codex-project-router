@@ -8,7 +8,7 @@
 
 **Created:** 2026-11-23
 
-**Updated:** 2026-11-23
+**Updated:** 2026-11-24
 
 **Provenance:** User’s first-use walkthrough request, repository inspection, interactive selection to include app-authored file-dialog instructions, and subsequent scope/design confirmation: “confirmed”. The DRAFT specification was then presented separately in chat while Plan mode prevented saving it. The user's subsequent “Please implement the plan.” approves that presented specification under the supplied AGENTS.md approval interpretation; no implementation plan had been presented. This file preserves the approved requirements, with lifecycle and storage metadata updated.
 
@@ -71,4 +71,4 @@ Exclude broader layout/navigation redesign, walkthrough content, diagnostic expo
 
 **Execution endpoint:** Deliver the approved selectable-text improvement, complete verification and review, report evidence and limitations, and stop before subsequent UI work.
 
-**Current stage:** Stage 3 — specification approved; separate implementation plan not yet presented or approved. The scope/design approval was “confirmed”; the specification approval was the later “Please implement the plan.” following presentation of the DRAFT. That approval authorizes a separate implementation plan only. The specification is now saved in Default mode before any product changes.
+**Current stage:** Stage 4 — Native implementation is in progress. The scope/design approval was “confirmed”; the specification approval was the first “Please implement the plan.” following presentation of the DRAFT. The separate implementation plan was then presented and approved by the later, second “Please implement the plan.” Both artifacts were saved before product changes.

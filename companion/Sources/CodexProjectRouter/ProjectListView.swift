@@ -21,7 +21,7 @@ import CompanionCore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Projects").font(.headline)
+            Text("Projects").textSelection(.enabled).font(.headline)
             HStack {
                 TextField("Search projects or accounts", text: $state.query)
                     .textFieldStyle(.roundedBorder)
@@ -35,16 +35,16 @@ import CompanionCore
             ForEach(presentation.notices, id: \.kind) { notice in
                 let explanatory = notice.kind == .notRunning || notice.kind == .routingOff
                 Text(notice.kind == .defaultDifference
-                     ? "Saved and running default accounts differ. \(notice.text)" : notice.text)
+                     ? "Saved and running default accounts differ. \(notice.text)" : notice.text).textSelection(.enabled)
                     .font(.callout).foregroundStyle(explanatory ? Color.secondary : Color.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let hidden = presentation.hiddenAttentionText(state: state) {
-                Text(hidden).font(.callout).foregroundStyle(.orange)
+                Text(hidden).textSelection(.enabled).font(.callout).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let empty = presentation.emptyState(state: state) {
-                Text(empty.text).foregroundStyle(.secondary)
+                Text(empty.text).textSelection(.enabled).foregroundStyle(.secondary)
             }
             if presentation.usesAccountSections {
                 ForEach(presentation.sections(state: state)) { section in
@@ -81,19 +81,19 @@ import CompanionCore
                         ? "Show or hide projects with no active chats" : "Search temporarily shows matching projects")
                     .accessibilityIdentifier("project-section-noActive")
                 } else {
-                    Text(section.title).font(.headline).accessibilityAddTraits(.isHeader)
+                    Text(section.title).textSelection(.enabled).font(.headline).accessibilityAddTraits(.isHeader)
                 }
                 Spacer(minLength: 8)
                 if section.kind != .noActive || !state.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(section.countText).font(.caption).foregroundStyle(.secondary)
+                    Text(section.countText).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                 }
             }
             if let subtitle = section.subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(section.notices, id: \.kind) { notice in
-                Text(notice.text).font(.callout).foregroundStyle(.orange)
+                Text(notice.text).textSelection(.enabled).font(.callout).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Previews already include the editing exception and never add to section counts.
@@ -129,8 +129,8 @@ import CompanionCore
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).fontWeight(.medium).fixedSize(horizontal: false, vertical: true)
-                    Text(row.accountText).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(name).textSelection(.enabled).fontWeight(.medium).fixedSize(horizontal: false, vertical: true)
+                    Text(row.accountText).textSelection(.enabled).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 10) {
@@ -152,14 +152,14 @@ import CompanionCore
                 .controlSize(.small).fixedSize()
             }
             ForEach(row.issues, id: \.kind) { issue in
-                Text(issue.text).font(.callout).foregroundStyle(.orange)
+                Text(issue.text).textSelection(.enabled).font(.callout).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let status = row.chatStatusText {
-                Text(status).font(.caption).foregroundStyle(.secondary)
+                Text(status).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
             }
             if let notice = row.placementNotice {
-                Text(notice).font(.caption).foregroundStyle(.secondary)
+                Text(notice).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if isDisclosed {

@@ -5,6 +5,28 @@ import CompanionCore
 @testable import CodexProjectRouter
 
 @MainActor final class ControlsPresentationTests: XCTestCase {
+    func testInformationalTextCopiesWithoutChangingRecoveryAndSurvivesRefresh() async throws {
+        try await withPendingDirectController { controller, backend, store in
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            let clipboard = NativeClipboard()
+            defer { clipboard.restore(); host.close() }
+            await host.settle()
+            let journal = try store.load()
+            try host.selectText("Project routing", range: NSRange(location: 0, length: 15))
+            XCTAssertEqual(try host.copySelection(), "Project routing")
+            try host.selectText("No default account designated", range: NSRange(location: 3, length: 7))
+            XCTAssertEqual(try host.copySelection(), "default")
+            await controller.refresh()
+            await host.settle()
+            XCTAssertEqual(try host.copySelection(), "default")
+            XCTAssertEqual(try store.load(), journal)
+            XCTAssertEqual(backend.startCount, 0)
+            XCTAssertEqual(backend.controlCount, 0)
+            XCTAssertFalse(controller.quitRequested)
+            try host.snapshot("selectable-controls", width: 800, height: 820)
+        }
+    }
+
     private func withController(_ body: (RouterController, DisplayBackend) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("app presentation \(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
