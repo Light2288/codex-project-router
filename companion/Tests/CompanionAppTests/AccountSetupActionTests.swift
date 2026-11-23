@@ -43,14 +43,38 @@ import UniformTypeIdentifiers
             XCTAssertFalse(panel.isVisible)
             XCTAssertEqual(router.selectedConfiguration, original)
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
-            // The remote Save button is outside this in-process host. Exercise its unchanged
-            // controller operation with the same synthetic destination after cancellation.
+            XCTAssertEqual(backend.commits, 0)
+            XCTAssertEqual(backend.activations, 0)
+            XCTAssertEqual(backend.starts, 0)
+        }
+    }
+
+    func testNativeDestinationConfirmationInvokesExistingSelectionCallback() async throws {
+        try await withSetup { router, setup, backend in
+            backend.snapshot.configuration = .init(state: "missing")
+            backend.snapshot.context = nil
+            await router.refresh()
+            let host = NativeProjectHost(ControlsView(controller: router, navigation: QuitGuidanceNavigation(), accountSetup: setup))
+            defer {
+                for panel in NSApp.windows.compactMap({ $0 as? NSSavePanel }) where panel.isVisible { panel.cancel(nil) }
+                host.close()
+            }
+            await host.settle()
+            try host.press(title: "Create private configuration…", in: host.window)
+            for _ in 0..<30 where !NSApp.windows.contains(where: { $0 is NSSavePanel && $0.isVisible }) { await host.settle() }
+            let panel = try XCTUnwrap(NSApp.windows.compactMap { $0 as? NSSavePanel }.first { $0.isVisible })
+            for _ in 0..<30 where panel.url == nil { await host.settle() }
+            let directory = try XCTUnwrap(panel.url).deletingLastPathComponent()
+            // Save only chooses a nonexistent destination; the synthetic backend never writes it.
+            let destination = directory.appendingPathComponent("selection-check-\(UUID().uuidString).json")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
             backend.preview.context = .init(configPath: destination.path, codexHome: backend.preview.context.codexHome,
                 providerId: backend.preview.context.providerId, listenPort: backend.preview.context.listenPort)
             backend.preview.sourceKind = "missing"
             backend.preview.defaultAccountId = nil
             backend.preview.incomingCredential = nil
-            await router.selectConfiguration(destination)
+            try await host.confirmDestination(destination)
+            for _ in 0..<30 where router.selectedConfiguration != destination { await host.settle() }
             XCTAssertEqual(router.selectedConfiguration, destination)
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
             XCTAssertEqual(backend.commits, 0)

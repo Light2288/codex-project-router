@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 import XCTest
 
@@ -35,6 +36,49 @@ import XCTest
 }
 
 @MainActor extension NativeProjectHost {
+    func confirmDestination(_ destination: URL) async throws {
+        guard AXIsProcessTrusted() else { throw XCTSkip("Native Save acceptance requires Accessibility access") }
+        var lastReadError: String?
+        func value(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
+            var output: CFTypeRef?
+            let status = AXUIElementCopyAttributeValue(node, attribute as CFString, &output)
+            switch status {
+            case .success: return output
+            case .attributeUnsupported, .noValue: return nil
+            default:
+                lastReadError = "\(attribute): AX error \(status.rawValue)"
+                return nil
+            }
+        }
+        func find(_ identifier: String, in root: AXUIElement) -> AXUIElement? {
+            var seen: Set<CFHashCode> = []
+            func walk(_ node: AXUIElement) -> AXUIElement? {
+                guard seen.count < 1000, seen.insert(CFHash(node)).inserted else { return nil }
+                if value(node, kAXIdentifierAttribute) as? String == identifier { return node }
+                for key in [kAXWindowsAttribute, kAXChildrenAttribute, "AXSheets"] {
+                    for child in value(node, key) as? [AXUIElement] ?? [] {
+                        if let found = walk(child) { return found }
+                    }
+                }
+                return nil
+            }
+            return walk(root)
+        }
+        let application = AXUIElementCreateApplication(getpid())
+        var panel: AXUIElement?
+        for _ in 0..<60 {
+            if let found = find("save-panel", in: application), find("OKButton", in: found) != nil {
+                panel = found; break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let dialog = try XCTUnwrap(panel, "Missing native Save panel; \(lastReadError ?? "no accessibility read errors")")
+        let name = try XCTUnwrap(find("saveAsNameTextField", in: dialog), lastReadError ?? "Missing filename field")
+        let save = try XCTUnwrap(find("OKButton", in: dialog), lastReadError ?? "Missing Save button")
+        XCTAssertEqual(AXUIElementSetAttributeValue(name, kAXValueAttribute as CFString, destination.lastPathComponent as CFString), .success)
+        XCTAssertEqual(AXUIElementPerformAction(save, kAXPressAction as CFString), .success)
+    }
+
     func dialog(containing text: String) async throws -> NSWindow {
         for _ in 0..<30 {
             if let dialog = NSApp.windows.first(where: { candidate in

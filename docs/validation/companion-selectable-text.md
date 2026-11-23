@@ -29,15 +29,18 @@ Commands ran sequentially in the existing checkout on
 | `npm run companion:test` — Task 1 RED | 1 | New copying cases fail at unavailable selection in heading, project, account, and assignment text; fixture issues were corrected before GREEN |
 | `npm run companion:test` — Task 1 GREEN | 0 | 279 core + 120 application tests, zero failures |
 | `npm run companion:test` — Task 2 RED | 1 | 279 core pass; 123 application tests with exactly one failure: destination instructions absent from local selectable text tree; alert cases pass |
-| `npm run companion:test` — final product state | 0 | `Executed 279 tests, with 0 failures`; `Executed 123 tests, with 0 failures` (402 total) |
+| `npm run companion:test` — Task 2 product state | 0 | `Executed 279 tests, with 0 failures`; `Executed 123 tests, with 0 failures` (402 total) |
+| Native Save confirmation check — review remedy | 0 | Real accessibility Save action invokes the callback; selected URL matches; no file, commit, activation, or start |
+| `npm run companion:test` — final review coverage | 0 | 279 core + 124 application tests (403), zero failures; native Save acceptance passed, no skips |
 | `npm run companion:build` | 0 | `Built and ad-hoc signed dist/Codex Project Router.app` |
 | `npm run companion:package-test` | 0 | 31 tests; 31 pass, 0 fail |
 | `npm test` | 0 | 1,123 tests; 1,123 pass, 0 fail |
 | `git diff --check` | 0 | No whitespace errors |
 
 The Swift Testing footer reports zero tests because these suites use XCTest;
-the XCTest counts above are the decisive results. The final product-state suite
-also supplies Task 3's companion regression evidence; no product changes follow it.
+the XCTest counts above are the decisive results. The final review coverage adds a native Save regression without changing product
+code. Build, packaging, and repository-suite evidence applies to the unchanged
+product state.
 
 ## Native interaction evidence
 
@@ -46,7 +49,7 @@ also supplies Task 3's companion regression evidence; no product changes follow 
 | AC-01 | Main heading/status, project name, details, and empty-state text copy exactly. Copying leaves backend mutation counters unchanged. |
 | AC-02 | Account guidance/metadata and assignment guidance/warning/error copy exactly. Existing sheet/action tests continue to pass. |
 | AC-03 | Actual SwiftUI activation alert and NSAlert blocked-Quit heading/body selections copy without dismissal. All four blocked-Quit reasons, including both ownership variants for pending confirmation, are covered. Escape cancels; Return retains the primary response. Activation occurs only after Return, once. Existing delegate tests retain termination/recovery safeguards. |
-| AC-04 | The real destination panel's owned accessory copies its complete message. The JSON filter and directory-creation option remain enabled. Escape closes the panel without changing selected configuration or creating a file. Selecting a synthetic destination through the controller preserves its selection-only behavior, with zero commits, activations, or starts. Remote Save confirmation is unobserved; see below. |
+| AC-04 | The real destination panel's owned accessory copies its complete message. The JSON filter and directory-creation option remain enabled. Escape closes the panel without changing selected configuration or creating a file. A separate native accessibility check edits the real Save As field and presses the real Save button. The actual completion callback selects the expected nonexistent synthetic filename in the panel's displayed directory, creates no file, and leaves commit/activation/start counters at zero. |
 | AC-05 | Complete `café 🧭\nstatus — ready` block and its compass substring copy exactly with correct UTF-16 selection ranges. Native informational fields are selectable and read-only; SwiftUI text retains native read-only rendering. |
 | AC-06 | Entered `SYNTHETIC_SELECTION_KEY` into the actual NSSecureTextField editor. Attempted Copy and accessibility traversal do not expose it. Moving focus to guidance and choosing existing-item entry retains concealment and secret-clearing behavior. Synthetic native-key creation and configuration commit counters stay zero. |
 | AC-07 | Search editing/clearing, Details/Edit/Refresh actions, account-entry controls, alert Return/Escape, and destination Escape run alongside selected text. Existing picker/disclosure/action regressions pass. Control labels and SecureField receive no selection modifier. |
@@ -80,18 +83,24 @@ External OS-event injection into the rebuilt packaged app, real mouse dragging,
 and testing on macOS 14 are **unobserved**.
 
 AppKit hosts the destination accessory in a local NSAccessoryViewWindow beside its
-remote file browser. The test selects that actual owned field without inspecting
-private remote views. The remote Save action is **unobserved**: `NSSavePanel.ok:`
-raises “not implemented” on this Mac, and ViewBridge ignores destination setters
-after presentation. The completion block is unchanged; its controller operation is
-tested directly with a synthetic destination. This leaves a native file-browser
-confirmation regression outside the automated evidence.
+remote file browser. Copying uses that actual owned field. Native Save confirmation
+uses public Accessibility identifiers and actions on the real filename field and
+Save button, with no private remote-view access or simulated completion. That check
+requires existing Accessibility access and skips explicitly if it is absent;
+**it ran and passed on this Mac**. The test chooses a unique nonexistent filename
+in the panel's displayed directory and verifies that selection creates no file.
+Earlier attempts with `NSSavePanel.ok:` and post-presentation property setters did
+not drive native confirmation; the public accessibility check replaces that gap.
 
 ## Execution ruling and review
 
-Ruling: retain real accessory Copy/Escape coverage, preserve the file-panel
-completion block verbatim, and exercise the confirmation's controller operation
-directly rather than add a production test seam or private remote-view access.
-Cost if wrong: a remote Save-confirmation regression could escape these checks.
+Initial ruling (superseded): retain real accessory Copy/Escape coverage, preserve
+the completion block verbatim, and test its controller operation directly. The
+stated cost was that a remote Save-confirmation regression could escape the checks.
+The initial specification review rejected that evidence gap. The remedy now drives
+the actual native Save button and verifies the callback, removing that deferral;
+product code did not change. The new check first exposed filename/path handling in
+the fixture, then passed with a unique synthetic filename.
 
-Final sequential specification and quality review: pending.
+Initial specification review: **MISSING** at `cf37951`, solely for AC-04 native
+confirmation evidence. Targeted specification follow-up and quality review: pending.
