@@ -17,6 +17,11 @@ execute the provider authentication helper, or preflight destinations. Explicit
 account setup reads native item metadata and can add a new item through a concealed
 native entry field; existing secret values are not retrieved by setup.
 
+Select informational text in the companion's windows, sheets, alerts, or
+configuration-destination instructions and press **⌘C** to copy the selection.
+Selection works within each text block. Buttons keep their normal actions, and
+the API-key field remains concealed.
+
 ## Local bridge
 
 `src/companion.js` exports `inspectCompanion({configPath, browseHome})` and

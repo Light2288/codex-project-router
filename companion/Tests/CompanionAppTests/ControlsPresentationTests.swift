@@ -5,6 +5,61 @@ import CompanionCore
 @testable import CodexProjectRouter
 
 @MainActor final class ControlsPresentationTests: XCTestCase {
+    func testActivationAlertCopiesAndKeepsCancelAndDefaultActions() async throws {
+        try await withPendingDirectController { controller, backend, _ in
+            backend.routingError = nil
+            await controller.start()
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            let clipboard = NativeClipboard()
+            defer {
+                for sheet in host.window.sheets { host.window.endSheet(sheet, returnCode: .cancel) }
+                clipboard.restore(); host.close()
+            }
+            await host.settle()
+            let heading = "Activate routing for every chat using this provider?"
+            try host.press(title: "Activate for provider…", in: host.window)
+            let alert = try await host.dialog(containing: heading)
+            try host.selectText(heading, range: NSRange(location: 0, length: heading.utf16.count), in: alert)
+            XCTAssertEqual(try host.copySelection(in: alert), heading)
+            let message = "This changes the provider-wide setting. Identified projects without an override inherit the configured default account; unresolved project identity may block a request. Restart Codex manually after this initial activation and confirm a working routed response. The listener is still required while project routing is Off. Keep it running until direct recovery is confirmed."
+            try host.selectText(message, range: NSRange(location: 0, length: message.utf16.count), in: alert)
+            XCTAssertEqual(try host.copySelection(in: alert), message)
+            XCTAssertEqual(backend.controlCount, 0)
+            try host.snapshot("activation-selected-message", in: alert)
+            try host.pressKey("\u{1b}", keyCode: 53, in: alert)
+            await host.settle()
+            XCTAssertEqual(backend.controlCount, 0)
+            try host.press(title: "Activate for provider…", in: host.window)
+            let again = try await host.dialog(containing: heading)
+            try host.selectText(heading, range: NSRange(location: 0, length: heading.utf16.count), in: again)
+            try host.pressKey("\r", keyCode: 36, in: again)
+            for _ in 0..<30 where controller.busy || backend.controlCount == 0 { await host.settle() }
+            XCTAssertEqual(backend.controlCount, 1)
+        }
+    }
+
+    func testInformationalTextCopiesWithoutChangingRecoveryAndSurvivesRefresh() async throws {
+        try await withPendingDirectController { controller, backend, store in
+            let host = NativeProjectHost(ControlsView(controller: controller, navigation: QuitGuidanceNavigation()))
+            let clipboard = NativeClipboard()
+            defer { clipboard.restore(); host.close() }
+            await host.settle()
+            let journal = try store.load()
+            try host.selectText("Project routing", range: NSRange(location: 0, length: 15))
+            XCTAssertEqual(try host.copySelection(), "Project routing")
+            try host.selectText("No default account designated", range: NSRange(location: 3, length: 7))
+            XCTAssertEqual(try host.copySelection(), "default")
+            await controller.refresh()
+            await host.settle()
+            XCTAssertEqual(try host.copySelection(), "default")
+            XCTAssertEqual(try store.load(), journal)
+            XCTAssertEqual(backend.startCount, 0)
+            XCTAssertEqual(backend.controlCount, 0)
+            XCTAssertFalse(controller.quitRequested)
+            try host.snapshot("selectable-controls", width: 800, height: 820)
+        }
+    }
+
     private func withController(_ body: (RouterController, DisplayBackend) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("app presentation \(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

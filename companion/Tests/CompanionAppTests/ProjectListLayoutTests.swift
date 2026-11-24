@@ -6,6 +6,40 @@ import ApplicationServices
 @testable import CodexProjectRouter
 
 @MainActor final class ProjectListLayoutTests: XCTestCase {
+    func testProjectTextCopiesWithoutTriggeringActionsAndSurvivesRefresh() async throws {
+        try await withProjectListFixture { controller, backend in
+            let name = "café 🧭\nstatus — ready"
+            backend.snapshot.catalog.entries = [Self.entry(1, name)]
+            await controller.refresh()
+            var opened = false
+            let host = NativeProjectHost(ScrollView {
+                ProjectListView(controller: controller, editingProjectID: nil, canOpenEditor: true) { _ in opened = true }.padding(20)
+            })
+            let clipboard = NativeClipboard()
+            defer { clipboard.restore(); host.close() }
+            await host.settle()
+            try host.selectText(name, range: NSRange(location: 0, length: (name as NSString).length))
+            XCTAssertEqual(try host.copySelection(), "café 🧭\nstatus — ready")
+            try host.selectText(name, range: (name as NSString).range(of: "🧭"))
+            XCTAssertEqual(try host.copySelection(), "🧭")
+            await controller.refresh(); await host.settle()
+            XCTAssertEqual(try host.copySelection(), "🧭")
+            XCTAssertFalse(opened)
+            XCTAssertTrue(backend.changes.isEmpty)
+            try host.press("project-details-\(Self.id(1))")
+            await host.settle()
+            let detail = "Project ID: \(Self.id(1))"
+            try host.selectText(detail, range: NSRange(location: 0, length: detail.utf16.count))
+            XCTAssertEqual(try host.copySelection(), detail)
+            try host.search("no match"); await host.settle()
+            try host.selectText("No matching projects.", range: NSRange(location: 0, length: 21))
+            XCTAssertEqual(try host.copySelection(), "No matching projects.")
+            try host.press("project-clear-search"); await host.settle()
+            try host.press("project-edit-\(Self.id(1))")
+            XCTAssertTrue(opened)
+        }
+    }
+
     // Losing previews or filtering them a second time removes the only repair/disclosure actions while collapsed.
     func testCollapsePreviewsRetainEditAndDisclosureAccess() async throws {
         try await withProjectListFixture { controller, backend in
@@ -160,7 +194,9 @@ import ApplicationServices
             XCTAssertTrue(host.text.contains("Needs attention"))
             XCTAssertTrue(host.text.contains("Custom account"))
             XCTAssertFalse(host.text.contains("No active chats ("))
-            XCTAssertEqual(host.elements().filter { $0.accessibilityValue() as? String == "Chat status unknown" }.count, 2)
+            let statuses = host.elements().filter { $0.accessibilityValue() as? String == "Chat status unknown" }
+            // Selectable SwiftUI text exposes a native view and a text node at the same rendered frame.
+            XCTAssertEqual(Set(statuses.map { NSStringFromRect($0.accessibilityFrame()) }).count, 2)
             XCTAssertTrue(host.text.contains("Saved assignment policy is unavailable. Refresh to inspect it."))
             XCTAssertEqual(host.matches("project-edit-\(Self.id(1))").count, 1)
             XCTAssertEqual(host.matches("project-edit-\(Self.id(2))").count, 1)

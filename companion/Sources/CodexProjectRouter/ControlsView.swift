@@ -149,7 +149,7 @@ struct ControlsDisclosureState {
                         .frame(width: 36, height: 36)
                         .accessibilityHidden(true)
                 }
-                Text("Codex Project Router").font(.title2.bold())
+                Text("Codex Project Router").textSelection(.enabled).font(.title2.bold())
                 Spacer()
                 if controller.busy { ProgressView().controlSize(.small) }
                 Button("Refresh") { Task { await controller.refresh() } }
@@ -201,10 +201,10 @@ struct ControlsDisclosureState {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Project routing").font(.title2.bold())
+                    Text("Project routing").textSelection(.enabled).font(.title2.bold())
                     Spacer()
                     if pendingRoutingMode != nil { ProgressView().controlSize(.small) }
-                    Text(display.routingState).font(.headline)
+                    Text(display.routingState).textSelection(.enabled).font(.headline)
                 }
                 if let title = display.routingActionTitle {
                     Button(title) {
@@ -221,9 +221,9 @@ struct ControlsDisclosureState {
                     }
                     .disabled(controller.ownedRouter == nil ? !controller.canStart : !controller.canSetProjectRouting)
                 }
-                Text(display.globalAccount).font(.headline)
+                Text(display.globalAccount).textSelection(.enabled).font(.headline)
                 if let guidance = display.originalConnectionGuidance {
-                    Text(guidance).font(.caption).foregroundStyle(.secondary)
+                    Text(guidance).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                 }
                 if accountSetup != nil {
                     HStack {
@@ -237,35 +237,35 @@ struct ControlsDisclosureState {
                         }
                         Button("Select existing / import…") { selectFile(node: false, importAfterSelection: true) }.disabled(!controller.canSelectConfiguration)
                     }
-                    if let guidance = display.accountSetupGuidance { Text(guidance).foregroundStyle(.orange) }
+                    if let guidance = display.accountSetupGuidance { Text(guidance).textSelection(.enabled).foregroundStyle(.orange) }
                     if controller.inspection?.configuration.mode == "accounts" {
-                        Text("Configured account selection; credential access and upstream responses are unverified.").font(.caption).foregroundStyle(.secondary)
+                        Text("Configured account selection; credential access and upstream responses are unverified.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if controller.inspection?.configuration.mode == "legacy" {
-                    Text("Uses the caller's existing credential; aliases do not select separate accounts.")
+                    Text("Uses the caller's existing credential; aliases do not select separate accounts.").textSelection(.enabled)
                 }
-                Text("Off suspends project overrides. Codex still uses the router listener until direct settings are restored and verified.")
+                Text("Off suspends project overrides. Codex still uses the router listener until direct settings are restored and verified.").textSelection(.enabled)
                     .font(.caption).foregroundStyle(.secondary)
                 if let guidance = display.assignmentGuidance {
-                    Text(guidance).foregroundStyle(.orange)
+                    Text(guidance).textSelection(.enabled).foregroundStyle(.orange)
                 }
                 if let error = controller.routingModeError {
-                    Text(error).foregroundStyle(.orange)
-                    Text("Refresh to check routing mode before changing it again.").font(.caption)
+                    Text(error).textSelection(.enabled).foregroundStyle(.orange)
+                    Text("Refresh to check routing mode before changing it again.").textSelection(.enabled).font(.caption)
                 }
                 if let guidance = display.recoveryGuidance {
-                    Text(guidance).foregroundStyle(.orange)
+                    Text(guidance).textSelection(.enabled).foregroundStyle(.orange)
                 }
                 if controller.needsManualListenerCleanup {
-                    Text("An external listener requires manual inspection and cleanup. This app cannot adopt or stop it. See the companion recovery instructions.").foregroundStyle(.orange)
+                    Text("An external listener requires manual inspection and cleanup. This app cannot adopt or stop it. See the companion recovery instructions.").textSelection(.enabled).foregroundStyle(.orange)
                 }
                 if controller.mutationRequiresReconciliation {
-                    Text("A provider operation must finish and be reconciled before further controls. Keep the app open and refresh.").foregroundStyle(.orange)
+                    Text("A provider operation must finish and be reconciled before further controls. Keep the app open and refresh.").textSelection(.enabled).foregroundStyle(.orange)
                 }
                 if let error = controller.error {
                     Text(error).foregroundStyle(.red).textSelection(.enabled)
-                    Text("Refresh to recheck current evidence. For setup errors select an existing private configuration or installed Node 24. Preserve recovery files when recovery is blocked.").font(.caption)
+                    Text("Refresh to recheck current evidence. For setup errors select an existing private configuration or installed Node 24. Preserve recovery files when recovery is blocked.").textSelection(.enabled).font(.caption)
                 }
                 if display.recoveryGuidance != nil || controller.needsManualListenerCleanup || controller.mutationRequiresReconciliation {
                     Button("Show recovery controls") {
@@ -280,18 +280,18 @@ struct ControlsDisclosureState {
         VStack(alignment: .leading, spacing: 14) {
             DisclosureGroup("Setup", isExpanded: $disclosures.setupExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(display.configuration).font(.headline)
+                    Text(display.configuration).textSelection(.enabled).font(.headline)
                     pathRow("Configuration", controller.selectedConfiguration?.path ?? "No configuration selected")
                     Button("Select existing configuration…") { selectFile(node: false) }.disabled(!controller.canSelectConfiguration)
                     pathRow("Node runtime", controller.selectedNode?.path ?? "Automatic installed Node 24 discovery")
                     Button("Select Node 24 executable…") { selectFile(node: true) }.disabled(!controller.canSelectNode)
-                    Text("Configuration stays in place outside Git and the app. Selection never starts or activates the router.").font(.caption).foregroundStyle(.secondary)
+                    Text("Configuration stays in place outside Git and the app. Selection never starts or activates the router.").textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                     guidanceText(for: .setup)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .overlay { guidanceOutline(for: .setup) }
             .id(QuitGuidance.Destination.setup)
-            GroupBox("Independent operational facts") {
+            GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
                         fact("Configuration kind", controller.inspection?.configuration.mode == "accounts" ? "Account routing" : controller.inspection?.configuration.mode == "credential" ? "Credential routing" : controller.inspection?.configuration.mode == "legacy" ? "Legacy routing" : "Unknown")
@@ -306,6 +306,8 @@ struct ControlsDisclosureState {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     guidanceText(for: .status)
                 }
+            } label: {
+                Text("Independent operational facts").textSelection(.enabled)
             }
             .overlay { guidanceOutline(for: .status) }
             .id(QuitGuidance.Destination.status)
@@ -323,25 +325,27 @@ struct ControlsDisclosureState {
             }
             guidanceText(for: .restoreDirect)
             guidanceText(for: .stopRouter)
-            GroupBox("Manual desktop restart and response checks") {
+            GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("After provider changes, restart Codex yourself and send a model request. Only confirm after a working response. Readiness does not prove desktop-loaded settings, gateway acceptance, billing, or complete streaming.").fixedSize(horizontal: false, vertical: true)
+                    Text("After provider changes, restart Codex yourself and send a model request. Only confirm after a working response. Readiness does not prove desktop-loaded settings, gateway acceptance, billing, or complete streaming.").textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Button("I restarted Codex and received a routed response") { Task { await controller.confirmRoutedResponse() } }.disabled(!controller.canConfirmRoutedResponse)
                     guidanceText(for: .directResponse)
                     Button("I restarted Codex and received a direct response") { Task { await controller.confirmDirectResponse() } }.disabled(!controller.canConfirmDirectResponse)
                         .overlay { guidanceOutline(for: .directResponse) }
-                    Text(display.quitGuidance).font(.caption).foregroundStyle(.secondary)
+                    Text(display.quitGuidance).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Text("Manual desktop restart and response checks").textSelection(.enabled)
             }
             .id(QuitGuidance.Destination.directResponse)
             if let context = controller.recoveryContext ?? controller.inspection?.context {
                 VStack(alignment: .leading, spacing: 8) {
                     DisclosureGroup("Manual recovery and external listener cleanup", isExpanded: $disclosures.recoveryExpanded) {
                         VStack(alignment: .leading, spacing: 7) {
-                            Text("If Restore direct cannot run safely, inspect the selected configuration's private activation.json and its named TOML backup locally. Restore only the original base_url for the recorded provider; preserve authentication, models, and unrelated edits. Keep recovery evidence and verify any lock's helper has stopped before manual removal.")
+                            Text("If Restore direct cannot run safely, inspect the selected configuration's private activation.json and its named TOML backup locally. Restore only the original base_url for the recorded provider; preserve authentication, models, and unrelated edits. Keep recovery evidence and verify any lock's helper has stopped before manual removal.").textSelection(.enabled)
                             pathRow("Recorded provider", context.providerId)
                             pathRow("Recorded provider settings", URL(fileURLWithPath: context.codexHome).appendingPathComponent("config.toml").path)
-                            Text("Restart Codex manually and verify a direct response before confirming recovery. For an external listener, inspect the recorded port and independently verify its executable and origin before stopping it yourself. Retain an unverified listener for investigation.")
+                            Text("Restart Codex manually and verify a direct response before confirming recovery. For an external listener, inspect the recorded port and independently verify its executable and origin before stopping it yourself. Retain an unverified listener for investigation.").textSelection(.enabled)
                             Text("lsof -nP -iTCP:\(context.listenPort) -sTCP:LISTEN").font(.caption.monospaced()).textSelection(.enabled)
                         }.font(.caption).padding(.top, 6)
                     }
@@ -366,7 +370,7 @@ struct ControlsDisclosureState {
     }
     @ViewBuilder private func guidanceText(for destination: QuitGuidance.Destination) -> some View {
         if let guidance, guidance.destination == destination {
-            Text(guidance.text)
+            Text(guidance.text).textSelection(.enabled)
                 .font(.callout.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(6)
@@ -399,12 +403,12 @@ struct ControlsDisclosureState {
     }
     private func pathRow(_ label: String, _ path: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).textSelection(.enabled).font(.caption).foregroundStyle(.secondary)
             Text(path).font(.system(.caption, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
     }
     private func fact(_ label: String, _ value: String) -> some View {
-        GridRow { Text(label).foregroundStyle(.secondary); Text(value).textSelection(.enabled) }
+        GridRow { Text(label).textSelection(.enabled).foregroundStyle(.secondary); Text(value).textSelection(.enabled) }
     }
     private func selectDestination() {
         let panel = NSSavePanel()
@@ -412,7 +416,12 @@ struct ControlsDisclosureState {
         panel.nameFieldStringValue = "config.json"
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
-        panel.message = "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration."
+        let instructions = NSTextField(wrappingLabelWithString: "Choose a new file in a private directory outside Git. The setup preview uses the compatible direct provider; this does not start routing or create the configuration.")
+        instructions.isSelectable = true
+        instructions.isEditable = false
+        instructions.preferredMaxLayoutWidth = 440
+        instructions.setFrameSize(NSSize(width: 440, height: instructions.fittingSize.height))
+        panel.accessoryView = instructions
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in

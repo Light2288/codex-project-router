@@ -133,11 +133,11 @@ enum AssignmentSelection: Hashable {
     var body: some View {
         @Bindable var editor = editor
         VStack(alignment: .leading, spacing: 14) {
-            Text("Project assignment").font(.title2.bold())
-            Text(project.name.isEmpty ? "Saved project absent from discovery" : project.name).font(.headline)
-            Text(display.savedText)
-            Text(display.runningText).foregroundStyle(.secondary)
-            Text("Off suspends project overrides and uses the running default. Saving never changes On/Off.")
+            Text("Project assignment").textSelection(.enabled).font(.title2.bold())
+            Text(project.name.isEmpty ? "Saved project absent from discovery" : project.name).textSelection(.enabled).font(.headline)
+            Text(display.savedText).textSelection(.enabled)
+            Text(display.runningText).textSelection(.enabled).foregroundStyle(.secondary)
+            Text("Off suspends project overrides and uses the running default. Saving never changes On/Off.").textSelection(.enabled)
                 .font(.caption).foregroundStyle(.secondary)
             Picker("Account", selection: $editor.selection) {
                 if editor.selection == .unselected { Text("Choose an assignment…").tag(AssignmentSelection.unselected) }
@@ -151,11 +151,11 @@ enum AssignmentSelection: Hashable {
                 }
             }
             .disabled(controller.busy || controller.assignmentRequiresReconciliation)
-            Text("Choosing the default account by name saves an explicit override. Use default removes this project's saved override or inherited label.")
+            Text("Choosing the default account by name saves an explicit override. Use default removes this project's saved override or inherited label.").textSelection(.enabled)
                 .font(.caption).foregroundStyle(.secondary)
-            if let warning = display.warning { Text(warning).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
-            if let error = controller.assignmentError { Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-            if let reason = display.disabledReason { Text(reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if let warning = display.warning { Text(warning).textSelection(.enabled).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            if let error = controller.assignmentError { Text(error).textSelection(.enabled).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let reason = display.disabledReason { Text(reason).textSelection(.enabled).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             DisclosureGroup("Advanced", isExpanded: $advanced) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Project ID: \(project.id)")

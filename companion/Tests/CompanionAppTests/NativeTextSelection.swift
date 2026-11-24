@@ -1,0 +1,165 @@
+import AppKit
+import ApplicationServices
+import SwiftUI
+import XCTest
+
+/// Native copying necessarily uses the general pasteboard; restore its data without logging it.
+@MainActor final class NativeClipboard {
+    private let saved: [[NSPasteboard.PasteboardType: Data]]
+    private let menu = NSApp.mainMenu
+
+    init() {
+        saved = (NSPasteboard.general.pasteboardItems ?? []).map { item in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type, $0) } })
+        }
+        // SwiftUI installs these standard commands for the real MenuBarExtra scene; XCTest does not.
+        let root = NSMenu()
+        let edit = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        edit.submenu = NSMenu(title: "Edit")
+        for (title, action, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            edit.submenu?.addItem(withTitle: title, action: NSSelectorFromString(action), keyEquivalent: key)
+        }
+        root.addItem(edit)
+        NSApp.mainMenu = root
+    }
+
+    func restore() {
+        NSPasteboard.general.clearContents()
+        let items = saved.map { values in
+            let item = NSPasteboardItem()
+            for (type, data) in values { XCTAssertTrue(item.setData(data, forType: type)) }
+            return item
+        }
+        if !items.isEmpty { XCTAssertTrue(NSPasteboard.general.writeObjects(items)) }
+        NSApp.mainMenu = menu
+    }
+}
+
+@MainActor extension NativeProjectHost {
+    func confirmDestination(_ destination: URL) async throws {
+        guard AXIsProcessTrusted() else { throw XCTSkip("Native Save acceptance requires Accessibility access") }
+        var lastReadError: String?
+        func value(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
+            var output: CFTypeRef?
+            let status = AXUIElementCopyAttributeValue(node, attribute as CFString, &output)
+            switch status {
+            case .success: return output
+            case .attributeUnsupported, .noValue: return nil
+            default:
+                lastReadError = "\(attribute): AX error \(status.rawValue)"
+                return nil
+            }
+        }
+        func find(_ identifier: String, in root: AXUIElement) -> AXUIElement? {
+            var seen: Set<CFHashCode> = []
+            func walk(_ node: AXUIElement) -> AXUIElement? {
+                guard seen.count < 1000, seen.insert(CFHash(node)).inserted else { return nil }
+                if value(node, kAXIdentifierAttribute) as? String == identifier { return node }
+                for key in [kAXWindowsAttribute, kAXChildrenAttribute, "AXSheets"] {
+                    for child in value(node, key) as? [AXUIElement] ?? [] {
+                        if let found = walk(child) { return found }
+                    }
+                }
+                return nil
+            }
+            return walk(root)
+        }
+        let application = AXUIElementCreateApplication(getpid())
+        var panel: AXUIElement?
+        for _ in 0..<60 {
+            if let found = find("save-panel", in: application), find("OKButton", in: found) != nil {
+                panel = found; break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let dialog = try XCTUnwrap(panel, "Missing native Save panel; \(lastReadError ?? "no accessibility read errors")")
+        let name = try XCTUnwrap(find("saveAsNameTextField", in: dialog), lastReadError ?? "Missing filename field")
+        let save = try XCTUnwrap(find("OKButton", in: dialog), lastReadError ?? "Missing Save button")
+        XCTAssertEqual(AXUIElementSetAttributeValue(name, kAXValueAttribute as CFString, destination.lastPathComponent as CFString), .success)
+        XCTAssertEqual(AXUIElementPerformAction(save, kAXPressAction as CFString), .success)
+    }
+
+    func dialog(containing text: String) async throws -> NSWindow {
+        for _ in 0..<30 {
+            if let dialog = NSApp.windows.first(where: { candidate in
+                candidate !== window && candidate.isVisible && elements(in: candidate).contains {
+                    $0.accessibilityValue() as? String == text || $0.accessibilityLabel() == text
+                }
+            }) { return dialog }
+            await settle()
+        }
+        return try XCTUnwrap(nil as NSWindow?, "Missing native dialog")
+    }
+
+    func pressKey(_ characters: String, keyCode: UInt16, in target: NSWindow) throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+        if !target.performKeyEquivalent(with: event) { target.sendEvent(event) }
+    }
+
+    func snapshot(_ name: String, in target: NSWindow) throws {
+        let view = try XCTUnwrap(target.contentView)
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent(".build/text-selection-qa")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("\(name).png"))
+    }
+
+    func selectText(_ text: String, range: NSRange, in target: NSWindow? = nil) throws {
+        let target = target ?? window
+        target.makeKeyAndOrderFront(nil)
+        let element = try XCTUnwrap(elements(in: target).first {
+            $0.accessibilityValue() as? String == text || $0.accessibilityLabel() == text
+        }, "Missing displayed text: \(text)")
+        if let field = (element.object as? NSCell)?.controlView as? NSTextField ?? element.object as? NSTextField {
+            XCTAssertTrue(field.isSelectable, "Displayed text must be selectable: \(text)")
+            XCTAssertFalse(field.isEditable, "Informational text must stay read-only")
+            XCTAssertTrue(target.makeFirstResponder(field))
+            field.selectText(nil)
+            let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+            editor.setSelectedRange(range)
+        } else {
+            _ = target.makeFirstResponder(target.contentView)
+            element.setAccessibilityFocused(true)
+            let setter = NSSelectorFromString("setAccessibilitySelectedTextRange:")
+            guard element.object.responds(to: setter), let method = element.object.method(for: setter) else {
+                XCTFail("Displayed text has no native selection: \(text)")
+                throw NativeSelectionError.unavailable
+            }
+            let set = unsafeBitCast(method, to: (@convention(c) (AnyObject, Selector, NSRange) -> Void).self)
+            set(element.object, setter, range)
+        }
+    }
+
+    func copySelection(in target: NSWindow? = nil) throws -> String {
+        let target = target ?? window
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("COPY_DID_NOT_RUN", forType: .string)
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
+            context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8))
+        // Keep native menu validation and responder copying, without requiring OS foreground ownership.
+        let edit = try XCTUnwrap(NSApp.mainMenu?.items.first?.submenu)
+        let copy = try XCTUnwrap(edit.items.first { $0.action == NSSelectorFromString("copy:") })
+        copy.target = target.firstResponder
+        _ = edit.performKeyEquivalent(with: event)
+        return try XCTUnwrap(NSPasteboard.general.string(forType: .string))
+    }
+}
+
+private enum NativeSelectionError: Error { case unavailable }
+
+@MainActor final class NativeTextSelectionTests: XCTestCase {
+    func testCopyFixtureUsesTheRenderedUnicodeSelection() async throws {
+        let host = NativeProjectHost(Text("café 🧭\nstatus — ready").textSelection(.enabled).padding())
+        let clipboard = NativeClipboard()
+        defer { clipboard.restore(); host.close() }
+        await host.settle()
+        try host.selectText("café 🧭\nstatus — ready", range: NSRange(location: 5, length: 2))
+        XCTAssertEqual(try host.copySelection(), "🧭")
+    }
+}

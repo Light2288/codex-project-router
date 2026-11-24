@@ -5,6 +5,32 @@ import AppKit
 @testable import CodexProjectRouter
 
 @MainActor final class ProjectAssignmentPresentationTests: XCTestCase {
+    func testAssignmentGuidanceCopiesWithoutSaving() async throws {
+        try await withEditor(live: false) { controller, backend, project in
+            var absent = project
+            absent.routeState = "catalog_missing"
+            let host = NativeProjectHost(ProjectAssignmentView(controller: controller, project: absent))
+            let clipboard = NativeClipboard()
+            defer { clipboard.restore(); host.close() }
+            await host.settle()
+            for text in ["Project assignment", "Exact project", "Off suspends project overrides and uses the running default. Saving never changes On/Off.",
+                         "This saved project is absent from current discovery. Its exact saved identity will be edited; discovery has not confirmed it."] {
+                try host.selectText(text, range: NSRange(location: 0, length: text.utf16.count))
+                XCTAssertEqual(try host.copySelection(), text)
+            }
+            XCTAssertTrue(backend.changes.isEmpty)
+            XCTAssertEqual(backend.starts, 0)
+            try host.press(title: "Refresh", in: host.window)
+            await host.settle()
+            XCTAssertTrue(backend.changes.isEmpty)
+            backend.readError = .assignmentUnavailable
+            await controller.refresh(); await host.settle()
+            try host.selectText("Project assignment editing is unavailable.", range: NSRange(location: 0, length: 42))
+            XCTAssertEqual(try host.copySelection(), "Project assignment editing is unavailable.")
+            try host.snapshot("selectable-assignment-error")
+        }
+    }
+
     private func withEditor(live: Bool = true, setupRequired: Bool = false, _ body: (RouterController, AssignmentDisplayBackend, Inspection.Entry) async throws -> Void) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("assignment presentation \(UUID())")
         defer {

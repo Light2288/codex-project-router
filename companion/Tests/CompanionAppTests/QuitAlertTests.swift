@@ -1,9 +1,43 @@
 import XCTest
 import AppKit
+import SwiftUI
 import CompanionCore
 @testable import CodexProjectRouter
 
 @MainActor final class QuitAlertTests: XCTestCase {
+    func testQuitAlertCopiesWithoutDismissingAndKeepsKeyboardActions() async throws {
+        let host = NativeProjectHost(Text("Synthetic alert host"))
+        let clipboard = NativeClipboard()
+        defer { clipboard.restore(); host.close() }
+        for (reason, ownsRouter) in [(RouterController.QuitBlockReason.directConfirmationPending, true),
+                                    (.directConfirmationPending, false), (.operationInProgress, true),
+                                    (.directRecoveryRequired, true), (.contextUnavailable, true)] {
+            let alert = QuitAlert.make(reason: reason, ownsRouter: ownsRouter)
+            var response: NSApplication.ModalResponse?
+            alert.beginSheetModal(for: host.window) { response = $0 }
+            defer { if alert.window.sheetParent != nil { host.window.endSheet(alert.window, returnCode: .abort) } }
+            await host.settle()
+            for text in [alert.messageText, alert.informativeText] {
+                try host.selectText(text, range: NSRange(location: 0, length: text.utf16.count), in: alert.window)
+                XCTAssertEqual(try host.copySelection(in: alert.window), text)
+                XCTAssertNil(response)
+            }
+            try host.snapshot("quit-\(reason)", in: alert.window)
+            try host.pressKey("\u{1b}", keyCode: 53, in: alert.window)
+            await host.settle()
+            XCTAssertEqual(response, .alertSecondButtonReturn)
+        }
+        let alert = QuitAlert.make(reason: .contextUnavailable, ownsRouter: false)
+        var response: NSApplication.ModalResponse?
+        alert.beginSheetModal(for: host.window) { response = $0 }
+        defer { if alert.window.sheetParent != nil { host.window.endSheet(alert.window, returnCode: .abort) } }
+        await host.settle()
+        try host.selectText("Cannot quit yet", range: NSRange(location: 0, length: 15), in: alert.window)
+        try host.pressKey("\r", keyCode: 36, in: alert.window)
+        await host.settle()
+        XCTAssertEqual(response, .alertFirstButtonReturn)
+    }
+
     private var root: URL!
     private var store: PrivateStore!
     private var backend: QuitBackend!
